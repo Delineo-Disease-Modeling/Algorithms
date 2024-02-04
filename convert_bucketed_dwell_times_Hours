@@ -1,0 +1,48 @@
+import yaml
+import os
+
+def convert_bucketed_dwell_times(dwell_times):
+    new_dwell_times = {"<1": 0, "1-2": 0, "2-3": 0, "3-4": 0, ">6": 0}
+    for k, v in dwell_times.items():
+        lower, upper = map(int, k.split('-')) if '-' in k else (int(k.strip('<>')), int(k.strip('<>')))
+        for i in range(lower, upper + 1):
+            if i < 60:
+                new_dwell_times["<1"] += v
+                break
+            elif 60 <= i < 120:
+                new_dwell_times["1-2"] += v
+                break
+            elif 120 <= i < 180:
+                new_dwell_times["2-3"] += v
+                break
+            elif 180 <= i < 240:
+                new_dwell_times["3-4"] += v
+                break
+            elif i >= 240:
+                new_dwell_times[">6"] += v
+                break
+    return new_dwell_times
+
+
+def update_yaml_file(filepath):
+    with open(filepath, 'r') as file:
+        data = yaml.safe_load(file)
+
+    for place in data.keys():
+        if 'bucketed_dwell_times' in data[place]:
+            updated_dwell_times = convert_bucketed_dwell_times(
+                yaml.safe_load(data[place]['bucketed_dwell_times'])
+            )
+            data[place]['bucketed_dwell_times'] = str(updated_dwell_times).replace("'", '"')
+
+    new_filename = "updated_" + filepath
+    with open(new_filename, 'w') as file:
+        yaml.safe_dump(data, file)
+
+
+# Process the 'barnsdall.yaml' file
+yaml_file = 'barnsdall.yaml'
+if os.path.exists(yaml_file):
+    update_yaml_file(yaml_file)
+else:
+    print(f"File '{yaml_file}' not found.")
