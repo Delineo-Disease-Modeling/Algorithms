@@ -1,0 +1,1436 @@
+American Heritage Bank:
+  bucketed_dwell_times: '{"<1": 34, "1-2": 4, "2-3": 1, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 8
+    Monday: 4
+    Saturday: 3
+    Sunday: 1
+    Thursday: 5
+    Tuesday: 10
+    Wednesday: 8
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 4
+  - 5
+  - 9
+  - 5
+  - 8
+  - 8
+  - 5
+  - 3
+  - 3
+  - 3
+  - 1
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 39
+  related_same_day_brand:
+    Circle K: 50
+    Dollar General: 48
+    Phillips 66: 100
+Andy's Hamburgers:
+  bucketed_dwell_times: '{"<1": 161, "1-2": 36, "2-3": 44, "3-4": 0, ">6": 47}'
+  popularity_by_day:
+    Friday: 44
+    Monday: 46
+    Saturday: 30
+    Sunday: 12
+    Thursday: 59
+    Tuesday: 57
+    Wednesday: 40
+  popularity_by_hour:
+  - 6
+  - 7
+  - 6
+  - 8
+  - 9
+  - 10
+  - 9
+  - 28
+  - 29
+  - 52
+  - 70
+  - 80
+  - 83
+  - 77
+  - 70
+  - 71
+  - 56
+  - 53
+  - 52
+  - 27
+  - 29
+  - 19
+  - 10
+  - 9
+  raw_visit_counts: 288
+  related_same_day_brand:
+    Dollar General: 9
+    Ford Motor Company: 12
+Ascension Health:
+  bucketed_dwell_times: '{"<1": 18, "1-2": 3, "2-3": 2, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 9
+    Monday: 4
+    Saturday: 1
+    Sunday: 3
+    Thursday: 4
+    Tuesday: 2
+    Wednesday: 2
+  popularity_by_hour:
+  - 2
+  - 3
+  - 3
+  - 3
+  - 4
+  - 2
+  - 1
+  - 4
+  - 4
+  - 5
+  - 3
+  - 6
+  - 1
+  - 3
+  - 5
+  - 3
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 2
+  - 1
+  - 1
+  raw_visit_counts: 25
+  related_same_day_brand:
+    McDonald's: 96
+Assembly of God Church:
+  bucketed_dwell_times: '{"<1": 89, "1-2": 49, "2-3": 29, "3-4": 0, ">6": 12}'
+  popularity_by_day:
+    Friday: 18
+    Monday: 11
+    Saturday: 13
+    Sunday: 42
+    Thursday: 14
+    Tuesday: 11
+    Wednesday: 70
+  popularity_by_hour:
+  - 10
+  - 12
+  - 11
+  - 14
+  - 14
+  - 15
+  - 14
+  - 14
+  - 25
+  - 24
+  - 41
+  - 40
+  - 28
+  - 8
+  - 18
+  - 23
+  - 20
+  - 12
+  - 22
+  - 32
+  - 34
+  - 15
+  - 14
+  - 9
+  raw_visit_counts: 179
+  related_same_day_brand:
+    Burkes Outlet: 20
+    Dollar General: 27
+    Walmart: 7
+B Square Hair:
+  bucketed_dwell_times: '{"<1": 0, "1-2": 1, "2-3": 0, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 0
+    Saturday: 1
+    Sunday: 0
+    Thursday: 0
+    Tuesday: 0
+    Wednesday: 0
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 1
+  related_same_day_brand: {}
+Baptist Church:
+  bucketed_dwell_times: '{"<1": 32, "1-2": 4, "2-3": 6, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 0
+    Saturday: 2
+    Sunday: 11
+    Thursday: 23
+    Tuesday: 5
+    Wednesday: 3
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 9
+  - 10
+  - 10
+  - 5
+  - 3
+  - 2
+  - 1
+  - 0
+  - 2
+  - 9
+  - 24
+  - 5
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 44
+  related_same_day_brand:
+    Walmart: 93
+Barnsdall Building Blocks:
+  bucketed_dwell_times: '{"<1": 5, "1-2": 4, "2-3": 0, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 3
+    Saturday: 0
+    Sunday: 0
+    Thursday: 3
+    Tuesday: 3
+    Wednesday: 0
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 5
+  - 6
+  - 4
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 9
+  related_same_day_brand: {}
+Barnsdall Church Of The Nazarene:
+  bucketed_dwell_times: '{"<1": 9, "1-2": 4, "2-3": 4, "3-4": 0, ">6": 1}'
+  popularity_by_day:
+    Friday: 1
+    Monday: 0
+    Saturday: 3
+    Sunday: 2
+    Thursday: 3
+    Tuesday: 2
+    Wednesday: 7
+  popularity_by_hour:
+  - 0
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 3
+  - 4
+  - 4
+  - 3
+  - 5
+  - 6
+  - 3
+  - 3
+  - 5
+  - 2
+  - 1
+  - 0
+  raw_visit_counts: 18
+  related_same_day_brand: {}
+Barnsdall City Cemetery:
+  bucketed_dwell_times: '{"<1": 0, "1-2": 0, "2-3": 1, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 1
+    Monday: 0
+    Saturday: 0
+    Sunday: 0
+    Thursday: 0
+    Tuesday: 0
+    Wednesday: 0
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 1
+  related_same_day_brand: {}
+Barnsdall Es:
+  bucketed_dwell_times: '{"<1": 139, "1-2": 56, "2-3": 39, "3-4": 0, ">6": 61}'
+  popularity_by_day:
+    Friday: 10
+    Monday: 67
+    Saturday: 6
+    Sunday: 8
+    Thursday: 98
+    Tuesday: 70
+    Wednesday: 36
+  popularity_by_hour:
+  - 2
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 71
+  - 72
+  - 72
+  - 77
+  - 79
+  - 79
+  - 78
+  - 79
+  - 118
+  - 59
+  - 50
+  - 49
+  - 29
+  - 17
+  - 5
+  - 4
+  - 1
+  raw_visit_counts: 295
+  related_same_day_brand:
+    OnCue: 9
+    QuikTrip: 49
+    Sonic: 11
+    T.J. Maxx: 8
+Barnsdall Flower:
+  bucketed_dwell_times: '{"<1": 102, "1-2": 15, "2-3": 20, "3-4": 0, ">6": 22}'
+  popularity_by_day:
+    Friday: 23
+    Monday: 17
+    Saturday: 17
+    Sunday: 23
+    Thursday: 24
+    Tuesday: 26
+    Wednesday: 29
+  popularity_by_hour:
+  - 11
+  - 11
+  - 10
+  - 9
+  - 9
+  - 8
+  - 9
+  - 15
+  - 25
+  - 38
+  - 50
+  - 42
+  - 25
+  - 22
+  - 25
+  - 27
+  - 28
+  - 26
+  - 18
+  - 11
+  - 11
+  - 13
+  - 10
+  - 8
+  raw_visit_counts: 159
+  related_same_day_brand:
+    Atwoods Ranch & Home: 100
+    Dollar General: 23
+    Ford Motor Company: 14
+    Kawasaki Motors: 20
+    Olive Garden: 16
+    Sinclair Oil: 17
+Barnsdall Hs:
+  bucketed_dwell_times: '{"<1": 74, "1-2": 2, "2-3": 68, "3-4": 0, ">6": 4}'
+  popularity_by_day:
+    Friday: 7
+    Monday: 28
+    Saturday: 2
+    Sunday: 5
+    Thursday: 37
+    Tuesday: 41
+    Wednesday: 28
+  popularity_by_hour:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  - 9
+  - 8
+  - 9
+  - 11
+  - 28
+  - 77
+  - 71
+  - 73
+  - 65
+  - 2
+  - 1
+  - 3
+  - 8
+  - 6
+  - 4
+  - 3
+  - 1
+  raw_visit_counts: 148
+  related_same_day_brand:
+    Braum's Ice Cream and Dairy Stores: 12
+    Dollar General: 13
+    McAlister's Deli: 9
+Barnsdall Jhs:
+  bucketed_dwell_times: '{"<1": 90, "1-2": 42, "2-3": 53, "3-4": 0, ">6": 89}'
+  popularity_by_day:
+    Friday: 12
+    Monday: 53
+    Saturday: 9
+    Sunday: 7
+    Thursday: 78
+    Tuesday: 56
+    Wednesday: 59
+  popularity_by_hour:
+  - 5
+  - 5
+  - 5
+  - 7
+  - 9
+  - 11
+  - 10
+  - 135
+  - 150
+  - 147
+  - 151
+  - 138
+  - 95
+  - 75
+  - 67
+  - 50
+  - 8
+  - 10
+  - 9
+  - 3
+  - 4
+  - 4
+  - 4
+  - 7
+  raw_visit_counts: 274
+  related_same_day_brand:
+    Braum's Ice Cream and Dairy Stores: 6
+    Dollar General: 7
+    T.J. Maxx: 7
+Barnsdall Main Street Oil Well:
+  bucketed_dwell_times: '{"<1": 80, "1-2": 30, "2-3": 23, "3-4": 0, ">6": 74}'
+  popularity_by_day:
+    Friday: 26
+    Monday: 28
+    Saturday: 30
+    Sunday: 19
+    Thursday: 40
+    Tuesday: 37
+    Wednesday: 27
+  popularity_by_hour:
+  - 49
+  - 49
+  - 46
+  - 48
+  - 45
+  - 43
+  - 44
+  - 41
+  - 41
+  - 44
+  - 50
+  - 50
+  - 55
+  - 54
+  - 52
+  - 54
+  - 39
+  - 34
+  - 30
+  - 38
+  - 55
+  - 55
+  - 57
+  - 52
+  raw_visit_counts: 207
+  related_same_day_brand:
+    Dollar General: 23
+    T.J. Maxx: 16
+Barnsdall Market:
+  bucketed_dwell_times: '{"<1": 20, "1-2": 3, "2-3": 3, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 2
+    Monday: 6
+    Saturday: 0
+    Sunday: 4
+    Thursday: 5
+    Tuesday: 9
+    Wednesday: 2
+  popularity_by_hour:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 2
+  - 2
+  - 2
+  - 3
+  - 4
+  - 6
+  - 5
+  - 7
+  - 9
+  - 8
+  - 5
+  - 8
+  - 3
+  - 2
+  - 0
+  - 1
+  - 3
+  - 2
+  - 1
+  - 1
+  raw_visit_counts: 28
+  related_same_day_brand: {}
+Barnsdall Nursing Home:
+  bucketed_dwell_times: '{"<1": 67, "1-2": 20, "2-3": 11, "3-4": 0, ">6": 40}'
+  popularity_by_day:
+    Friday: 26
+    Monday: 11
+    Saturday: 15
+    Sunday: 20
+    Thursday: 20
+    Tuesday: 26
+    Wednesday: 20
+  popularity_by_hour:
+  - 34
+  - 33
+  - 32
+  - 31
+  - 29
+  - 28
+  - 26
+  - 25
+  - 29
+  - 30
+  - 34
+  - 37
+  - 40
+  - 40
+  - 36
+  - 41
+  - 33
+  - 40
+  - 35
+  - 21
+  - 24
+  - 30
+  - 32
+  - 33
+  raw_visit_counts: 138
+  related_same_day_brand:
+    CrossFit: 16
+    Fresenius Kidney Care: 12
+    Sinclair Oil: 25
+    Starbucks: 15
+Barnsdall Police Department Barnsdall Oklahoma:
+  bucketed_dwell_times: '{"<1": 43, "1-2": 14, "2-3": 9, "3-4": 0, ">6": 8}'
+  popularity_by_day:
+    Friday: 16
+    Monday: 10
+    Saturday: 10
+    Sunday: 8
+    Thursday: 13
+    Tuesday: 8
+    Wednesday: 9
+  popularity_by_hour:
+  - 5
+  - 6
+  - 6
+  - 5
+  - 6
+  - 7
+  - 9
+  - 9
+  - 15
+  - 13
+  - 14
+  - 15
+  - 8
+  - 8
+  - 5
+  - 8
+  - 9
+  - 7
+  - 6
+  - 6
+  - 9
+  - 10
+  - 6
+  - 7
+  raw_visit_counts: 74
+  related_same_day_brand:
+    Ford Motor Company: 100
+Barnsdall Rural Fire Fighters Association:
+  bucketed_dwell_times: '{"<1": 10, "1-2": 5, "2-3": 3, "3-4": 0, ">6": 20}'
+  popularity_by_day:
+    Friday: 17
+    Monday: 2
+    Saturday: 6
+    Sunday: 1
+    Thursday: 1
+    Tuesday: 9
+    Wednesday: 2
+  popularity_by_hour:
+  - 10
+  - 9
+  - 9
+  - 8
+  - 9
+  - 9
+  - 9
+  - 9
+  - 14
+  - 13
+  - 9
+  - 11
+  - 12
+  - 10
+  - 9
+  - 13
+  - 12
+  - 9
+  - 8
+  - 12
+  - 12
+  - 11
+  - 9
+  - 10
+  raw_visit_counts: 38
+  related_same_day_brand:
+    Reasor's: 100
+Barnsdall Tag Agency:
+  bucketed_dwell_times: '{"<1": 2, "1-2": 0, "2-3": 1, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 1
+    Saturday: 0
+    Sunday: 0
+    Thursday: 0
+    Tuesday: 2
+    Wednesday: 0
+  popularity_by_hour:
+  - 1
+  - 3
+  - 2
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  raw_visit_counts: 3
+  related_same_day_brand: {}
+Dollar General:
+  bucketed_dwell_times: '{"<1": 274, "1-2": 1, "2-3": 0, "3-4": 0, ">6": 1}'
+  popularity_by_day:
+    Friday: 51
+    Monday: 36
+    Saturday: 45
+    Sunday: 34
+    Thursday: 38
+    Tuesday: 38
+    Wednesday: 34
+  popularity_by_hour:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 6
+  - 17
+  - 17
+  - 23
+  - 28
+  - 20
+  - 22
+  - 21
+  - 23
+  - 41
+  - 25
+  - 27
+  - 21
+  - 30
+  - 9
+  - 1
+  - 1
+  raw_visit_counts: 276
+  related_same_day_brand:
+    Hobby Lobby Stores: 12
+    Lincare: 9
+    O'Reilly Auto Parts: 11
+    ULTA Beauty: 8
+    United States Postal Service (USPS): 16
+Free Will Baptist Church:
+  bucketed_dwell_times: '{"<1": 51, "1-2": 23, "2-3": 22, "3-4": 0, ">6": 17}'
+  popularity_by_day:
+    Friday: 15
+    Monday: 7
+    Saturday: 15
+    Sunday: 25
+    Thursday: 16
+    Tuesday: 9
+    Wednesday: 26
+  popularity_by_hour:
+  - 7
+  - 6
+  - 6
+  - 5
+  - 5
+  - 5
+  - 5
+  - 5
+  - 5
+  - 18
+  - 30
+  - 33
+  - 25
+  - 20
+  - 22
+  - 32
+  - 29
+  - 23
+  - 26
+  - 17
+  - 16
+  - 11
+  - 7
+  - 9
+  raw_visit_counts: 113
+  related_same_day_brand:
+    O'Reilly Auto Parts: 33
+    Sinclair Oil: 8
+Garretts Country Store & Grill:
+  bucketed_dwell_times: '{"<1": 136, "1-2": 12, "2-3": 4, "3-4": 0, ">6": 7}'
+  popularity_by_day:
+    Friday: 29
+    Monday: 16
+    Saturday: 27
+    Sunday: 5
+    Thursday: 39
+    Tuesday: 23
+    Wednesday: 20
+  popularity_by_hour:
+  - 6
+  - 7
+  - 7
+  - 7
+  - 8
+  - 9
+  - 13
+  - 18
+  - 19
+  - 23
+  - 18
+  - 28
+  - 37
+  - 33
+  - 11
+  - 4
+  - 4
+  - 7
+  - 12
+  - 23
+  - 16
+  - 8
+  - 7
+  - 8
+  raw_visit_counts: 159
+  related_same_day_brand:
+    Ascension Health: 25
+    Family Dollar Stores: 12
+    Hard Rock Hotel: 14
+    Walmart: 43
+Kelley Insurance Agency:
+  bucketed_dwell_times: '{"<1": 4, "1-2": 0, "2-3": 1, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 1
+    Monday: 0
+    Saturday: 0
+    Sunday: 0
+    Thursday: 3
+    Tuesday: 0
+    Wednesday: 1
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 1
+  - 2
+  - 0
+  - 0
+  - 1
+  - 2
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 5
+  related_same_day_brand: {}
+Kelley's Trucks and More:
+  bucketed_dwell_times: '{"<1": 19, "1-2": 0, "2-3": 0, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 4
+    Monday: 1
+    Saturday: 4
+    Sunday: 4
+    Thursday: 0
+    Tuesday: 3
+    Wednesday: 3
+  popularity_by_hour:
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 3
+  - 6
+  - 3
+  - 3
+  - 1
+  - 1
+  - 2
+  - 2
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  - 1
+  raw_visit_counts: 19
+  related_same_day_brand:
+    Hard Rock Hotel: 100
+    Kawasaki Motors: 100
+Lighthouse Church:
+  bucketed_dwell_times: '{"<1": 30, "1-2": 23, "2-3": 21, "3-4": 0, ">6": 26}'
+  popularity_by_day:
+    Friday: 10
+    Monday: 28
+    Saturday: 4
+    Sunday: 15
+    Thursday: 11
+    Tuesday: 7
+    Wednesday: 25
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 11
+  - 23
+  - 38
+  - 52
+  - 44
+  - 35
+  - 31
+  - 25
+  - 14
+  - 16
+  - 15
+  - 11
+  - 10
+  - 7
+  - 6
+  - 4
+  - 0
+  - 0
+  raw_visit_counts: 100
+  related_same_day_brand:
+    Braum's Ice Cream and Dairy Stores: 50
+    Chicken Express: 50
+    Panda Express: 33
+Osage Nation Head Start Barnsdall:
+  bucketed_dwell_times: '{"<1": 10, "1-2": 1, "2-3": 0, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 1
+    Monday: 5
+    Saturday: 0
+    Sunday: 0
+    Thursday: 2
+    Tuesday: 2
+    Wednesday: 1
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 3
+  - 2
+  - 1
+  - 3
+  - 2
+  - 1
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 11
+  related_same_day_brand: {}
+Reece Cemetery:
+  bucketed_dwell_times: '{"<1": 0, "1-2": 0, "2-3": 0, "3-4": 0, ">6": 1}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 0
+    Saturday: 0
+    Sunday: 0
+    Thursday: 1
+    Tuesday: 0
+    Wednesday: 0
+  popularity_by_hour:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 1
+  related_same_day_brand: {}
+Robinowitz Oil:
+  bucketed_dwell_times: '{"<1": 17, "1-2": 1, "2-3": 1, "3-4": 0, ">6": 13}'
+  popularity_by_day:
+    Friday: 0
+    Monday: 5
+    Saturday: 3
+    Sunday: 3
+    Thursday: 8
+    Tuesday: 6
+    Wednesday: 7
+  popularity_by_hour:
+  - 0
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 10
+  - 14
+  - 15
+  - 14
+  - 17
+  - 16
+  - 15
+  - 15
+  - 16
+  - 8
+  - 3
+  - 1
+  - 1
+  - 1
+  - 0
+  - 0
+  raw_visit_counts: 32
+  related_same_day_brand:
+    Carl's Jr.: 50
+Siggins Memorial Clinic:
+  bucketed_dwell_times: '{"<1": 6, "1-2": 1, "2-3": 3, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 2
+    Monday: 2
+    Saturday: 1
+    Sunday: 1
+    Thursday: 1
+    Tuesday: 3
+    Wednesday: 2
+  popularity_by_hour:
+  - 4
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  - 2
+  - 1
+  - 1
+  - 2
+  - 2
+  - 1
+  - 4
+  - 1
+  - 0
+  - 0
+  - 0
+  - 0
+  - 2
+  - 5
+  - 5
+  - 5
+  - 5
+  raw_visit_counts: 12
+  related_same_day_brand: {}
+Sinclair Oil:
+  bucketed_dwell_times: '{"<1": 483, "1-2": 14, "2-3": 13, "3-4": 0, ">6": 16}'
+  popularity_by_day:
+    Friday: 97
+    Monday: 64
+    Saturday: 99
+    Sunday: 61
+    Thursday: 87
+    Tuesday: 55
+    Wednesday: 63
+  popularity_by_hour:
+  - 7
+  - 7
+  - 7
+  - 6
+  - 8
+  - 11
+  - 32
+  - 47
+  - 36
+  - 45
+  - 58
+  - 73
+  - 68
+  - 61
+  - 60
+  - 60
+  - 52
+  - 43
+  - 29
+  - 34
+  - 32
+  - 26
+  - 13
+  - 11
+  raw_visit_counts: 526
+  related_same_day_brand:
+    Carl's Jr.: 11
+    Casey's General Stores: 16
+    David's Bridal: 6
+    Daylight Donuts: 7
+    Dollar General: 13
+    Phillips 66: 5
+    QuikTrip: 13
+    Sutherland Lumber: 10
+    T.J. Maxx: 6
+    Walmart: 5
+    Whataburger: 6
+Stumpff Chapel:
+  bucketed_dwell_times: '{"<1": 19, "1-2": 0, "2-3": 4, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 2
+    Monday: 1
+    Saturday: 2
+    Sunday: 13
+    Thursday: 2
+    Tuesday: 3
+    Wednesday: 2
+  popularity_by_hour:
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 3
+  - 5
+  - 4
+  - 4
+  - 10
+  - 6
+  - 9
+  - 5
+  - 3
+  - 2
+  - 4
+  - 1
+  - 1
+  - 1
+  - 2
+  - 2
+  raw_visit_counts: 25
+  related_same_day_brand:
+    Walmart: 59
+Sweet Scripture:
+  bucketed_dwell_times: '{"<1": 34, "1-2": 5, "2-3": 11, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 16
+    Monday: 2
+    Saturday: 2
+    Sunday: 7
+    Thursday: 8
+    Tuesday: 5
+    Wednesday: 12
+  popularity_by_hour:
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 2
+  - 3
+  - 2
+  - 7
+  - 7
+  - 4
+  - 4
+  - 4
+  - 7
+  - 6
+  - 7
+  - 12
+  - 12
+  - 15
+  - 12
+  - 5
+  raw_visit_counts: 52
+  related_same_day_brand:
+    Ascension Health: 50
+Tone Ur Hyde:
+  bucketed_dwell_times: '{"<1": 52, "1-2": 6, "2-3": 9, "3-4": 0, ">6": 2}'
+  popularity_by_day:
+    Friday: 24
+    Monday: 5
+    Saturday: 4
+    Sunday: 3
+    Thursday: 16
+    Tuesday: 8
+    Wednesday: 9
+  popularity_by_hour:
+  - 3
+  - 2
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 5
+  - 6
+  - 9
+  - 7
+  - 4
+  - 8
+  - 7
+  - 4
+  - 8
+  - 6
+  - 10
+  - 10
+  - 7
+  - 14
+  - 14
+  - 8
+  raw_visit_counts: 69
+  related_same_day_brand: {}
+Toon Hardware and Lumber:
+  bucketed_dwell_times: '{"<1": 48, "1-2": 21, "2-3": 1, "3-4": 0, ">6": 1}'
+  popularity_by_day:
+    Friday: 12
+    Monday: 10
+    Saturday: 4
+    Sunday: 15
+    Thursday: 11
+    Tuesday: 12
+    Wednesday: 7
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 1
+  - 1
+  - 9
+  - 12
+  - 16
+  - 18
+  - 7
+  - 8
+  - 7
+  - 10
+  - 12
+  - 5
+  - 1
+  - 5
+  - 7
+  - 1
+  - 0
+  - 0
+  raw_visit_counts: 71
+  related_same_day_brand:
+    Atwoods Ranch & Home: 50
+United Methodist Church:
+  bucketed_dwell_times: '{"<1": 39, "1-2": 6, "2-3": 1, "3-4": 0, ">6": 9}'
+  popularity_by_day:
+    Friday: 6
+    Monday: 11
+    Saturday: 2
+    Sunday: 6
+    Thursday: 13
+    Tuesday: 12
+    Wednesday: 5
+  popularity_by_hour:
+  - 7
+  - 7
+  - 7
+  - 7
+  - 7
+  - 8
+  - 8
+  - 7
+  - 8
+  - 8
+  - 6
+  - 8
+  - 10
+  - 5
+  - 11
+  - 8
+  - 4
+  - 6
+  - 6
+  - 6
+  - 10
+  - 10
+  - 10
+  - 8
+  raw_visit_counts: 55
+  related_same_day_brand:
+    Mazzio's Italian Eatery: 100
+United States Postal Service (USPS):
+  bucketed_dwell_times: '{"<1": 31, "1-2": 1, "2-3": 0, "3-4": 0, ">6": 0}'
+  popularity_by_day:
+    Friday: 11
+    Monday: 2
+    Saturday: 2
+    Sunday: 4
+    Thursday: 6
+    Tuesday: 2
+    Wednesday: 5
+  popularity_by_hour:
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 1
+  - 4
+  - 9
+  - 7
+  - 5
+  - 1
+  - 2
+  - 8
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  - 0
+  raw_visit_counts: 32
+  related_same_day_brand: {}
+Uptown Pizza:
+  bucketed_dwell_times: '{"<1": 112, "1-2": 14, "2-3": 10, "3-4": 0, ">6": 7}'
+  popularity_by_day:
+    Friday: 25
+    Monday: 7
+    Saturday: 20
+    Sunday: 23
+    Thursday: 31
+    Tuesday: 12
+    Wednesday: 25
+  popularity_by_hour:
+  - 3
+  - 2
+  - 3
+  - 3
+  - 3
+  - 4
+  - 6
+  - 6
+  - 17
+  - 23
+  - 24
+  - 42
+  - 28
+  - 14
+  - 16
+  - 12
+  - 16
+  - 21
+  - 23
+  - 20
+  - 6
+  - 1
+  - 4
+  - 3
+  raw_visit_counts: 143
+  related_same_day_brand:
+    United Super Markets Oklahoma: 10
