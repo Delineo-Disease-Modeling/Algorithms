@@ -292,18 +292,18 @@ def simulation(settings, city_info, hh_info):
             poi_count = 1
 
             hh_ret = {}
+
             for hh, pop in hh_dict.items():
                 pop_list = []
                 new_pop = pop.population.copy()
                 for person in new_pop:
-                    person_list = vars(person).copy()
-                    person_list.pop('household')
-                    pop_list.append(person_list)
-                    # print(pop_list)
-                hh_ret[f"household_{count}"] = pop_list
+                    pop_list.append(str(person.id))
+                    
+                hh_ret[f"{count}"] = pop_list
+
                 count += 1
 
-            hh_return_dict[f'timestep_{time}'] = hh_ret
+            hh_return_dict[f'{time}'] = hh_ret
 
             poi_ret = {}
             for poi, cur_poi in poi_dict.items():
@@ -321,8 +321,11 @@ def simulation(settings, city_info, hh_info):
                 poi_count += 1
             poi_return_dict[f'timestep_{time}'] = poi_ret
 
-    with open("result_hh.json", "w+") as hhstream:
-        json.dump(hh_return_dict, hhstream)
+    for key in list(hh_return_dict.keys()):
+        hh_return_dict[key] = {sub_key: sub_val for sub_key, sub_val in hh_return_dict[key].items() if sub_val}
+
+    with open("result_hh_new_patterns.json", "w+") as hhstream:
+        json.dump(hh_return_dict, hhstream, indent=4)
 
     with open("result_poi.json", "w+") as poistream:
         json.dump(poi_return_dict, poistream)
