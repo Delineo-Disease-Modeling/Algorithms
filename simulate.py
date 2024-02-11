@@ -213,6 +213,22 @@ def get_popularity_matrix(poi_dict):
 
     return [name, weights]
 
+def remove_empty_elements(data_dict):
+    for outer_key, outer_value in data_dict.items():
+        for category_key in ['homes', 'places']:  # Check if category exists in dict
+            if category_key in outer_value:
+                cleaned_category = {}
+                for inner_key, inner_value in outer_value[category_key].items():
+                    # Remove empty lists from within the lists for 'places'
+                    if category_key == 'places':
+                        cleaned_list = [item for item in inner_value if item]
+                        if cleaned_list:  # Only add if the cleaned list is not empty
+                            cleaned_category[inner_key] = cleaned_list
+                    # For 'homes' or other categories, just remove empty lists
+                    elif inner_value:
+                        cleaned_category[inner_key] = inner_value
+                data_dict[outer_key][category_key] = cleaned_category
+
 
 def simulation(settings, city_info, hh_info):
 
@@ -303,27 +319,28 @@ def simulation(settings, city_info, hh_info):
 
                 count += 1
 
-            hh_return_dict[f'{time}'] = hh_ret
 
             poi_ret = {}
+            places_ret = {}
             for poi, cur_poi in poi_dict.items():
                 pop_list_poi = []
                 new_pop_poi = list(cur_poi.current_people.copy())
                 for spot in new_pop_poi:
                     spot_list = []
                     for person in spot:
-                        person_list_poi = vars(person).copy()
-                        person_list_poi.pop('household')
+                        person_list_poi = person.id
                         spot_list.append(person_list_poi)
                     pop_list_poi.append(spot_list)
 
                 poi_ret[f"id_{poi_count}_{cur_poi.name}"] = pop_list_poi
+                places_ret[poi_count] = pop_list_poi
                 poi_count += 1
+
+            hh_return_dict[f'{time}']= {"homes": hh_ret, "places": places_ret}
             poi_return_dict[f'timestep_{time}'] = poi_ret
 
-    for key in list(hh_return_dict.keys()):
-        hh_return_dict[key] = {sub_key: sub_val for sub_key, sub_val in hh_return_dict[key].items() if sub_val}
-
+    remove_empty_elements(hh_return_dict)
+    
     with open("result_hh_new_patterns.json", "w+") as hhstream:
         json.dump(hh_return_dict, hhstream, indent=4)
 
