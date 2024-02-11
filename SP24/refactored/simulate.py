@@ -199,7 +199,7 @@ class Simulate:
     
     def write(self, hh_return_dict, poi_return_dict):
         with open("output/result_hh.json", "w+", encoding='utf-8') as hhstream:
-            json.dump(hh_return_dict, hhstream)
+            json.dump(hh_return_dict, hhstream, ensure_ascii=False, indent=4)
 
         with open("output/result_poi.json", "w+", encoding='utf-8') as poistream:
-            json.dump(poi_return_dict, poistream)
+            json.dump(poi_return_dict, poistream, ensure_ascii=False, indent=4)
