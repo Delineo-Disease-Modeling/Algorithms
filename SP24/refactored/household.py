@@ -239,19 +239,19 @@ if __name__=="__main__":
     # reading population information from yaml file
     pop_data = {}
 
-    with open('population_info.yaml', mode="r", encoding="utf-8") as file:
+    with open('input/population_info.yaml', mode="r", encoding="utf-8") as file:
         pop_data = yaml.full_load(file)
 
     print(pop_data) #TODO delete
 
     # Reading Census Information
-    census_info = "safegraph_cbg_population_estimate.csv"
+    census_info = "input/safegraph_cbg_population_estimate.csv"
     census_df = pd.read_csv(census_info)
 
     # HELPER FUNCTIONS
 
     # read clusters into string array in order to easier census search
-    cluster_df = pd.read_csv('clusters.csv')
+    cluster_df = pd.read_csv('input/clusters.csv')
     clusters = [str(i) for i in list(cluster_df['cbgs'])]
 
     household_list = []
@@ -262,7 +262,7 @@ if __name__=="__main__":
         household_list.append(create_households(pop_data, household, cbg))
 
     # Dump household list data into households.yaml file
-    with open('households.yaml', mode="wt", encoding="utf-8") as outstream:
+    with open('input/households.yaml', mode="wt", encoding="utf-8") as outstream:
         yaml.dump(household_list, outstream)
 
     print("Successfully Created Households")
