@@ -198,8 +198,8 @@ class Simulate:
         self.write(hh_return_dict, poi_return_dict)
     
     def write(self, hh_return_dict, poi_return_dict):
-        with open("SP24/refactored/output/result_hh.json", "w+", encoding='utf-8') as hhstream:
+        with open("output/result_hh.json", "w+", encoding='utf-8') as hhstream:
             json.dump(hh_return_dict, hhstream)
 
-        with open("SP24/refactored/output/result_poi.json", "w+", encoding='utf-8') as poistream:
+        with open("output/result_poi.json", "w+", encoding='utf-8') as poistream:
             json.dump(poi_return_dict, poistream)
