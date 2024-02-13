@@ -308,20 +308,38 @@ def simulation(settings, city_info, hh_info):
             poi_count = 1
 
             hh_ret = {}
+            papdata = {}
+            homes = {}
+            people = {}
 
             for hh, pop in hh_dict.items():
                 pop_list = []
                 new_pop = pop.population.copy()
                 for person in new_pop:
                     pop_list.append(str(person.id))
-                    
+                    people[person.id] = {
+                        "sex": person.sex,
+                        "age": person.age,
+                        "home": str(person.hh_id),
+                    }
+                
+                if not (len(pop_list) == 0):
+                    homes[count] = {
+                        "members": len(pop_list),
+                        "cbg": hh.cbg,
+                    }
+
                 hh_ret[f"{count}"] = pop_list
 
                 count += 1
 
+            papdata["people"] = people
+            papdata["homes"] = homes
 
             poi_ret = {}
             places_ret = {}
+            places = {}
+
             for poi, cur_poi in poi_dict.items():
                 pop_list_poi = []
                 new_pop_poi = list(cur_poi.current_people.copy())
@@ -333,19 +351,31 @@ def simulation(settings, city_info, hh_info):
                     pop_list_poi.append(spot_list)
 
                 poi_ret[f"id_{poi_count}_{cur_poi.name}"] = pop_list_poi
+
                 places_ret[poi_count] = pop_list_poi
+                places[poi_count] = {
+                    "label": cur_poi.name,
+                    "cbg": -1,
+                }
+                #latitude
+                #longitude
+                #capacity
                 poi_count += 1
+
+            papdata["places"] = places
+
+            
 
             hh_return_dict[f'{time}']= {"homes": hh_ret, "places": places_ret}
             poi_return_dict[f'timestep_{time}'] = poi_ret
 
     remove_empty_elements(hh_return_dict)
     
-    with open("result_hh_new_patterns.json", "w+") as hhstream:
+    with open("new_patterns.json", "w+") as hhstream:
         json.dump(hh_return_dict, hhstream, indent=4)
 
-    with open("result_poi.json", "w+") as poistream:
-        json.dump(poi_return_dict, poistream)
+    with open("new_papdata.json", "w+") as poistream:
+        json.dump(papdata, poistream, indent=4)
 
 
 if __name__ == "__main__":
