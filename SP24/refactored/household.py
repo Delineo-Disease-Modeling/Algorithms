@@ -2,10 +2,30 @@ import numpy as np
 import pandas as pd
 import random
 import yaml
+from enum import Enum
 
 '''
     GLOBAL VARIABLES
 '''
+
+class Locations(Enum):
+    Home = 0
+    School = 1
+    Restaurant = 2
+    Office = 3
+    #add-on
+
+class AgesVariation(Enum):
+    Preschool = (0, 4),
+    Adolescent = (5, 15),
+    Adolescent_Workable = (16, 19),
+    Young_Adult = (20, 24),
+    Middle_Aged_1 = (25, 34),
+    Middle_Aged_2 = (35, 44),
+    Middle_Aged_3 = (45, 54),
+    Late_Middle_Aged = (55, 64),
+    Retired = (65, 999)
+
 
 '''
     Classe Definitions to use in pop_mov_sim
@@ -24,6 +44,26 @@ class Person:
         self.cbg = cbg
         self.household = household
         self.hh_id = hh_id
+        self.set_occupation()
+
+    def set_occupation(self):
+        if(self.age in AgesVariation.Preschool): self.occupation = Occupation(Locations.Home)
+        elif(self.age in AgesVariation.Adolescent): self.occupation = Occupation(Locations.School)
+        #add random occupation assignment based on age
+        #reference: https://www.bls.gov/cps/cpsaat11b.htm
+        elif(self.age in AgesVariation.Retired): self.occupation = Occupation(Locations.Home)
+
+class Occupation:
+    def __init__(self, work_location, work_time):
+        self.location = work_location
+        self.work_time = (0, 0)
+        self.set_time()
+
+    def set_time(self):
+        if self.location == Locations.School: self.work_time = (9, 4)
+        elif self.location == Locations.Restaurant: self.work_time = (12, 8)
+        elif self.location == Locations.Office: self.work_time = (9, 5)
+        #add-on
 
 class Population:
 
