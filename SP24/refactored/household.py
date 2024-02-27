@@ -11,15 +11,15 @@ import yaml
     Classe Definitions to use in pop_mov_sim
 '''
 
-class Person:
 
+class Person:
     '''
     Class for each individual
     '''
 
     def __init__(self, id, sex, age, cbg, household, hh_id):
         self.id = id
-        self.sex = sex #male 0 female 1
+        self.sex = sex # male 0 female 1
         self.age = age
         self.cbg = cbg
         self.household = household
@@ -32,9 +32,9 @@ class Population:
     '''
 
     def __init__(self):
-        #total population
+        # total population
         self.total_count = 0
-        #container for persons in the population
+        # container for persons in the population
         self.population = []
     
     def populate_indiv(self, person):
@@ -51,8 +51,9 @@ class Household(Population):
     ''' 
     Household class, inheriting Population since its a small population
     '''
-    def __init__(self, cbg):
-        super().__init__()
+    def __init__(self, cbg, total_count=0, population=[]):
+        self.total_count = total_count
+        self.population = population
         self.cbg = cbg
 
 
@@ -62,6 +63,7 @@ class Household(Population):
         @param person = person to be added to household
         '''
         self.population.append(person)
+        
 
     #TODO: Add more functions for leaving/coming back, etc if needed
     #jiwoo: an idea would be to extend from the population info to create
