@@ -11,8 +11,9 @@ from enum import Enum
 class Locations(Enum):
     Home = 0
     School = 1
-    Restaurant = 2
+    Service = 2 #Renamed from restaurant to encompass other service oriented roles
     Office = 3
+    Industry = 4 
     #add-on
 
 class AgesVariation(Enum):
@@ -47,11 +48,13 @@ class Person:
         self.set_occupation()
 
     def set_occupation(self):
-        if(self.age in AgesVariation.Preschool): self.occupation = Occupation(Locations.Home)
-        elif(self.age in AgesVariation.Adolescent): self.occupation = Occupation(Locations.School)
+        if(self.age in AgesVariation.Preschool or self.age in AgesVariation.Retired): 
+            self.occupation = Occupation(Locations.Home)
+        elif(self.age in AgesVariation.Adolescent or self.age in AgesVariation.Adolescent_Workable): 
+            self.occupation = Occupation(Locations.School)
         #add random occupation assignment based on age
         #reference: https://www.bls.gov/cps/cpsaat11b.htm
-        elif(self.age in AgesVariation.Retired): self.occupation = Occupation(Locations.Home)
+        
 
 class Occupation:
     def __init__(self, work_location, work_time):
@@ -61,8 +64,9 @@ class Occupation:
 
     def set_time(self):
         if self.location == Locations.School: self.work_time = (9, 4)
-        elif self.location == Locations.Restaurant: self.work_time = (12, 8)
+        elif self.location == Locations.Service: self.work_time = (12, 8)
         elif self.location == Locations.Office: self.work_time = (9, 5)
+        elif self.location == Locations.Industry: self.work_time = (7, 4)
         #add-on
 
 class Population:
