@@ -8,23 +8,35 @@ from enum import Enum
     GLOBAL VARIABLES
 '''
 
-locations_work_hours = {
-    "Home": (0, 0),
-    "School": (9, 4),
-    "Service": (6, 11),
-    "Office": (9, 5),
-    "Healthcare": (7, 7),
-    "Industry": (8, 4) 
+naics_pois = {
+    '11': 'Agriculture, Forestry, Fishing and Hunting',
+    '21': 'Mining, Quarrying, and Oil and Gas Extraction',
+    '22': 'Utilities',
+    '23': 'Construction',
+    '31-33': 'Manufacturing',
+    '42': 'Wholesale Trade',
+    '44-45': 'Retail Trade',
+    '48-49': 'Transportation and Warehousing',
+    '51': 'Information',
+    '52': 'Finance and Insurance',
+    '53': 'Real Estate and Rental and Leasing',
+    '54': 'Professional, Scientific, and Technical Services',
+    '55': 'Management of Companies and Enterprises',
+    '56': 'Administrative and Support and Waste Management and Remediation Services',
+    '61': 'Educational Services',
+    '62': 'Health Care and Social Assistance',
+    '71': 'Arts, Entertainment, and Recreation',
+    '72': 'Accommodation and Food Services',
+    '81': 'Other Services (except Public Administration)',
+    '92': 'Public Administration' 
     #add-on
 }
 
 age_categories = {
     "Preschool": (0, 4),
-    "Adolescent": (5, 15),
-    "Adolescent_Workable": (16, 19),
-    "Young_Adult": (20, 24),
-    "Middle_Aged": (25, 64),
-    "Retired": (65, 999)
+    "Adolescent": (5, 18),
+    "Adult": (19, 64),
+    "Retired": (65, 99)
 }
 
 
@@ -45,22 +57,34 @@ class Person:
         self.cbg = cbg
         self.household = household
         self.occupation = None
-        self.work_time = (0, 0)
         self.set_occupation()
+        self.work_time = (0, 0)
+        self.naics_code = None
+        self.set_work_time()
 
     def set_occupation(self):
         for category, (start_age, end_age) in age_categories.items():
             if start_age <= self.age <= end_age:
-                if category in ["Preschool", "Retired"]:
-                    self.occupation = "Home"
+                if category == "Preschool" or category == "Retired":
+                    self.occupation = category
+                    self.naics_code = None
                 elif category == "Adolescent":
-                    self.occupation = "School"
-                else:
-                    self.occupation = random.choice(["Service", "Office", "Healthcare", "Industry"])
-                self.work_time = locations_work_hours[self.occupation]
+                    self.occupation = "Student"
+                    self.naics_code = '61'  
+                elif category == "Adult":
+                    self.assign_naics_code_for_adults()
                 break
-        
+    
+    def assign_naics_code_for_adults(self):
+        job_categories = list(naics_pois.keys())
+        selected_code = random.choice(job_categories)
+        self.naics_code = selected_code
+        self.occupation = naics_pois[selected_code]
 
+    def set_work_time(self):
+        self.work_time = (9, 5)
+        
+'''
 class Occupation:
     def __init__(self, work_location, work_time):
         self.location = work_location
@@ -73,6 +97,7 @@ class Occupation:
         elif self.location == Locations.Office: self.work_time = (9, 5)
         elif self.location == Locations.Industry: self.work_time = (7, 4)
         #add-on
+'''
 
 class Population:
 
