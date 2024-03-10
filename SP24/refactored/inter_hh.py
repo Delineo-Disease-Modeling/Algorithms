@@ -5,12 +5,12 @@ from household import Household, Person
 import pandas
 
 class InterHousehold:
-    def __init__(self, people:list, hh_list:list[Household]):
+    def __init__(self, hh_list:list[Household]):
         self.hh_list = hh_list
         self.people = []
         
         for hh in hh_list:
-            self.people += hh.population        
+            self.people += hh.population    
         
 
 
@@ -19,6 +19,7 @@ class InterHousehold:
         self.regular_visitation_frequency = 0.15
 
         self.social_event_frequency = 0.1
+        self.social_max_size = 10
         
         
 
@@ -33,11 +34,29 @@ class InterHousehold:
 
 
 
-    def next(self, hh_list:list[Household]):
-        self.individual_movement(hh_list)
+    def next(self):
+        self.individual_movement()
+        self.social_event()
 
     
-    def individual_movement(self, hh_list:list[Household]):
+    def social_event(self):
+        number = int(self.social_event_frequency * len(self.hh_list))
+        hh_social = np.random.choice(self.hh_list, size=number, replace=False)
+        for hh in hh_social:
+            hh.social = True
+            # randomly choose people from other households to gather
+            guests_num = np.random.randint(1, high=self.social_max_size - len(hh.population), size=None, dtype='l')
+            guests = np.random.choice(self.people, size=guests_num, replace=False)
+            for guest in guests:
+                if guest.current_household == guest.household:
+                    guest.current_household = hh
+                    guest.household.population.remove(guest)
+                    hh.population.append(guest)
+
+
+
+
+    def individual_movement(self):
         for person in self.people:
             if person.current_household != person.household: # person not in its hosuehold, he is a guest
                 # put the person back to its original household
@@ -48,12 +67,13 @@ class InterHousehold:
             else:
                 move = self.random_boolean(self.individual_movement_frequency)
                 if move:
-                    hh = np.random.choice(hh_list, size=1, replace=False)
-                    while (hh != person.current_household and len(hh_list) >= 2):
-                        hh = np.random.choice(hh_list, size=1, replace=False)
+                    hh = np.random.choice(self.hh_list, replace=False)
+                    while (hh == person.current_household and len(self.hh_list) >= 2):
+                        hh = np.random.choice(self.hh_list, replace=False)
                     
                     person.current_household = hh
                     hh.population.append(person)
+                    
 
 
 
