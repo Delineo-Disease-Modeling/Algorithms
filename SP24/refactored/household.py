@@ -8,24 +8,24 @@ from enum import Enum
     GLOBAL VARIABLES
 '''
 
-class Locations(Enum):
-    Home = 0
-    School = 1
-    Service = 2 #Renamed from restaurant to encompass other service oriented roles
-    Office = 3
-    Industry = 4 
+locations_work_hours = {
+    "Home": (0, 0),
+    "School": (9, 4),
+    "Service": (6, 11),
+    "Office": (9, 5),
+    "Healthcare": (7, 7),
+    "Industry": (8, 4) 
     #add-on
+}
 
-class AgesVariation(Enum):
-    Preschool = (0, 4),
-    Adolescent = (5, 15),
-    Adolescent_Workable = (16, 19),
-    Young_Adult = (20, 24),
-    Middle_Aged_1 = (25, 34),
-    Middle_Aged_2 = (35, 44),
-    Middle_Aged_3 = (45, 54),
-    Late_Middle_Aged = (55, 64),
-    Retired = (65, 999)
+age_categories = {
+    "Preschool": (0, 4),
+    "Adolescent": (5, 15),
+    "Adolescent_Workable": (16, 19),
+    "Young_Adult": (20, 24),
+    "Middle_Aged": (25, 64),
+    "Retired": (65, 999)
+}
 
 
 '''
@@ -40,20 +40,25 @@ class Person:
 
     def __init__(self, id, sex, age, cbg, household, hh_id):
         self.id = id
-        self.sex = sex # male 0 female 1
+        self.sex = sex 
         self.age = age
         self.cbg = cbg
         self.household = household
-        self.hh_id = hh_id
+        self.occupation = None
+        self.work_time = (0, 0)
         self.set_occupation()
 
     def set_occupation(self):
-        if(self.age in AgesVariation.Preschool or self.age in AgesVariation.Retired): 
-            self.occupation = Occupation(Locations.Home)
-        elif(self.age in AgesVariation.Adolescent or self.age in AgesVariation.Adolescent_Workable): 
-            self.occupation = Occupation(Locations.School)
-        #add random occupation assignment based on age
-        #reference: https://www.bls.gov/cps/cpsaat11b.htm
+        for category, (start_age, end_age) in age_categories.items():
+            if start_age <= self.age <= end_age:
+                if category in ["Preschool", "Retired"]:
+                    self.occupation = "Home"
+                elif category == "Adolescent":
+                    self.occupation = "School"
+                else:
+                    self.occupation = random.choice(["Service", "Office", "Healthcare", "Industry"])
+                self.work_time = locations_work_hours[self.occupation]
+                break
         
 
 class Occupation:
