@@ -81,7 +81,7 @@ class Person:
         if self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']: #if medical or food service
             if random.random() <= 15 / 100: self.work_time = (17, 24) #15% night shift
         elif self.work_naics == naics_pois['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
-            if random.random() <= 0.1:  # 10% night shift
+            if random.random() <= 10 / 100:  # 10% night shift
                 self.work_time = (18, 2)  # Night shift
             else:
                 self.work_time = (6, 18)   # Day shift, longer 12 hour shift common
