@@ -10,7 +10,9 @@ class InterHousehold:
         self.people = []
         
         for hh in hh_list:
-            self.people += hh.population    
+            self.people += hh.population
+
+        self.social_hh:set = {}
         
 
 
@@ -19,7 +21,8 @@ class InterHousehold:
         self.regular_visitation_frequency = 0.15
 
         self.social_event_frequency = 0.1
-        self.social_max_size = 10
+        self.social_guest_num = 10
+        self.social_max_duration = 5
         
         
 
@@ -41,9 +44,28 @@ class InterHousehold:
     
     def social_event(self):
         number = int(self.social_event_frequency * len(self.hh_list))
-        hh_social = np.random.choice(self.hh_list, size=number, replace=False)
-        for hh in hh_social:
-            hh.social = True
+
+        hh_social:list[Household] = np.random.choice(self.hh_list, size=number, replace=False)
+
+        for hh in hh_social: # iterate through the randomly selected households
+            if hh.is_social(): # is the household is already hosting social event, increase the social event day by 1
+                hh.social_days += 1
+                if hh.social_days == hh.social_max_duration: # is the host day reachees maximum, stop social
+                    hh.end_social()
+                    self.social_hh.discard(hh)
+            else: # is the household is not hosting social
+                if hh.population: # the household has its original population
+                    self.social_hh.add(hh)
+                    hh.start_social(duration=np.random.randint(1, self.social_max_duration + 1))
+                    guest = np.random.randint(1, self.social_guest_num + 1)
+                    guest:list[Person] = np.random.choice(self.people, size=guest, replace=False)
+
+
+
+
+
+        
+
             # randomly choose people from other households to gather
             guests_num = np.random.randint(1, high=self.social_max_size - len(hh.population), size=None, dtype='l')
             guests = np.random.choice(self.people, size=guests_num, replace=False)
