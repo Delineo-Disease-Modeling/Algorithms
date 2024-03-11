@@ -29,7 +29,6 @@ naics_pois = {
     '72': 'Accommodation and Food Services',
     '81': 'Other Services (except Public Administration)',
     '92': 'Public Administration' 
-    #add-on
 }
 
 age_categories = {
@@ -56,48 +55,29 @@ class Person:
         self.age = age
         self.cbg = cbg
         self.household = household
-        self.occupation = None
+
+        self.availablility = True
+        self.work_naics = None
+        self.work_time = (0, 0) #0 ~ 24
         self.set_occupation()
-        self.work_time = (0, 0)
-        self.naics_code = None
         self.set_work_time()
 
     def set_occupation(self):
         for category, (start_age, end_age) in age_categories.items():
             if start_age <= self.age <= end_age:
-                if category == "Preschool" or category == "Retired":
-                    self.occupation = category
-                    self.naics_code = None
-                elif category == "Adolescent":
-                    self.occupation = "Student"
-                    self.naics_code = '61'  
+                if category == "Adolescent":
+                    self.work_naics = naics_pois['61']  #student
                 elif category == "Adult":
-                    self.assign_naics_code_for_adults()
+                    if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
                 break
     
     def assign_naics_code_for_adults(self):
-        job_categories = list(naics_pois.keys())
-        selected_code = random.choice(job_categories)
-        self.naics_code = selected_code
-        self.occupation = naics_pois[selected_code]
+        self.work_naics = random.choice(list(naics_pois.values()))
 
     def set_work_time(self):
-        self.work_time = (9, 5)
-        
-'''
-class Occupation:
-    def __init__(self, work_location, work_time):
-        self.location = work_location
-        self.work_time = (0, 0)
-        self.set_time()
-
-    def set_time(self):
-        if self.location == Locations.School: self.work_time = (9, 4)
-        elif self.location == Locations.Service: self.work_time = (12, 8)
-        elif self.location == Locations.Office: self.work_time = (9, 5)
-        elif self.location == Locations.Industry: self.work_time = (7, 4)
-        #add-on
-'''
+        if self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']: #if medical or food service
+            if random.random() <= 15 / 100: self.work_time = (17, 24) #15% night shift
+        else: self.work_time = (9, 17)
 
 class Population:
 
@@ -158,7 +138,7 @@ if __name__=="__main__":
         '''
         married, opposite_sex, samesex, female_single, male_single, other = 0, 1, 2, 3, 4, 5
         
-        for i in range(int(households * pop_data['family_percents'][married] / 100)):
+        for i in range(int(households * pop_data["family_percents"][married] / 100)):
             result.append(create_married_hh(pop_data, cbg, count))
             count += 1
 

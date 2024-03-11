@@ -25,7 +25,7 @@ class Papdata:
         self.hh_info = hh_info
         self.place_path = place_path
         self.out_path = out_path
-        self.pap_dict = {"people":{}, "homes":{}, "places":{}}
+        self.pap_dict = {"people":{}, "homes":{}, "places":{}, "availability":{}, "work place":{}, "work start time":{}, "work end time":{}}
 
     def read_place(self) -> pd.DataFrame:
         """
@@ -48,7 +48,7 @@ class Papdata:
             home_id = home.population[0].hh_id
             self.pap_dict["homes"][home_id] = {"cbg":home.cbg, "members":len(home.population)}
             for person in home.population:
-                self.pap_dict["people"][person.id] = {"sex": person.sex, "age":person.age, "home":person.hh_id}
+                self.pap_dict["people"][person.id] = {"sex": person.sex, "age":person.age, "home":person.hh_id, "availability":person.availability, "work place":person.work_place_naics, "work start time":person.work_time[0], "work end time":person.work_time[1]}
         
 
         # add places
