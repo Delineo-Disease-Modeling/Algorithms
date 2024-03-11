@@ -59,11 +59,11 @@ class Person:
 
         self.availablility = True
         self.work_naics = None
-        self.work_time = (0, 0) #0 ~ 24
-        self.set_occupation()
-        self.set_work_time()
+        # self.work_time = (0, 0) #0 ~ 24
+        # self.set_occupation()
+        # self.set_work_time()
 
-        self.current_household = household # where is the person now
+        # self.current_household = household # where is the person now
 
     def set_occupation(self):
         for category, (start_age, end_age) in age_categories.items():
