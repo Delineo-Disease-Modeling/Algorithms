@@ -61,7 +61,9 @@ class Person:
         self.work_naics = None
         self.work_time = (0, 0) #0 ~ 24
         self.set_occupation()
+        print(f"Occupation set for Person {self.id}: {self.work_naics}")
         self.set_work_time()
+        print(f"Work time set for Person {self.id}: {self.work_time[0]}:00 - {self.work_time[1]}:00")
 
         # self.current_household = household # where is the person now
 
