@@ -55,12 +55,15 @@ class Person:
         self.age = age
         self.cbg = cbg
         self.household = household
+        self.hh_id = hh_id
 
         self.availablility = True
         self.work_naics = None
         self.work_time = (0, 0) #0 ~ 24
         self.set_occupation()
         self.set_work_time()
+
+        self.current_household = household # where is the person now
 
     def set_occupation(self):
         for category, (start_age, end_age) in age_categories.items():
@@ -78,6 +81,12 @@ class Person:
         if self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']: #if medical or food service
             if random.random() <= 15 / 100: self.work_time = (17, 24) #15% night shift
         else: self.work_time = (9, 17)
+
+    def __str__(self):
+        return f"Person {self.id}"
+    
+    def __repr__(self):
+        return self.__str__()
 
 class Population:
 
@@ -102,13 +111,17 @@ class Population:
 
 class Household(Population):
 
-    ''' 
+    '''
     Household class, inheriting Population since its a small population
     '''
     def __init__(self, cbg, total_count=0, population=[]):
         self.total_count = total_count
         self.population = population
         self.cbg = cbg
+        self.id = -1
+        self.guests = []
+        self.social_days = 0 # 0 means no social event currently
+        self.social_max_duration = 0
 
 
     def add_member(self, person):
@@ -117,6 +130,29 @@ class Household(Population):
         @param person = person to be added to household
         '''
         self.population.append(person)
+
+    def start_social(self, duration:int):
+        if (self.social_days != 0):
+            raise ValueError("Alreay hosting social")
+        elif (not self.population):
+            raise ValueError("No population to host social")
+        
+        self.social_days = 1
+        self.social_max_duration = duration
+    
+    def end_social(self):
+        self.social_days = 0
+        self.social_max_duration = 0
+    
+    def is_social(self) -> bool:
+        return self.social_days > 0
+
+
+    def __str__(self):
+        return f"Household {self.id} with {str(self.population)}"
+    
+    def __repr__(self):
+        return self.__str__()
         
 
     #TODO: Add more functions for leaving/coming back, etc if needed
