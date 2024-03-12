@@ -56,14 +56,12 @@ class Person:
         self.cbg = cbg
         self.household = household
         self.hh_id = hh_id
-
         self.availablility = True
         self.work_naics = None
         self.work_time = (0, 0) #0 ~ 24
         self.set_occupation()
-        print(f"Occupation set for Person {self.id}: {self.work_naics}")
         self.set_work_time()
-        print(f"Work time set for Person {self.id}: {self.work_time[0]}:00 - {self.work_time[1]}:00")
+        print(self)
 
         # self.current_household = household # where is the person now
 
@@ -80,8 +78,8 @@ class Person:
         self.work_naics = random.choice(list(naics_pois.values()))
 
     def set_work_time(self):
-        if self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']: #if medical or food service
-            if random.random() <= 15 / 100: self.work_time = (17, 24) #15% night shift
+        if (self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']) and random.random() <= 15 / 100: #if medical or food service && #15% night shift
+            self.work_time = (17, 24) 
         elif self.work_naics == naics_pois['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
             if random.random() <= 10 / 100:  # 10% night shift
                 self.work_time = (18, 2)  # Night shift
@@ -91,13 +89,17 @@ class Person:
             start_time = random.randint(6, 8)  #tends to start earlier in the day
             end_time = random.randint(14, 18)
             self.work_time = (start_time, end_time)
-        else: self.work_time = (9, 17)
+        elif self.work_naics != None: self.work_time = (9, 17)
 
     def __str__(self):
-        return f"Person {self.id}"
+        return f"Person {self.id}:  Occupation set to {self.work_naics}\n              Work time set to {self.work_time[0]}:00 - {self.work_time[1]}:00 \n"
     
     def __repr__(self):
         return self.__str__()
+    
+    #def write(self):
+        #with open('people_occupation_worktime.txt', 'w') as of:
+            #of.write(self)
 
 class Population:
 
