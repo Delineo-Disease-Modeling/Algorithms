@@ -394,6 +394,7 @@ def prepare_data_for_papdata(household_list):
                 population[str(person.id)] = {
                     "sex": person.sex,
                     "age": person.age,
+                    "home": hh_id,
                     "availability": person.availablility,  # Note the typo correction here
                     "work_naics": person.work_naics,
                     "work_time": person.work_time,
@@ -408,7 +409,7 @@ if __name__=="__main__":
 
     prepared_data = prepare_data_for_papdata(household_list)
 
-    place_path = 'c:/Users/mimsi/algorithms/Algorithms/SP24/hagerstown.pois.csv'
+    place_path = '../hagerstown.pois.csv'
     
     from papdata import Papdata
     papdata_processor = Papdata(prepared_data, place_path)
