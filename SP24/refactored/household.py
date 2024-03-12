@@ -8,6 +8,8 @@ from enum import Enum
     GLOBAL VARIABLES
 '''
 
+next_household_id = 0
+
 naics_pois = {
     '11': 'Agriculture, Forestry, Fishing and Hunting',
     '21': 'Mining, Quarrying, and Oil and Gas Extraction',
@@ -61,6 +63,7 @@ class Person:
         self.work_time = (0, 0) #0 ~ 24
         self.set_occupation()
         self.set_work_time()
+        print(f"Creating Person {id} with Household ID: {hh_id}")
         print(self)
 
         # self.current_household = household # where is the person now
@@ -127,11 +130,18 @@ class Household(Population):
     '''
     Household class, inheriting Population since its a small population
     '''
+    
+    global next_household_id
+
     def __init__(self, cbg, total_count=0, population=[]):
+        global next_household_id
+        super().__init__()
         self.total_count = total_count
         self.population = population
         self.cbg = cbg
-        self.id = -1
+        self.id = next_household_id  
+        print(f"Assigning Household ID: {self.id}")
+        next_household_id += 1  
         self.guests = []
         self.social_days = 0 # 0 means no social event currently
         self.social_max_duration = 0
@@ -378,6 +388,7 @@ def prepare_data_for_papdata(household_list):
     for household in household_list:
         for home in household:  # Because create_households returns a list of Household instances
             hh_id = str(home.id)
+            print(f"Preparing Household {hh_id} for Papdata")
             population = {}
             for person in home.population:
                 population[str(person.id)] = {
