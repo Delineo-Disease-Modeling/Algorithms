@@ -394,7 +394,7 @@ def prepare_data_for_papdata(household_list):
                 population[str(person.id)] = {
                     "sex": person.sex,
                     "age": person.age,
-                    "home": hh_id,
+                    "home": person.household.id,
                     "availability": person.availablility,  # Note the typo correction here
                     "work_naics": person.work_naics,
                     "work_time": person.work_time,
