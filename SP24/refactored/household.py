@@ -372,3 +372,35 @@ if __name__=="__main__":
 
     print("Successfully Created Households")
     
+
+def prepare_data_for_papdata(household_list):
+    hh_info = {}
+    for household in household_list:
+        for home in household:  # Because create_households returns a list of Household instances
+            hh_id = str(home.id)
+            population = {}
+            for person in home.population:
+                population[str(person.id)] = {
+                    "sex": person.sex,
+                    "age": person.age,
+                    "availability": person.availablility,  # Note the typo correction here
+                    "work_naics": person.work_naics,
+                    "work_time": person.work_time,
+                }
+            hh_info[hh_id] = {
+                "cbg": home.cbg,
+                "population": population
+            }
+    return hh_info
+
+if __name__=="__main__":
+
+    prepared_data = prepare_data_for_papdata(household_list)
+
+    place_path = 'c:/Users/mimsi/algorithms/Algorithms/SP24/hagerstown.pois.csv'
+    
+    from papdata import Papdata
+    papdata_processor = Papdata(prepared_data, place_path)
+    papdata_processor.generate()
+
+    print("Papdata JSON generation completed.")
