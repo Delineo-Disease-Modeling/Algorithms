@@ -3,7 +3,7 @@ import random
 import sys
 import json 
 import csv
-from household import Person, Household, poi_category
+from household import Person, Household, poi_category, age_category
 from inter_hh import InterHousehold
 
 category_weight = {
@@ -125,19 +125,29 @@ class Simulate:
 
         for hh in hhlist:
             for person in hh.population:
-                occupation = self.select_occupation(occupation_population)
+                occupation = self.select_occupation(person, category_dict, occupation_population)
                 if occupation is None: break
                 occupation_population[occupation] -= 1
-                person.set_occupation(person, occupation)
+                person.set_occupation(occupation)
                 print(person)
 
-    def select_occupation(self, person, occupation_population):
+    def select_occupation(self, person, category_dict, occupation_population):
         occupations = list(occupation_population.keys())
         # Choose from occupations that still have individuals to assign
         available_occupations = [occ for occ in occupations if occupation_population[occ] > 0]
 
+        for category, (start_age, end_age) in age_category.items():
+            if start_age <= person.age <= end_age:
+                if category == "Adolescent":
+                    available_occupations = [occ for occ in available_occupations if category_dict[occ] is 'Education']
+                elif category == "Adult":
+                    if random.random() <= 3.9 / 100: return None
+                break
+
         if available_occupations == []: return None
-        return random.choice(available_occupations)
+        occupation = random.choice(available_occupations)
+
+        return occupation
         
 
 
@@ -150,7 +160,7 @@ class Simulate:
             Releasing people from households TODO: categorize people
         '''
 
-        #role-based Movement
+        # Role-based Movement
         for hh in hh_dict.keys():
             cur_hh = hh_dict[hh]
             for person in cur_hh.population:
@@ -162,14 +172,14 @@ class Simulate:
                 if person.occupation is not None: poi_dict[person.occupation].add_person_to_work(person)
                 cur_hh.population.remove(person) 
 
-        # Interhouse Movements
+        # Interhouse Movement
         self.interhouse.next()
 
         '''
             Movement of people in each timestep
         '''
         
-        #after work
+        # POIs
         for poi in poi_dict.keys():
             cur_poi = poi_dict[poi]
             cur_poi.current_people.rotate(-1)
