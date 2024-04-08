@@ -1,22 +1,7 @@
 {
     "timestep_60": {
         "household_1": [],
-        "household_2": [
-            {
-                "id": 3,
-                "sex": 1,
-                "age": 28,
-                "cbg": "401139400082",
-                "hh_id": 2,
-                "availablility": true,
-                "occupation": "Barnsdall Es",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_2": [],
         "household_3": [],
         "household_4": [],
         "household_5": [],
@@ -1730,214 +1715,19 @@
     "timestep_120": {
         "household_1": [],
         "household_2": [],
-        "household_3": [
-            {
-                "id": 7,
-                "sex": 0,
-                "age": 67,
-                "cbg": "401139400082",
-                "hh_id": 3,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_4": [
-            {
-                "id": 9,
-                "sex": 0,
-                "age": 73,
-                "cbg": "401139400082",
-                "hh_id": 4,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_5": [
-            {
-                "id": 11,
-                "sex": 0,
-                "age": 35,
-                "cbg": "401139400082",
-                "hh_id": 5,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_6": [
-            {
-                "id": 14,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 6,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_7": [
-            {
-                "id": 16,
-                "sex": 0,
-                "age": 50,
-                "cbg": "401139400082",
-                "hh_id": 7,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_8": [
-            {
-                "id": 18,
-                "sex": 0,
-                "age": 45,
-                "cbg": "401139400082",
-                "hh_id": 8,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_9": [
-            {
-                "id": 20,
-                "sex": 0,
-                "age": 24,
-                "cbg": "401139400082",
-                "hh_id": 9,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_10": [
-            {
-                "id": 22,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 10,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_11": [
-            {
-                "id": 24,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 11,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_12": [
-            {
-                "id": 26,
-                "sex": 0,
-                "age": 27,
-                "cbg": "401139400082",
-                "hh_id": 12,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_13": [
-            {
-                "id": 28,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 13,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_14": [
-            {
-                "id": 30,
-                "sex": 0,
-                "age": 22,
-                "cbg": "401139400082",
-                "hh_id": 14,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_15": [
-            {
-                "id": 32,
-                "sex": 0,
-                "age": 58,
-                "cbg": "401139400082",
-                "hh_id": 15,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_3": [],
+        "household_4": [],
+        "household_5": [],
+        "household_6": [],
+        "household_7": [],
+        "household_8": [],
+        "household_9": [],
+        "household_10": [],
+        "household_11": [],
+        "household_12": [],
+        "household_13": [],
+        "household_14": [],
+        "household_15": [],
         "household_16": [],
         "household_17": [],
         "household_18": [],
@@ -3637,22 +3427,7 @@
     },
     "timestep_180": {
         "household_1": [],
-        "household_2": [
-            {
-                "id": 5,
-                "sex": 1,
-                "age": 7,
-                "cbg": "401139400082",
-                "hh_id": 2,
-                "availablility": true,
-                "occupation": "Barnsdall Jhs",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_2": [],
         "household_3": [],
         "household_4": [],
         "household_5": [],
@@ -5367,198 +5142,18 @@
         "household_1": [],
         "household_2": [],
         "household_3": [],
-        "household_4": [
-            {
-                "id": 9,
-                "sex": 0,
-                "age": 73,
-                "cbg": "401139400082",
-                "hh_id": 4,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_5": [
-            {
-                "id": 11,
-                "sex": 0,
-                "age": 35,
-                "cbg": "401139400082",
-                "hh_id": 5,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_6": [
-            {
-                "id": 14,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 6,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_7": [
-            {
-                "id": 16,
-                "sex": 0,
-                "age": 50,
-                "cbg": "401139400082",
-                "hh_id": 7,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_8": [
-            {
-                "id": 18,
-                "sex": 0,
-                "age": 45,
-                "cbg": "401139400082",
-                "hh_id": 8,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_9": [
-            {
-                "id": 20,
-                "sex": 0,
-                "age": 24,
-                "cbg": "401139400082",
-                "hh_id": 9,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_10": [
-            {
-                "id": 22,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 10,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_11": [
-            {
-                "id": 24,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 11,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_12": [
-            {
-                "id": 26,
-                "sex": 0,
-                "age": 27,
-                "cbg": "401139400082",
-                "hh_id": 12,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_13": [
-            {
-                "id": 28,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 13,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_14": [
-            {
-                "id": 30,
-                "sex": 0,
-                "age": 22,
-                "cbg": "401139400082",
-                "hh_id": 14,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_15": [
-            {
-                "id": 32,
-                "sex": 0,
-                "age": 58,
-                "cbg": "401139400082",
-                "hh_id": 15,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_4": [],
+        "household_5": [],
+        "household_6": [],
+        "household_7": [],
+        "household_8": [],
+        "household_9": [],
+        "household_10": [],
+        "household_11": [],
+        "household_12": [],
+        "household_13": [],
+        "household_14": [],
+        "household_15": [],
         "household_16": [],
         "household_17": [],
         "household_18": [],
@@ -7257,22 +6852,7 @@
         "household_1711": []
     },
     "timestep_300": {
-        "household_1": [
-            {
-                "id": 1,
-                "sex": 1,
-                "age": 74,
-                "cbg": "401139400082",
-                "hh_id": 1,
-                "availablility": false,
-                "occupation": "Barnsdall Hs",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_1": [],
         "household_2": [],
         "household_3": [],
         "household_4": [],
@@ -8988,198 +8568,18 @@
         "household_1": [],
         "household_2": [],
         "household_3": [],
-        "household_4": [
-            {
-                "id": 9,
-                "sex": 0,
-                "age": 73,
-                "cbg": "401139400082",
-                "hh_id": 4,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_5": [
-            {
-                "id": 11,
-                "sex": 0,
-                "age": 35,
-                "cbg": "401139400082",
-                "hh_id": 5,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_6": [
-            {
-                "id": 14,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 6,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_7": [
-            {
-                "id": 16,
-                "sex": 0,
-                "age": 50,
-                "cbg": "401139400082",
-                "hh_id": 7,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_8": [
-            {
-                "id": 18,
-                "sex": 0,
-                "age": 45,
-                "cbg": "401139400082",
-                "hh_id": 8,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_9": [
-            {
-                "id": 20,
-                "sex": 0,
-                "age": 24,
-                "cbg": "401139400082",
-                "hh_id": 9,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_10": [
-            {
-                "id": 22,
-                "sex": 0,
-                "age": 59,
-                "cbg": "401139400082",
-                "hh_id": 10,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_11": [
-            {
-                "id": 24,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 11,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_12": [
-            {
-                "id": 26,
-                "sex": 0,
-                "age": 27,
-                "cbg": "401139400082",
-                "hh_id": 12,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_13": [
-            {
-                "id": 28,
-                "sex": 0,
-                "age": 63,
-                "cbg": "401139400082",
-                "hh_id": 13,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_14": [
-            {
-                "id": 30,
-                "sex": 0,
-                "age": 22,
-                "cbg": "401139400082",
-                "hh_id": 14,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_15": [
-            {
-                "id": 32,
-                "sex": 0,
-                "age": 58,
-                "cbg": "401139400082",
-                "hh_id": 15,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_4": [],
+        "household_5": [],
+        "household_6": [],
+        "household_7": [],
+        "household_8": [],
+        "household_9": [],
+        "household_10": [],
+        "household_11": [],
+        "household_12": [],
+        "household_13": [],
+        "household_14": [],
+        "household_15": [],
         "household_16": [],
         "household_17": [],
         "household_18": [],
@@ -10879,22 +10279,7 @@
     },
     "timestep_420": {
         "household_1": [],
-        "household_2": [
-            {
-                "id": 4,
-                "sex": 1,
-                "age": 13,
-                "cbg": "401139400082",
-                "hh_id": 2,
-                "availablility": true,
-                "occupation": "Kelley Insurance Agency",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
+        "household_2": [],
         "household_3": [],
         "household_4": [],
         "household_5": [],
@@ -12606,23 +11991,174 @@
         "household_1711": []
     },
     "timestep_480": {
-        "household_1": [],
-        "household_2": [],
-        "household_3": [],
+        "household_1": [
+            {
+                "id": 0,
+                "sex": 0,
+                "age": 66,
+                "cbg": "401139400082",
+                "hh_id": 1,
+                "occupation": "Barnsdall Main Street Oil Well",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 1
+                }
+            }
+        ],
+        "household_2": [
+            {
+                "id": 6,
+                "sex": 1,
+                "age": 16,
+                "cbg": "401139400082",
+                "hh_id": 2,
+                "occupation": "Barnsdall Es",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 4
+                }
+            },
+            {
+                "id": 6,
+                "sex": 1,
+                "age": 16,
+                "cbg": "401139400082",
+                "hh_id": 2,
+                "occupation": "Barnsdall Es",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 4
+                }
+            },
+            {
+                "id": 2,
+                "sex": 0,
+                "age": 33,
+                "cbg": "401139400082",
+                "hh_id": 2,
+                "occupation": "Uptown Pizza",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 4
+                }
+            },
+            {
+                "id": 2,
+                "sex": 0,
+                "age": 33,
+                "cbg": "401139400082",
+                "hh_id": 2,
+                "occupation": "Uptown Pizza",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 4
+                }
+            }
+        ],
+        "household_3": [
+            {
+                "id": 8,
+                "sex": 1,
+                "age": 74,
+                "cbg": "401139400082",
+                "hh_id": 3,
+                "occupation": "Barnsdall Police Department Barnsdall Oklahoma",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 7,
+                "sex": 0,
+                "age": 67,
+                "cbg": "401139400082",
+                "hh_id": 3,
+                "occupation": "Osage Nation Head Start Barnsdall",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
         "household_4": [
+            {
+                "id": 10,
+                "sex": 1,
+                "age": 65,
+                "cbg": "401139400082",
+                "hh_id": 4,
+                "occupation": "Barnsdall Hs",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
             {
                 "id": 9,
                 "sex": 0,
                 "age": 73,
                 "cbg": "401139400082",
                 "hh_id": 4,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "United States Postal Service (USPS)",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
         "household_5": [
@@ -12632,13 +12168,17 @@
                 "age": 35,
                 "cbg": "401139400082",
                 "hh_id": 5,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "Barnsdall Jhs",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 1
+                }
             }
         ],
         "household_6": [
@@ -12648,13 +12188,35 @@
                 "age": 59,
                 "cbg": "401139400082",
                 "hh_id": 6,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "Ascension Health",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 14,
+                "sex": 0,
+                "age": 59,
+                "cbg": "401139400082",
+                "hh_id": 6,
+                "occupation": "Ascension Health",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
         "household_7": [
@@ -12664,31 +12226,38 @@
                 "age": 50,
                 "cbg": "401139400082",
                 "hh_id": 7,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "Siggins Memorial Clinic",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
-            }
-        ],
-        "household_8": [
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
             {
-                "id": 18,
+                "id": 16,
                 "sex": 0,
-                "age": 45,
+                "age": 50,
                 "cbg": "401139400082",
-                "hh_id": 8,
-                "availablility": false,
-                "occupation": "Tone Ur Hyde",
+                "hh_id": 7,
+                "occupation": "Siggins Memorial Clinic",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
+        "household_8": [],
         "household_9": [
             {
                 "id": 20,
@@ -12696,13 +12265,35 @@
                 "age": 24,
                 "cbg": "401139400082",
                 "hh_id": 9,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "United States Postal Service (USPS)",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 20,
+                "sex": 0,
+                "age": 24,
+                "cbg": "401139400082",
+                "hh_id": 9,
+                "occupation": "United States Postal Service (USPS)",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
         "household_10": [
@@ -12712,31 +12303,38 @@
                 "age": 59,
                 "cbg": "401139400082",
                 "hh_id": 10,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
                 "availablility": false,
-                "occupation": "Tone Ur Hyde",
-                "occupation_id": 0,
-                "work_time": [
-                    9,
-                    17
-                ]
-            }
-        ],
-        "household_11": [
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
             {
-                "id": 24,
+                "id": 22,
                 "sex": 0,
-                "age": 63,
+                "age": 59,
                 "cbg": "401139400082",
-                "hh_id": 11,
-                "availablility": true,
+                "hh_id": 10,
                 "occupation": "Tone Ur Hyde",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
+        "household_11": [],
         "household_12": [
             {
                 "id": 26,
@@ -12744,13 +12342,35 @@
                 "age": 27,
                 "cbg": "401139400082",
                 "hh_id": 12,
-                "availablility": true,
                 "occupation": "Tone Ur Hyde",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 26,
+                "sex": 0,
+                "age": 27,
+                "cbg": "401139400082",
+                "hh_id": 12,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
         "household_13": [
@@ -12760,13 +12380,35 @@
                 "age": 63,
                 "cbg": "401139400082",
                 "hh_id": 13,
-                "availablility": false,
                 "occupation": "Tone Ur Hyde",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 28,
+                "sex": 0,
+                "age": 63,
+                "cbg": "401139400082",
+                "hh_id": 13,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
         "household_14": [
@@ -12776,13 +12418,17 @@
                 "age": 22,
                 "cbg": "401139400082",
                 "hh_id": 14,
-                "availablility": true,
-                "occupation": "Tone Ur Hyde",
+                "occupation": "Barnsdall Nursing Home",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 1
+                }
             }
         ],
         "household_15": [
@@ -12792,43 +12438,954 @@
                 "age": 58,
                 "cbg": "401139400082",
                 "hh_id": 15,
-                "availablility": false,
                 "occupation": "Tone Ur Hyde",
                 "occupation_id": 0,
                 "work_time": [
                     9,
                     17
-                ]
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 32,
+                "sex": 0,
+                "age": 58,
+                "cbg": "401139400082",
+                "hh_id": 15,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
             }
         ],
-        "household_16": [],
-        "household_17": [],
-        "household_18": [],
-        "household_19": [],
-        "household_20": [],
-        "household_21": [],
-        "household_22": [],
-        "household_23": [],
-        "household_24": [],
-        "household_25": [],
-        "household_26": [],
-        "household_27": [],
-        "household_28": [],
-        "household_29": [],
+        "household_16": [
+            {
+                "id": 34,
+                "sex": 0,
+                "age": 63,
+                "cbg": "401139400082",
+                "hh_id": 16,
+                "occupation": "Barnsdall Main Street Oil Well",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 1
+                }
+            }
+        ],
+        "household_17": [
+            {
+                "id": 36,
+                "sex": 0,
+                "age": 36,
+                "cbg": "401139400082",
+                "hh_id": 17,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 36,
+                "sex": 0,
+                "age": 36,
+                "cbg": "401139400082",
+                "hh_id": 17,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_18": [
+            {
+                "id": 38,
+                "sex": 0,
+                "age": 46,
+                "cbg": "401139400082",
+                "hh_id": 18,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 38,
+                "sex": 0,
+                "age": 46,
+                "cbg": "401139400082",
+                "hh_id": 18,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_19": [
+            {
+                "id": 40,
+                "sex": 0,
+                "age": 21,
+                "cbg": "401139400082",
+                "hh_id": 19,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 40,
+                "sex": 0,
+                "age": 21,
+                "cbg": "401139400082",
+                "hh_id": 19,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_20": [
+            {
+                "id": 42,
+                "sex": 0,
+                "age": 54,
+                "cbg": "401139400082",
+                "hh_id": 20,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 42,
+                "sex": 0,
+                "age": 54,
+                "cbg": "401139400082",
+                "hh_id": 20,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_21": [
+            {
+                "id": 44,
+                "sex": 0,
+                "age": 33,
+                "cbg": "401139400082",
+                "hh_id": 21,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 44,
+                "sex": 0,
+                "age": 33,
+                "cbg": "401139400082",
+                "hh_id": 21,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_22": [
+            {
+                "id": 46,
+                "sex": 0,
+                "age": 42,
+                "cbg": "401139400082",
+                "hh_id": 22,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 46,
+                "sex": 0,
+                "age": 42,
+                "cbg": "401139400082",
+                "hh_id": 22,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_23": [
+            {
+                "id": 48,
+                "sex": 0,
+                "age": 30,
+                "cbg": "401139400082",
+                "hh_id": 23,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 48,
+                "sex": 0,
+                "age": 30,
+                "cbg": "401139400082",
+                "hh_id": 23,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_24": [
+            {
+                "id": 50,
+                "sex": 0,
+                "age": 49,
+                "cbg": "401139400082",
+                "hh_id": 24,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 50,
+                "sex": 0,
+                "age": 49,
+                "cbg": "401139400082",
+                "hh_id": 24,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_25": [
+            {
+                "id": 52,
+                "sex": 0,
+                "age": 43,
+                "cbg": "401139400082",
+                "hh_id": 25,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 52,
+                "sex": 0,
+                "age": 43,
+                "cbg": "401139400082",
+                "hh_id": 25,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_26": [
+            {
+                "id": 57,
+                "sex": 0,
+                "age": 23,
+                "cbg": "401139400082",
+                "hh_id": 26,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 1
+                }
+            }
+        ],
+        "household_27": [
+            {
+                "id": 60,
+                "sex": 1,
+                "age": 45,
+                "cbg": "401139400082",
+                "hh_id": 27,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 59,
+                "sex": 0,
+                "age": 45,
+                "cbg": "401139400082",
+                "hh_id": 27,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_28": [
+            {
+                "id": 62,
+                "sex": 1,
+                "age": 55,
+                "cbg": "401139400082",
+                "hh_id": 28,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 61,
+                "sex": 0,
+                "age": 55,
+                "cbg": "401139400082",
+                "hh_id": 28,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_29": [
+            {
+                "id": 64,
+                "sex": 1,
+                "age": 42,
+                "cbg": "401139400082",
+                "hh_id": 29,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 63,
+                "sex": 0,
+                "age": 39,
+                "cbg": "401139400082",
+                "hh_id": 29,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
         "household_30": [],
-        "household_31": [],
-        "household_32": [],
+        "household_31": [
+            {
+                "id": 68,
+                "sex": 0,
+                "age": 39,
+                "cbg": "401139400082",
+                "hh_id": 31,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 68,
+                "sex": 0,
+                "age": 39,
+                "cbg": "401139400082",
+                "hh_id": 31,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_32": [
+            {
+                "id": 70,
+                "sex": 0,
+                "age": 56,
+                "cbg": "401139400082",
+                "hh_id": 32,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 70,
+                "sex": 0,
+                "age": 56,
+                "cbg": "401139400082",
+                "hh_id": 32,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
         "household_33": [],
-        "household_34": [],
-        "household_35": [],
-        "household_36": [],
-        "household_37": [],
-        "household_38": [],
-        "household_39": [],
+        "household_34": [
+            {
+                "id": 74,
+                "sex": 0,
+                "age": 36,
+                "cbg": "401139400082",
+                "hh_id": 34,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 74,
+                "sex": 0,
+                "age": 36,
+                "cbg": "401139400082",
+                "hh_id": 34,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_35": [
+            {
+                "id": 76,
+                "sex": 0,
+                "age": 34,
+                "cbg": "401139400082",
+                "hh_id": 35,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 76,
+                "sex": 0,
+                "age": 34,
+                "cbg": "401139400082",
+                "hh_id": 35,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_36": [
+            {
+                "id": 78,
+                "sex": 0,
+                "age": 68,
+                "cbg": "401139400082",
+                "hh_id": 36,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 78,
+                "sex": 0,
+                "age": 68,
+                "cbg": "401139400082",
+                "hh_id": 36,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_37": [
+            {
+                "id": 80,
+                "sex": 0,
+                "age": 65,
+                "cbg": "401139400082",
+                "hh_id": 37,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 80,
+                "sex": 0,
+                "age": 65,
+                "cbg": "401139400082",
+                "hh_id": 37,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_38": [
+            {
+                "id": 82,
+                "sex": 0,
+                "age": 39,
+                "cbg": "401139400082",
+                "hh_id": 38,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 82,
+                "sex": 0,
+                "age": 39,
+                "cbg": "401139400082",
+                "hh_id": 38,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_39": [
+            {
+                "id": 84,
+                "sex": 0,
+                "age": 28,
+                "cbg": "401139400082",
+                "hh_id": 39,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 84,
+                "sex": 0,
+                "age": 28,
+                "cbg": "401139400082",
+                "hh_id": 39,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
         "household_40": [],
-        "household_41": [],
-        "household_42": [],
-        "household_43": [],
+        "household_41": [
+            {
+                "id": 88,
+                "sex": 0,
+                "age": 72,
+                "cbg": "401139400082",
+                "hh_id": 41,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 88,
+                "sex": 0,
+                "age": 72,
+                "cbg": "401139400082",
+                "hh_id": 41,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_42": [
+            {
+                "id": 90,
+                "sex": 0,
+                "age": 65,
+                "cbg": "401139400082",
+                "hh_id": 42,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 90,
+                "sex": 0,
+                "age": 65,
+                "cbg": "401139400082",
+                "hh_id": 42,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": true,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
+        "household_43": [
+            {
+                "id": 92,
+                "sex": 0,
+                "age": 48,
+                "cbg": "401139400082",
+                "hh_id": 43,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            },
+            {
+                "id": 92,
+                "sex": 0,
+                "age": 48,
+                "cbg": "401139400082",
+                "hh_id": 43,
+                "occupation": "Tone Ur Hyde",
+                "occupation_id": 0,
+                "work_time": [
+                    9,
+                    17
+                ],
+                "availablility": false,
+                "location": {
+                    "cbg": "401139400082",
+                    "members": 2
+                }
+            }
+        ],
         "household_44": [],
         "household_45": [],
         "household_46": [],

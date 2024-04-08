@@ -49,8 +49,13 @@ class POI():
         person.availablility = False
 
     def add_person_to_work(self,person):
-        total_worktime = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) - person.work_time[0]
-        self.current_people[total_worktime - 1].append(person)
+        total_worktime = ((person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) - person.work_time[0])*60
+
+        if total_worktime > len(self.current_people):
+            self.current_people.append(deque())
+        else:
+            self.current_people[total_worktime - 1].append(person)
+            
         person.availablility = False
 
     def send_person(self, person, poi_dict):

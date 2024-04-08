@@ -158,7 +158,7 @@ class Household(Population):
         self.population = population
         self.cbg = cbg
         self.id = id  
-        print(f"Assigning Household ID: {self.id}")
+        #print(f"Assigning Household ID: {self.id}")
         next_household_id += 1  
         self.guests = []
         self.social_days = 0 # 0 means no social event currently
