@@ -3,7 +3,7 @@ import random
 import sys
 import json 
 import csv
-from household import Person, Household
+from household import Person, Household, poi_category
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
@@ -15,16 +15,16 @@ category_weight = {
     'Retail Trade': 20,
     'Transportation and Warehousing': 20,
     'Information': 30,
-    'Finance and Insurance': 20,
+    'Depository Credit Intermediation': 20,
     'Real Estate and Rental and Leasing': 20,
     'Professional, Scientific, and Technical Services': 20,
     'Management of Companies and Enterprises': 10,
     'Administrative and Support and Waste Management and Remediation Services': 10,
-    'Educational Services': 3000,
-    'Health Care and Social Assistance': 25,
+    'Education': 30,
+    'Medical': 25,
     'Arts, Entertainment, and Recreation': 10,
-    'Accommodation and Food Services': 15,
-    'Other Services (except Public Administration)': 20,
+    'Restaurants and Other Eating Places': 15,
+    'Others': 20,
     'Public Administration': 20
 }
 
@@ -74,47 +74,69 @@ class Simulate:
     '''
         Role Based Movement Pattern
     '''
-    def create_category_dictionary(self):
+    def analyze_category(self):
         category_dict = {}
         with open(self.category_info, newline='') as file:
             reader = csv.DictReader(file)
             for row in reader:
-                location_name = row['location_name']
-                top_category = row['top_category']
-                category_dict[location_name] = top_category
-        return category_dict
+                id = row['placekey']
+                name = row['location_name']
+                naics = row['naics_code']
+                if naics is '': continue
+                category = poi_category[naics[:2]]
 
-    def distribute_occupation(self, poi_dict, category_dict):
+                #match category to location
+                category_dict[name] = category
+
+        return category_dict
+    
+    def distribute_occupation(self, hh_dict, poi_dict, category_dict):
+        #count each category occurance
         category_count = {}
-        for poi_name in poi_dict.keys():
-            category = category_dict[poi_name]
+        occupation_count = {}
+        for poi in poi_dict:
+            category = category_dict[poi]
+
+            if poi in occupation_count:
+                occupation_count[poi] += 1
+            else:
+                occupation_count[poi] = 1
+
             if category in category_count:
                 category_count[category] += 1
             else:
                 category_count[category] = 1
 
-        total_population = sum(len(household.population) for household in self.hh_dict.keys())
-        total_count = sum(self.category_count.values())
-        total_weight = sum(self.category_weights.values())
+        #calculate the number of individuals to assign to each occupation category
+        total_population = sum(len(household.population) for household in hh_dict.keys())
+        total_count = sum(occupation_count.values())
+        total_weight = sum(category_weight.values())
 
-        # Calculate the number of individuals to assign to each occupation category
-        occupation_counts = {}
-        for category, count in self.category_count.items():
-            weight = self.category_weights[category]
-            occupation_counts[category] = int(count / total_count * total_population * weight / total_weight)
+        occupation_population = {}
+        for poi in poi_dict:
+            category = category_dict[poi]
+            weight = category_weight[category]
+            count = occupation_count[poi]
+            occupation_population[poi] = int((count / total_count) * (weight / total_weight) / (count) / (category_count[category]) * total_population)
 
-        for hh in self.hh_dict.keys():
+        hhlist = hh_dict.keys()
+
+        for hh in hhlist:
             for person in hh.population:
-                occupation = self.select_occupation(occupation_counts)
-                person.set_occupation(occupation)
-                occupation_counts[occupation] -= 1
+                occupation = self.select_occupation(occupation_population)
+                if occupation is None: break
+                occupation_population[occupation] -= 1
+                person.set_occupation(person, occupation)
+                print(person)
 
-    def select_occupation(self, occupation_counts):
-        occupations = list(occupation_counts.keys())
+    def select_occupation(self, person, occupation_population):
+        occupations = list(occupation_population.keys())
         # Choose from occupations that still have individuals to assign
-        available_occupations = [occ for occ in occupations if occupation_counts[occ] > 0]
+        available_occupations = [occ for occ in occupations if occupation_population[occ] > 0]
+
+        if available_occupations == []: return None
         return random.choice(available_occupations)
-    
+        
 
 
     def timestep(self, poi_dict, hh_dict, popularity_matrix):
@@ -125,6 +147,8 @@ class Simulate:
         '''
             Releasing people from households TODO: categorize people
         '''
+
+        #role-based Movement
         for hh in hh_dict.keys():
             cur_hh = hh_dict[hh]
             for person in cur_hh.population:
@@ -132,13 +156,15 @@ class Simulate:
                 # if random.choices([True, False], [1, 10])[0]:
                 #     target_poi = random.choices(
                 #         popularity_matrix[0], popularity_matrix[1])[0]
-                poi_dict[person.occupation].add_person_to_work(person)
+
+                if person.occupation is not None: poi_dict[person.occupation].add_person_to_work(person)
                 cur_hh.population.remove(person) 
 
 
         '''
             Movement of people in each timestep
         '''
+        #after work
         for poi in poi_dict.keys():
             cur_poi = poi_dict[poi]
             cur_poi.current_people.rotate(-1)
@@ -166,8 +192,8 @@ class Simulate:
         poi_dict = self.get_city_info()
         hh_dict = self.get_hh_info()
         
-        category_dict = self.create_category_dictionary()
-        self.distribute_occupation(poi_dict, category_dict)
+        category_dict = self.analyze_category()
+        self.distribute_occupation(hh_dict, poi_dict, category_dict)
 
         # print(hh_dict)
         # for key, value in hh_dict.items():

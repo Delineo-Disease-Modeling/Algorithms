@@ -38,7 +38,7 @@ if __name__ == "__main__":
     with open('input/barnsdall.yaml', mode="r", encoding='utf-8') as citystream:
         city_info = yaml.safe_load(citystream)
 
-    category_info = '../hagerstown.pois.csv'
+    category_info = 'input/barnsdall.pois.csv'
 
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Person', person_constructor)
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Household', household_constructor)
