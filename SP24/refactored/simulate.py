@@ -71,6 +71,9 @@ class Simulate:
 
         return [name, weights]
     
+    '''
+        Role Based Movement Pattern
+    '''
     def create_category_dictionary(self):
         category_dict = {}
         with open(self.category_info, newline='') as file:
@@ -101,8 +104,7 @@ class Simulate:
             occupation_counts[category] = int(count / total_count * total_population * weight / total_weight)
 
         for hh in self.hh_dict.keys():
-            cur_hh = self.hh_dict[hh]
-            for person in cur_hh.population:
+            for person in hh.population:
                 occupation = self.select_occupation(occupation_counts)
                 person.set_occupation(occupation)
                 occupation_counts[occupation] -= 1
@@ -112,6 +114,8 @@ class Simulate:
         # Choose from occupations that still have individuals to assign
         available_occupations = [occ for occ in occupations if occupation_counts[occ] > 0]
         return random.choice(available_occupations)
+    
+
 
     def timestep(self, poi_dict, hh_dict, popularity_matrix):
         '''
@@ -123,14 +127,14 @@ class Simulate:
         '''
         for hh in hh_dict.keys():
             cur_hh = hh_dict[hh]
-            
             for person in cur_hh.population:
                 # TODO 집에서 나갈 확률
-                if random.choices([True, False], [1, 10])[0]:
-                    target_poi = random.choices(
-                        popularity_matrix[0], popularity_matrix[1])[0]
-                    poi_dict[target_poi].add_person(person)
-                    cur_hh.population.remove(person)
+                # if random.choices([True, False], [1, 10])[0]:
+                #     target_poi = random.choices(
+                #         popularity_matrix[0], popularity_matrix[1])[0]
+                poi_dict[person.occupation].add_person_to_work(person)
+                cur_hh.population.remove(person) 
+
 
         '''
             Movement of people in each timestep
