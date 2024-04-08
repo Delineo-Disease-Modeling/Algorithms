@@ -81,9 +81,9 @@ class Simulate:
                 category_dict[location_name] = top_category
         return category_dict
 
-    def distribute_occupation(self, category_dict):
+    def distribute_occupation(self, poi_dict, category_dict):
         category_count = {}
-        for poi_name in self.poi_dict.keys():
+        for poi_name in poi_dict.keys():
             category = category_dict[poi_name]
             if category in category_count:
                 category_count[category] += 1
@@ -163,7 +163,7 @@ class Simulate:
         hh_dict = self.get_hh_info()
         
         category_dict = self.create_category_dictionary()
-        self.distribute_occupation(category_dict)
+        self.distribute_occupation(poi_dict, category_dict)
 
         # print(hh_dict)
         # for key, value in hh_dict.items():

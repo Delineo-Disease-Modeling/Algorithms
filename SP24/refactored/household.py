@@ -137,18 +137,18 @@ class Household(Population):
     
     global next_household_id
 
-    def __init__(self, cbg, total_count=0, population=[]):
+    def __init__(self, cbg, total_count=0, population=[], guests=[], id=next_household_id, social_days=0, social_max_duration=0):
         global next_household_id
         super().__init__()
         self.total_count = total_count
         self.population = population
         self.cbg = cbg
-        self.id = next_household_id  
+        self.id = id  
         print(f"Assigning Household ID: {self.id}")
         next_household_id += 1  
-        self.guests = []
-        self.social_days = 0 # 0 means no social event currently
-        self.social_max_duration = 0
+        self.guests = guests
+        self.social_days = social_days # 0 means no social event currently
+        self.social_max_duration = social_max_duration
 
 
     def add_member(self, person):
