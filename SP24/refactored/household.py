@@ -60,16 +60,24 @@ class Person:
         self.sex = sex 
         self.age = age
         self.cbg = cbg
-        self.household = household
+        self.household:Household = household
         self.hh_id = hh_id
-        self.availablility = True
         self.occupation = None
         self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
         #self.set_occupation()
         #self.set_work_time()
 
-        # self.current_household = household # where is the person now
+        self.location:Household = household # where is the person now
+
+    def set_occupation(self):
+        for category, (start_age, end_age) in age_categories.items():
+            if start_age <= self.age <= end_age:
+                if category == "Adolescent":
+                    self.occupation = naics_pois['61']  #student
+                elif category == "Adult":
+                    if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
+                break
     
     def set_occupation(self, occupation):
         self.occupation = occupation
@@ -89,20 +97,33 @@ class Person:
             self.work_time = (start_time, end_time)
         elif self.occupation != None: self.work_time = (9, 17)
 
-    # def set_occupation(self):
-    #     for category, (start_age, end_age) in age_categories.items():
-    #         if start_age <= self.age <= end_age:
-    #             if category == "Adolescent":
-    #                 self.occupation = naics_pois['61']  #student
-    #             elif category == "Adult":
-    #                 if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
-    #             break
-    
-    # def assign_naics_code_for_adults(self):
-    #     self.occupation = random.choice(list(naics_pois.values()))
+    # assign the person to the designated household
+    def assign_household(self, hh):
+        if self.location.id != hh.id: # check if the person is already in designated household
+            
+            # remove the person from the current location
+            if self in self.location.population:
+                self.location.population.remove(self)
+            if self in self.location.guests:
+                self.location.guests.remove(self)
+
+            # add the person to the designated location
+            if hh.id == self.household.id:
+                hh.population.append(self)
+            else:
+                hh.guests.append(self)
+            
+            self.location = hh
+
+    def to_dict(self):
+        return {
+            'sex': self.sex,
+            'age': self.age,
+            'home': self.household.id,
+        }
 
     def __str__(self):
-        return f"Person {self.id}:  Occupation set to {self.occupation}\n              Work time set to {self.work_time[0]}:00 - {self.work_time[1]}:00 \n"
+        return f"Person {self.id}"
     
     def __repr__(self):
         return self.__str__()
@@ -173,13 +194,25 @@ class Household(Population):
     def end_social(self):
         self.social_days = 0
         self.social_max_duration = 0
+        
+        
+        for person in self.guests:
+            person.assign_household(person.household)
+        
+        self.guests = []
     
     def is_social(self) -> bool:
         return self.social_days > 0
 
 
+    def to_dict(self):
+        return {
+            'cbg': self.cbg,
+            'members': len(self.population) + len(self.guests)
+        }
+
     def __str__(self):
-        return f"Household {self.id} with {str(self.population)}"
+        return f"Household {self.id} with people {str(self.population)} and guests {str(self.guests)}"
     
     def __repr__(self):
         return self.__str__()

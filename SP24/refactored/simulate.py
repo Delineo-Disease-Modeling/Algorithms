@@ -4,6 +4,7 @@ import sys
 import json 
 import csv
 from household import Person, Household, poi_category
+from inter_hh import InterHousehold
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
@@ -35,6 +36,7 @@ class Simulate:
         self.city_info = city_info
         self.hh_info = hh_info
         self.category_info = category_info
+        self.interhouse = InterHousehold(hh_info)
 
     def get_city_info(self):
 
@@ -160,10 +162,13 @@ class Simulate:
                 if person.occupation is not None: poi_dict[person.occupation].add_person_to_work(person)
                 cur_hh.population.remove(person) 
 
+        # Interhouse Movements
+        self.interhouse.next()
 
         '''
             Movement of people in each timestep
         '''
+        
         #after work
         for poi in poi_dict.keys():
             cur_poi = poi_dict[poi]
@@ -297,9 +302,23 @@ class Simulate:
 
         self.write(hh_return_dict, poi_return_dict)
     
-    def write(self, hh_return_dict, poi_return_dict):
+    def write(self, hh_return_dict:dict, poi_return_dict:dict):
+        # Convert all custom objects to dictionaries using to_dict method
+        def convert_to_dict(obj):
+            if isinstance(obj, Person) or isinstance(obj, Household):
+                return obj.to_dict()
+            elif isinstance(obj, dict):
+                return {key: convert_to_dict(value) for key, value in obj.items()}
+            elif isinstance(obj, list):
+                return [convert_to_dict(element) for element in obj]
+            else:
+                return obj
+
+        hh_return_dict_converted = convert_to_dict(hh_return_dict)
+        poi_return_dict_converted = convert_to_dict(poi_return_dict)
+
         with open("output/result_hh.json", "w+", encoding='utf-8') as hhstream:
-            json.dump(hh_return_dict, hhstream, ensure_ascii=False, indent=4)
+            json.dump(hh_return_dict_converted, hhstream, ensure_ascii=False, indent=4)
 
         with open("output/result_poi.json", "w+", encoding='utf-8') as poistream:
-            json.dump(poi_return_dict, poistream, ensure_ascii=False, indent=4)
+            json.dump(poi_return_dict_converted, poistream, ensure_ascii=False, indent=4)

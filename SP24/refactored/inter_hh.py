@@ -7,24 +7,56 @@ import pandas
 class InterHousehold:
     def __init__(self, hh_list:list[Household]):
         self.hh_list = hh_list
-        self.people = []
+        self.people:list[Person] = []
         
         for hh in hh_list:
             self.people += hh.population
 
-        self.social_hh:set = {}
+        self.hh_by_cbg:dict = {}
+        self.p_by_cbg:dict = {}
+        for hh in hh_list:
+            cbg = hh.cbg
+            if self.hh_by_cbg.get(cbg) != None:
+                self.hh_by_cbg[cbg].append(hh)
+                self.p_by_cbg[cbg] += hh.population
+            else:
+                self.hh_by_cbg[cbg] = [hh]
+                self.p_by_cbg[cbg] = hh.population
+
+        self.social_hh:set[Household] = set()
+        self.movement_people:set[Person] = set()
         
 
 
         self.individual_movement_frequency = 0.2
-        self.school_children_frequency = 0.3
-        self.regular_visitation_frequency = 0.15
 
         self.social_event_frequency = 0.1
         self.social_guest_num = 10
-        self.social_max_duration = 5
+        self.social_max_duration = 3
+
+        self.school_children_frequency = 0.3
+        self.regular_visitation_frequency = 0.15
+
+        self.prefer_cbg = 0.8 # possobility that guests come from the same cbg
+
+
+    def select_guest(self, cbg=None, size:int=1) -> list[Person]:
+        if cbg:
+            guests:list[Person] = np.random.choice(self.p_by_cbg[cbg], size=size, replace=False)
+        else:
+            guests:list[Person] = np.random.choice(self.people, size=size, replace=False)
+        return guests
+
+
+    def select_hh(self, cbg=None, size:int=1) -> list[Household]:
+        if cbg:
+            hh:list[Household] = np.random.choice(self.hh_by_cbg[cbg], size=size, replace=False)
+        else:
+            hh:list[Household] = np.random.choice(self.hh_list, size=size, replace=False)
         
+        return hh
         
+    
 
     def random_boolean(self, probability_of_true):
         """
@@ -36,165 +68,81 @@ class InterHousehold:
         return np.random.random() < probability_of_true
 
 
-
     def next(self):
         self.individual_movement()
         self.social_event()
+        # self.children_movement()
 
     
-    def social_event(self):
-        number = int(self.social_event_frequency * len(self.hh_list))
+    def children_movement(self):
+        for hh in self.hh_list:
+            children = []
+            adults = []
+            for person in hh.population:
+                if person.age < 18:
+                    children.append(person)
+                else:
+                    adults.append(person)
 
-        hh_social:list[Household] = np.random.choice(self.hh_list, size=number, replace=False)
+            children_num = len(children) if len(children) < 3 else 3
+            adult_num = len(adults) if len(adults) < 2 else 2
+
+            if children_num > 0 and adult_num > 0 and self.random_boolean(self.school_children_frequency):
+                children = np.random.choice(children, size=children_num, replace=False)
+                adults = np.random.choice(adults, size=adult_num, replace=False)
+
+                hh:Household = np.random.choice(self.hh_list, replace=False)
+                for person in children + adults:
+                    pass
+
+                
+
+
+
+    def social_event(self):
+        # increase the houses already in social by 1 day
+        for hh in list(self.social_hh):
+            if hh.social_days >= hh.social_max_duration: # if the host day reachees maximum, stop social
+                hh.end_social()
+                self.social_hh.discard(hh)
+            hh.social_days += 1
+
+
+        number = int(self.social_event_frequency * len(self.hh_list)) # define a certain number of households that will host social events
+
+        hh_social:list[Household] = np.random.choice(self.hh_list, size=number, replace=False) # choose hosueholds
 
         for hh in hh_social: # iterate through the randomly selected households
-            if hh.is_social(): # is the household is already hosting social event, increase the social event day by 1
-                hh.social_days += 1
-                if hh.social_days == hh.social_max_duration: # is the host day reachees maximum, stop social
-                    hh.end_social()
-                    self.social_hh.discard(hh)
-            else: # is the household is not hosting social
+            if not hh.is_social(): # if the household is not hosting social
                 if hh.population: # the household has its original population
                     self.social_hh.add(hh)
                     hh.start_social(duration=np.random.randint(1, self.social_max_duration + 1))
-                    guest = np.random.randint(1, self.social_guest_num + 1)
-                    guest:list[Person] = np.random.choice(self.people, size=guest, replace=False)
-
-
-
-
-
-        
-
-            # randomly choose people from other households to gather
-            guests_num = np.random.randint(1, high=self.social_max_size - len(hh.population), size=None, dtype='l')
-            guests = np.random.choice(self.people, size=guests_num, replace=False)
-            for guest in guests:
-                if guest.current_household == guest.household:
-                    guest.current_household = hh
-                    guest.household.population.remove(guest)
-                    hh.population.append(guest)
-
-
+                    guest_num = np.random.randint(1, self.social_guest_num + 1)
+                    guest = self.select_guest(hh.cbg, size=guest_num) if self.random_boolean(self.prefer_cbg) else self.select_guest(size=guest_num)
+                    for person in guest:
+                        if person.hh_id != hh.id and person not in hh.guests: # if the person does not belong to the household member and is not a guest yet
+                            person.assign_household(hh)
 
 
     def individual_movement(self):
-        for person in self.people:
-            if person.current_household != person.household: # person not in its hosuehold, he is a guest
-                # put the person back to its original household
-                person.current_household.population.remove(person)
-                person.current_household = person.household
-                person.household.population.append(person)
+        for person in list(self.movement_people):
+            # put the person back to its original household
+            person.assign_household(person.household)
+            # remove person from movement list
+            self.movement_people.discard(person)
+
+        # Generate a random number between 0 and 1 for each person
+        # and select the persono if the number is less than or equal to individual_movement_frequency
+        selected_person = [person for person, rand in zip(self.people, np.random.rand(len(self.people))) if rand <= self.individual_movement_frequency]
+
+        for person in selected_person:
+            if person.location.social_days == 0: # if move and person is not in social
+                same_cbg = self.random_boolean(self.prefer_cbg)
+
+                hh = self.select_hh(person.cbg, size=1)[0] if same_cbg else self.select_hh(size=1)[0] # choose a random household in the same cbg
                 
-            else:
-                move = self.random_boolean(self.individual_movement_frequency)
-                if move:
-                    hh = np.random.choice(self.hh_list, replace=False)
-                    while (hh == person.current_household and len(self.hh_list) >= 2):
-                        hh = np.random.choice(self.hh_list, replace=False)
-                    
-                    person.current_household = hh
-                    hh.population.append(person)
-                    
-
-
-
-
-
-
-
-    
-
-        
-        
-
-
-
-    def generate_interhousehold_movements(
-            self,
-            availability_matrix,
-            household_info
-        ):
-        
-        num_timestamps = availability_matrix.shape[1]
-        num_persons = availability_matrix.shape[0]
-
-        result_array = np.zeros((num_persons, num_timestamps), dtype=int)
-
-        for timestamp in range(num_timestamps):
-            for person_id in range(num_persons):
-                # Check if the person is available at the given timestamp
-                if availability_matrix[person_id, timestamp] != 0:
-                    if person_id in household_info:
-                        household = household_info[person_id]
-                        cbg = household.cbg
-                        household_members = [p.id for p in household.population]
-            
-                        # Generate individual movement
-                        if np.random.rand() < self.individual_movement_frequency:
-                            result_array[person_id, timestamp] = 1
-
-                        # Generate social event visit
-                        if np.random.rand() < self.social_event_frequency:
-                            other_household_members = [
-                                p for h in household_info if h.cbg != cbg for p in h.population
-                            ]
-                            selected_person = np.random.choice(other_household_members)
-                            result_array[selected_person.id, timestamp] = 1
-
-                        # Generate regular visitation
-                        if np.random.rand() < self.regular_visitation_frequency:
-                            selected_person = np.random.choice(household_members)
-                            result_array[selected_person, timestamp] = 1
-
-                        # Generate school children movement
-                        if np.random.rand() < self.school_children_frequency and any(p.age < 19 for p in household.population):
-                            result_array[person_id, timestamp] = 1
-
-        return result_array
-
-
-
-
-# # Load the JSON data from the file
-# with open('result_poi.json', 'r') as file:
-#     data = json.load(file)
-
-# # Load the availability matrix
-# availability_matrix = np.genfromtxt('result_matrix.csv', delimiter=',', skip_header=1)
-
-# # Load household info from YAML
-# with open('households.yaml', 'r') as house_file:
-#     household_data = yaml.safe_load(house_file)
-
-# # Create a list of Household objects
-# household_info = []
-
-# for household_list in household_data:
-#     for household_dict in household_list:
-#         print(household_dict.cbg)
-#         cbg = household_dict.cbg  # Accessing the cbg attribute directly
-#         population_data = household_dict.population
-#         population = [
-#             Person(**person_data.__dict__) for person_data in population_data
-#         ]
-#         total_count = household_dict.total_count
-#         household_info.append(Household(cbg, population, total_count))
-
-
-
-
-# csv_file_path_interhousehold = 'interhousehold_movements.csv'
-# with open(csv_file_path_interhousehold, 'w', newline='') as csv_file:
-#     writer = csv.writer(csv_file)
-
-#     # Write header
-#     header = ['Person ID'] + [f'Timestamp {ts}' for ts in range(result_interhousehold.shape[1])]
-#     writer.writerow(header)
-
-#     # Write data
-#     for i in range(result_interhousehold.shape[0]):
-#         row = [i] + list(result_interhousehold[i, :])
-#         writer.writerow(row)
-
-# print(f"CSV file created for interhousehold movements: {csv_file_path_interhousehold}")
+                while (hh.id == person.location.id and len(self.hh_list) >= 2 and hh.social_days > 0): # if person belongs to its household, there are enough household for selction, and the household is hosting social, reselct household
+                    hh = self.select_hh(person.cbg, size=1)[0] if same_cbg else self.select_hh(size=1)[0]
+                
+                person.assign_household(hh)
+                self.movement_people.add(person)
