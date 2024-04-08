@@ -59,7 +59,7 @@ class Person:
         self.household = household
         self.hh_id = hh_id
         self.availablility = True
-        self.work_naics = None
+        self.occupation = None
         self.work_time = (0, 0) #0 ~ 24
         #self.set_occupation()
         #self.set_work_time()
@@ -72,34 +72,34 @@ class Person:
         for category, (start_age, end_age) in age_categories.items():
             if start_age <= self.age <= end_age:
                 if category == "Adolescent":
-                    self.work_naics = naics_pois['61']  #student
+                    self.occupation = naics_pois['61']  #student
                 elif category == "Adult":
                     if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
                 break
     
     def set_occupation(self, occupation):
-        self.work_naics = occupation
+        self.occupation = occupation
         self.set_work_time()
     
     def assign_naics_code_for_adults(self):
-        self.work_naics = random.choice(list(naics_pois.values()))
+        self.occupation = random.choice(list(naics_pois.values()))
 
     def set_work_time(self):
-        if (self.work_naics == naics_pois['62'] or self.work_naics == naics_pois['72']) and random.random() <= 15 / 100: #if medical or food service && #15% night shift
+        if (self.occupation == naics_pois['62'] or self.occupation == naics_pois['72']) and random.random() <= 15 / 100: #if medical or food service && #15% night shift
             self.work_time = (17, 24) 
-        elif self.work_naics == naics_pois['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
+        elif self.occupation == naics_pois['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
             if random.random() <= 10 / 100:  # 10% night shift
                 self.work_time = (18, 2)  # Night shift
             else:
                 self.work_time = (6, 18)   # Day shift, longer 12 hour shift common
-        elif self.work_naics == naics_pois['23']:  #if Construction
+        elif self.occupation == naics_pois['23']:  #if Construction
             start_time = random.randint(6, 8)  #tends to start earlier in the day
             end_time = random.randint(14, 18)
             self.work_time = (start_time, end_time)
-        elif self.work_naics != None: self.work_time = (9, 17)
+        elif self.occupation != None: self.work_time = (9, 17)
 
     def __str__(self):
-        return f"Person {self.id}:  Occupation set to {self.work_naics}\n              Work time set to {self.work_time[0]}:00 - {self.work_time[1]}:00 \n"
+        return f"Person {self.id}:  Occupation set to {self.occupation}\n              Work time set to {self.work_time[0]}:00 - {self.work_time[1]}:00 \n"
     
     def __repr__(self):
         return self.__str__()
@@ -380,9 +380,11 @@ if __name__=="__main__":
         _, household = create_pop_from_cluster([cbg], census_df)
         household_list.append(create_households(pop_data, household, cbg))
 
+    ##SHOULD NOT MODIFY INPUT FILES
+
     # Dump household list data into households.yaml file
-    with open('input/households.yaml', mode="wt", encoding="utf-8") as outstream:
-        yaml.dump(household_list, outstream)
+    # with open('input/households.yaml', mode="wt", encoding="utf-8") as outstream:
+    #     yaml.dump(household_list, outstream)
 
     print("Successfully Created Households")
     

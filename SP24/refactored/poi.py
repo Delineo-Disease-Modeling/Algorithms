@@ -46,6 +46,13 @@ class POI():
         else:
             self.current_people[random_integer - 1].append(person)
 
+        person.availablility = False
+
+    def add_person_to_work(self,person):
+        total_worktime = (person.worktime[1] if person.worktime[1] > person.worktime[0] else (person.worktime[1] + 24)) - person.worktime[0]
+        self.current_people[total_worktime - 1].append(person)
+        person.availablility = False
+
     def send_person(self, person, poi_dict):
         # print(self.same_day_brands)
         instate_sum = 0
@@ -87,6 +94,9 @@ class POI():
         next_poi_weights.append(home_weight_modified / next_poi_sum)
 
         next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
+
+        if next_poi is "home":
+            person.availablility = True
 
         # print(instate_sum)
         # print(outstate_count)
