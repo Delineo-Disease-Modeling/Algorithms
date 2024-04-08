@@ -37,7 +37,7 @@ poi_category = {
     '92': 'Public Administration' 
 }
 
-age_categories = {
+age_category = {
     "Preschool": (0, 4),
     "Adolescent": (5, 18),
     "Adult": (19, 64),
@@ -65,20 +65,9 @@ class Person:
         self.occupation = None
         self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
-        #self.set_occupation()
-        #self.set_work_time()
 
         self.location:Household = household # where is the person now
 
-    def set_occupation(self):
-        for category, (start_age, end_age) in age_categories.items():
-            if start_age <= self.age <= end_age:
-                if category == "Adolescent":
-                    self.occupation = naics_pois['61']  #student
-                elif category == "Adult":
-                    if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
-                break
-    
     def set_occupation(self, occupation):
         self.occupation = occupation
         self.set_work_time()
