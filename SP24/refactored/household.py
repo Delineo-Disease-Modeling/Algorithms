@@ -65,6 +65,7 @@ class Person:
         self.occupation = None
         self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
+        self.availablility = True
 
         self.location:Household = household # where is the person now
 
