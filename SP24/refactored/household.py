@@ -10,26 +10,30 @@ from enum import Enum
 
 next_household_id = 0
 
-naics_pois = {
+poi_category = {
     '11': 'Agriculture, Forestry, Fishing and Hunting',
     '21': 'Mining, Quarrying, and Oil and Gas Extraction',
     '22': 'Utilities',
     '23': 'Construction',
-    '31-33': 'Manufacturing',
+    '31': 'Manufacturing',
+    '32': 'Manufacturing',
+    '33': 'Manufacturing',
     '42': 'Wholesale Trade',
-    '44-45': 'Retail Trade',
-    '48-49': 'Transportation and Warehousing',
+    '44': 'Retail Trade',
+    '45': 'Retail Trade',
+    '48': 'Transportation and Warehousing',
+    '49': 'Transportation and Warehousing',
     '51': 'Information',
-    '52': 'Finance and Insurance',
+    '52': 'Depository Credit Intermediation',
     '53': 'Real Estate and Rental and Leasing',
     '54': 'Professional, Scientific, and Technical Services',
     '55': 'Management of Companies and Enterprises',
     '56': 'Administrative and Support and Waste Management and Remediation Services',
-    '61': 'Educational Services',
-    '62': 'Health Care and Social Assistance',
+    '61': 'Education',
+    '62': 'Medical',
     '71': 'Arts, Entertainment, and Recreation',
-    '72': 'Accommodation and Food Services',
-    '81': 'Other Services (except Public Administration)',
+    '72': 'Restaurants and Other Eating Places',
+    '81': 'Others',
     '92': 'Public Administration' 
 }
 
@@ -60,43 +64,42 @@ class Person:
         self.hh_id = hh_id
         self.availablility = True
         self.occupation = None
+        self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
         #self.set_occupation()
         #self.set_work_time()
-        print(f"Creating Person {id} with Household ID: {hh_id}")
-        print(self)
 
         # self.current_household = household # where is the person now
-
-    def set_occupation(self):
-        for category, (start_age, end_age) in age_categories.items():
-            if start_age <= self.age <= end_age:
-                if category == "Adolescent":
-                    self.occupation = naics_pois['61']  #student
-                elif category == "Adult":
-                    if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
-                break
     
     def set_occupation(self, occupation):
         self.occupation = occupation
         self.set_work_time()
-    
-    def assign_naics_code_for_adults(self):
-        self.occupation = random.choice(list(naics_pois.values()))
 
     def set_work_time(self):
-        if (self.occupation == naics_pois['62'] or self.occupation == naics_pois['72']) and random.random() <= 15 / 100: #if medical or food service && #15% night shift
+        if (self.occupation == poi_category['62'] or self.occupation == poi_category['72']) and random.random() <= 15 / 100: #if medical or food service && #15% night shift
             self.work_time = (17, 24) 
-        elif self.occupation == naics_pois['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
+        elif self.occupation == poi_category['21']:  # if Mining, Quarrying, and Oil and Gas Extraction
             if random.random() <= 10 / 100:  # 10% night shift
                 self.work_time = (18, 2)  # Night shift
             else:
                 self.work_time = (6, 18)   # Day shift, longer 12 hour shift common
-        elif self.occupation == naics_pois['23']:  #if Construction
+        elif self.occupation == poi_category['23']:  #if Construction
             start_time = random.randint(6, 8)  #tends to start earlier in the day
             end_time = random.randint(14, 18)
             self.work_time = (start_time, end_time)
         elif self.occupation != None: self.work_time = (9, 17)
+
+    # def set_occupation(self):
+    #     for category, (start_age, end_age) in age_categories.items():
+    #         if start_age <= self.age <= end_age:
+    #             if category == "Adolescent":
+    #                 self.occupation = naics_pois['61']  #student
+    #             elif category == "Adult":
+    #                 if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
+    #             break
+    
+    # def assign_naics_code_for_adults(self):
+    #     self.occupation = random.choice(list(naics_pois.values()))
 
     def __str__(self):
         return f"Person {self.id}:  Occupation set to {self.occupation}\n              Work time set to {self.work_time[0]}:00 - {self.work_time[1]}:00 \n"
@@ -137,7 +140,7 @@ class Household(Population):
     
     global next_household_id
 
-    def __init__(self, cbg, total_count=0, population=[], guests=[], id=next_household_id, social_days=0, social_max_duration=0):
+    def __init__(self, cbg, total_count=0, population=[]):
         global next_household_id
         super().__init__()
         self.total_count = total_count
@@ -146,9 +149,9 @@ class Household(Population):
         self.id = id  
         print(f"Assigning Household ID: {self.id}")
         next_household_id += 1  
-        self.guests = guests
-        self.social_days = social_days # 0 means no social event currently
-        self.social_max_duration = social_max_duration
+        self.guests = []
+        self.social_days = 0 # 0 means no social event currently
+        self.social_max_duration = 0
 
 
     def add_member(self, person):
