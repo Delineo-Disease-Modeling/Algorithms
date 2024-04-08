@@ -2,14 +2,39 @@ from poi import POI
 import random
 import sys
 import json 
+import csv
 from household import Person, Household
+
+category_weight = {
+    'Agriculture, Forestry, Fishing and Hunting': 20,
+    'Mining, Quarrying, and Oil and Gas Extraction': 100,
+    'Utilities': 5,
+    'Construction': 50,
+    'Manufacturing': 200,
+    'Wholesale Trade': 20,
+    'Retail Trade': 20,
+    'Transportation and Warehousing': 20,
+    'Information': 30,
+    'Finance and Insurance': 20,
+    'Real Estate and Rental and Leasing': 20,
+    'Professional, Scientific, and Technical Services': 20,
+    'Management of Companies and Enterprises': 10,
+    'Administrative and Support and Waste Management and Remediation Services': 10,
+    'Educational Services': 3000,
+    'Health Care and Social Assistance': 25,
+    'Arts, Entertainment, and Recreation': 10,
+    'Accommodation and Food Services': 15,
+    'Other Services (except Public Administration)': 20,
+    'Public Administration': 20
+}
 
 class Simulate:
 
-    def __init__(self, settings, city_info, hh_info):
+    def __init__(self, settings, city_info, hh_info, category_info):
         self.settings = settings
         self.city_info = city_info
         self.hh_info = hh_info
+        self.category_info = category_info
 
     def get_city_info(self):
 
@@ -45,6 +70,48 @@ class Simulate:
             weights.append(poi_dict[poi_name].visit)
 
         return [name, weights]
+    
+    def create_category_dictionary(self):
+        category_dict = {}
+        with open(self.category_info, newline='') as file:
+            reader = csv.DictReader(file)
+            for row in reader:
+                location_name = row['location_name']
+                top_category = row['top_category']
+                category_dict[location_name] = top_category
+        return category_dict
+
+    def distribute_occupation(self, category_dict):
+        category_count = {}
+        for poi_name in self.poi_dict.keys():
+            category = category_dict[poi_name]
+            if category in category_count:
+                category_count[category] += 1
+            else:
+                category_count[category] = 1
+
+        total_population = sum(len(household.population) for household in self.hh_dict.keys())
+        total_count = sum(self.category_count.values())
+        total_weight = sum(self.category_weights.values())
+
+        # Calculate the number of individuals to assign to each occupation category
+        occupation_counts = {}
+        for category, count in self.category_count.items():
+            weight = self.category_weights[category]
+            occupation_counts[category] = int(count / total_count * total_population * weight / total_weight)
+
+        for hh in self.hh_dict.keys():
+            cur_hh = self.hh_dict[hh]
+            for person in cur_hh.population:
+                occupation = self.select_occupation(occupation_counts)
+                person.set_occupation(occupation)
+                occupation_counts[occupation] -= 1
+
+    def select_occupation(self, occupation_counts):
+        occupations = list(occupation_counts.keys())
+        # Choose from occupations that still have individuals to assign
+        available_occupations = [occ for occ in occupations if occupation_counts[occ] > 0]
+        return random.choice(available_occupations)
 
     def timestep(self, poi_dict, hh_dict, popularity_matrix):
         '''
@@ -94,6 +161,9 @@ class Simulate:
 
         poi_dict = self.get_city_info()
         hh_dict = self.get_hh_info()
+        
+        category_dict = self.create_category_dictionary()
+        self.distribute_occupation(category_dict)
 
         # print(hh_dict)
         # for key, value in hh_dict.items():

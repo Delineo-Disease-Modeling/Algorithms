@@ -61,8 +61,8 @@ class Person:
         self.availablility = True
         self.work_naics = None
         self.work_time = (0, 0) #0 ~ 24
-        self.set_occupation()
-        self.set_work_time()
+        #self.set_occupation()
+        #self.set_work_time()
         print(f"Creating Person {id} with Household ID: {hh_id}")
         print(self)
 
@@ -76,6 +76,10 @@ class Person:
                 elif category == "Adult":
                     if random.random() >= 3.9 / 100: self.assign_naics_code_for_adults() #not unemployed
                 break
+    
+    def set_occupation(self, occupation):
+        self.work_naics = occupation
+        self.set_work_time()
     
     def assign_naics_code_for_adults(self):
         self.work_naics = random.choice(list(naics_pois.values()))
