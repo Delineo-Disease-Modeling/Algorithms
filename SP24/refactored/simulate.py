@@ -84,7 +84,7 @@ class Simulate:
                 id = row['placekey']
                 name = row['location_name']
                 naics = row['naics_code']
-                if naics is '': continue
+                if naics == '': continue
                 category = poi_category[naics[:2]]
 
                 #match category to location
@@ -114,6 +114,8 @@ class Simulate:
         total_count = sum(occupation_count.values())
         total_weight = sum(category_weight.values())
 
+        print(total_population, total_count, total_weight)
+
         occupation_population = {}
         for poi in poi_dict:
             category = category_dict[poi]
@@ -126,10 +128,10 @@ class Simulate:
         for hh in hhlist:
             for person in hh.population:
                 occupation = self.select_occupation(person, category_dict, occupation_population)
-                if occupation is None: break
+                if occupation is None: continue
                 occupation_population[occupation] -= 1
                 person.set_occupation(occupation)
-                print(person)
+                #print(person)
 
     def select_occupation(self, person, category_dict, occupation_population):
         occupations = list(occupation_population.keys())
@@ -139,7 +141,7 @@ class Simulate:
         for category, (start_age, end_age) in age_category.items():
             if start_age <= person.age <= end_age:
                 if category == "Adolescent":
-                    available_occupations = [occ for occ in available_occupations if category_dict[occ] is 'Education']
+                    available_occupations = [occ for occ in available_occupations if category_dict[occ] == 'Education']
                 elif category == "Adult":
                     if random.random() <= 3.9 / 100: return None
                 break
@@ -173,7 +175,7 @@ class Simulate:
                 cur_hh.population.remove(person) 
 
         # Interhouse Movement
-        self.interhouse.next()
+        #self.interhouse.next()
 
         '''
             Movement of people in each timestep
@@ -220,7 +222,7 @@ class Simulate:
         popularity_matrix = self.get_popularity_matrix(poi_dict)
 
         for i in range(self.settings['time']):
-            print("timestep" + str(time))
+            #print("timestep" + str(time))
             poi_dict, hh_dict = self.timestep(poi_dict, hh_dict, popularity_matrix)
             time += 1
 
