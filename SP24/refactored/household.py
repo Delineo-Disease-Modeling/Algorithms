@@ -94,14 +94,9 @@ class Person:
             # remove the person from the current location
             if self in self.location.population:
                 self.location.population.remove(self)
-            if self in self.location.guests:
-                self.location.guests.remove(self)
 
             # add the person to the designated location
-            if hh.id == self.household.id:
-                hh.population.append(self)
-            else:
-                hh.guests.append(self)
+            hh.population.append(self)
             
             self.location = hh
 
@@ -155,12 +150,11 @@ class Household(Population):
         global next_household_id
         super().__init__()
         self.total_count = total_count
-        self.population = population
+        self.population:list[Person] = population
         self.cbg = cbg
         self.id = id  
         #print(f"Assigning Household ID: {self.id}")
         next_household_id += 1  
-        self.guests = []
         self.social_days = 0 # 0 means no social event currently
         self.social_max_duration = 0
 
@@ -186,10 +180,10 @@ class Household(Population):
         self.social_max_duration = 0
         
         
-        for person in self.guests:
-            person.assign_household(person.household)
+        for person in self.population:
+            if person.hh_id != self.id:
+                person.assign_household(person.household)
         
-        self.guests = []
     
     def is_social(self) -> bool:
         return self.social_days > 0
@@ -198,11 +192,20 @@ class Household(Population):
     def to_dict(self):
         return {
             'cbg': self.cbg,
-            'members': len(self.population) + len(self.guests)
+            'members': len(self.population)
         }
 
     def __str__(self):
-        return f"Household {self.id} with people {str(self.population)} and guests {str(self.guests)}"
+        guests:list[Person] = []
+        hosts:list[Person] = []
+
+        for p in self.population:
+            if p.hh_id == self.id:
+                hosts.append(p)
+            else:
+                guests.append(p)
+
+        return f"Household {self.id} with people {str(hosts)} and guests {str(guests)}"
     
     def __repr__(self):
         return self.__str__()
