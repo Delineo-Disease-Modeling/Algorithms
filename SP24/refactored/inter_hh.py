@@ -6,6 +6,7 @@ import pandas
 
 class InterHousehold:
     def __init__(self, hh_list:list[Household]):
+        self.iteration = 1
         self.hh_list = hh_list
         self.people:list[Person] = []
         
@@ -14,14 +15,17 @@ class InterHousehold:
 
         self.hh_by_cbg:dict = {}
         self.p_by_cbg:dict = {}
+
         for hh in hh_list:
             cbg = hh.cbg
             if self.hh_by_cbg.get(cbg) != None:
                 self.hh_by_cbg[cbg].append(hh)
                 self.p_by_cbg[cbg] += hh.population
             else:
-                self.hh_by_cbg[cbg] = [hh]
-                self.p_by_cbg[cbg] = hh.population
+                self.hh_by_cbg[cbg] = list([hh])
+                self.p_by_cbg[cbg] = list(hh.population)
+        
+       
 
         self.social_hh:set[Household] = set()
         self.movement_people:set[Person] = set()
@@ -37,7 +41,7 @@ class InterHousehold:
         self.school_children_frequency = 0.3
         self.regular_visitation_frequency = 0.15
 
-        self.prefer_cbg = 0.8 # possobility that guests come from the same cbg
+        self.prefer_cbg = 0 # possobility that guests come from the same cbg
 
 
     def select_guest(self, cbg=None, size:int=1) -> list[Person]:
@@ -69,8 +73,13 @@ class InterHousehold:
 
 
     def next(self):
+        
+
         self.individual_movement()
         self.social_event()
+        print(f"InterHousehold iteration {self.iteration}")
+        self.iteration += 1
+        
         # self.children_movement()
 
     
@@ -94,9 +103,6 @@ class InterHousehold:
                 hh:Household = np.random.choice(self.hh_list, replace=False)
                 for person in children + adults:
                     pass
-
-                
-
 
 
     def social_event(self):

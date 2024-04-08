@@ -3,6 +3,7 @@ from household import Household, Person
 from simulate import Simulate
 from inter_hh import InterHousehold
 import numpy as np
+
 # Define a custom constructor for loading Person objects
 def person_constructor(loader, node):
     fields = loader.construct_mapping(node)
@@ -26,9 +27,17 @@ def load_household():
     return hh_info
 
 def format_hh(hh_list:list[Household]):
-    for hh in hh_list:
+    person_id_counter = 1
+    for i in range(0, len(hh_list)):
+        hh = hh_list[i]
         hh.total_count = len(hh.population)
-        hh.id = hh.population[0].hh_id
+        hh.id = i + 1
+        for person in hh.population:
+            person.hh_id = i + 1
+            person.location = hh
+            person.household = hh
+            person.id = person_id_counter
+            person_id_counter += 1
     return hh_list
 
 if __name__ == "__main__":
