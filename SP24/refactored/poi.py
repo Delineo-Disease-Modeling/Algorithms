@@ -111,7 +111,7 @@ class POI():
 
         self.population -= 1
         #print(self.population)
-        if next_poi is "home":
+        if next_poi == "home":
             person.availablility = True
 
         # print(instate_sum)
