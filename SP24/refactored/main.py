@@ -105,6 +105,33 @@ def visualize_simulation_results_dynamic():
 
     ani.save('simulation_distribution.gif', writer='pillow', fps=1)
 
+def visualize_occupation_distribution():
+    
+    with open('output/result_hh.json') as f:
+        hh_data = json.load(f)
+
+    
+    timestep_60_data = hh_data.get("timestep_60", {})
+
+    
+    occupation_counts = {}
+    for household in timestep_60_data.values():
+        for person in household:
+            occupation = person.get("occupation")
+            if occupation:
+                occupation_counts[occupation] = occupation_counts.get(occupation, 0) + 1
+
+
+    occupations = list(occupation_counts.keys())
+    counts = list(occupation_counts.values())
+
+   
+    plt.figure(figsize=(10, 8))
+    plt.pie(counts, labels=occupations, autopct='%1.1f%%', startangle=140)
+    plt.title('Occupation Distribution at Timestep 60')
+    plt.axis('equal') 
+    plt.show()
+
 if __name__ == "__main__":
     with open('input/simul_settings.yaml', mode="r", encoding='utf-8') as settingstream:
         settings = yaml.safe_load(settingstream)
@@ -120,15 +147,17 @@ if __name__ == "__main__":
     hh_info = load_household()
 
     hh_info = format_hh(hh_info)
-    
+
     simulate = Simulate(settings, city_info, hh_info, category_info)
     print("Starting simulation")
     simulate.start()
     print("Simulation has ended")
 
     #comment this out if you don't want make the animated gif
-    visualize_simulation_results_dynamic()
+    #visualize_simulation_results_dynamic()
 
     visualize_simulation_results()
+
+    visualize_occupation_distribution()
 
     
