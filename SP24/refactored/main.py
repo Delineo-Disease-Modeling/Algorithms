@@ -4,6 +4,7 @@ from simulate import Simulate
 from inter_hh import InterHousehold
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
 import json
 
 # Define a custom constructor for loading Person objects
@@ -42,6 +43,7 @@ def format_hh(hh_list:list[Household]):
             person_id_counter += 1
     return hh_list
 
+
 def visualize_simulation_results():
     with open('output/result_hh.json') as f:
         hh_data = json.load(f)
@@ -70,6 +72,39 @@ def visualize_simulation_results():
     plt.tight_layout()
     plt.show()
 
+
+
+def animate(i, timesteps, hh_counts, poi_counts, bars):
+    
+    bars[0].set_height(hh_counts[i])
+    bars[1].set_height(poi_counts[i])
+    
+    
+    plt.title(f'Distribution of People at Timestep {timesteps[i]}')
+
+def visualize_simulation_results_dynamic():
+    with open('output/result_hh.json') as f:
+        hh_data = json.load(f)
+    with open('output/result_poi.json') as f:
+        poi_data = json.load(f)
+    
+    
+    timesteps = sorted([int(step.split('_')[1]) for step in hh_data.keys()])
+    hh_counts = [sum(len(household) for household in hh_data[f'timestep_{step}'].values()) for step in timesteps]
+    poi_counts = [sum(sum(len(person) for person in poi) for poi in poi_data[f'timestep_{step}'].values()) for step in timesteps]
+
+    fig, ax = plt.subplots()
+    bars = plt.bar(['Households', 'POIs'], [hh_counts[0], poi_counts[0]])
+
+    
+    ani = FuncAnimation(fig, animate, frames=len(timesteps), fargs=(timesteps, hh_counts, poi_counts, bars), repeat=False)
+    
+    plt.xlabel('Location Type')
+    plt.ylabel('Count')
+    plt.tight_layout()
+
+    ani.save('simulation_distribution.gif', writer='pillow', fps=1)
+
 if __name__ == "__main__":
     with open('input/simul_settings.yaml', mode="r", encoding='utf-8') as settingstream:
         settings = yaml.safe_load(settingstream)
@@ -91,4 +126,9 @@ if __name__ == "__main__":
     simulate.start()
     print("Simulation has ended")
 
+    #comment this out if you don't want make the animated gif
+    visualize_simulation_results_dynamic()
+
     visualize_simulation_results()
+
+    
