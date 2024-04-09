@@ -111,7 +111,8 @@ class InterHousehold:
             if hh.social_days >= hh.social_max_duration: # if the host day reachees maximum, stop social
                 hh.end_social()
                 self.social_hh.discard(hh)
-            hh.social_days += 1
+            else:
+                hh.social_days += 1
 
 
         number = int(self.social_event_frequency * len(self.hh_list)) # define a certain number of households that will host social events
