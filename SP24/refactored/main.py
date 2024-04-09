@@ -3,6 +3,8 @@ from household import Household, Person
 from simulate import Simulate
 from inter_hh import InterHousehold
 import numpy as np
+import matplotlib.pyplot as plt
+import json
 
 # Define a custom constructor for loading Person objects
 def person_constructor(loader, node):
@@ -40,6 +42,34 @@ def format_hh(hh_list:list[Household]):
             person_id_counter += 1
     return hh_list
 
+def visualize_simulation_results():
+    with open('output/result_hh.json') as f:
+        hh_data = json.load(f)
+    with open('output/result_poi.json') as f:
+        poi_data = json.load(f)
+    
+    timesteps = sorted([int(step.split('_')[1]) for step in hh_data.keys()])
+    timestep_keys = [f'timestep_{step}' for step in timesteps]
+    
+    hh_counts = [sum(len(household) for household in hh_data[step].values()) for step in timestep_keys]
+    poi_counts = [sum(sum(len(person) for person in poi) for poi in poi_data[step].values()) for step in timestep_keys]
+    
+    
+    plt.figure(figsize=(10, 6))
+    bar_width = 0.35
+    index = np.arange(len(timesteps))
+    
+    plt.bar(index, hh_counts, bar_width, label='Households')
+    plt.bar(index + bar_width, poi_counts, bar_width, label='POIs')
+    
+    plt.xlabel('Timestep')
+    plt.ylabel('Count')
+    plt.title('Distribution of People in Households vs. POIs')
+    plt.xticks(index + bar_width / 2, timesteps)
+    plt.legend()
+    plt.tight_layout()
+    plt.show()
+
 if __name__ == "__main__":
     with open('input/simul_settings.yaml', mode="r", encoding='utf-8') as settingstream:
         settings = yaml.safe_load(settingstream)
@@ -60,3 +90,5 @@ if __name__ == "__main__":
     print("Starting simulation")
     simulate.start()
     print("Simulation has ended")
+
+    visualize_simulation_results()
