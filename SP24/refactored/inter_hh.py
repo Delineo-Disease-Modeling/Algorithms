@@ -142,7 +142,7 @@ class InterHousehold:
         selected_person = [person for person, rand in zip(self.people, np.random.rand(len(self.people))) if rand <= self.individual_movement_frequency]
 
         for person in selected_person:
-            if person.location.social_days == 0: # if move and person is not in social
+            if person.location.social_days == 0 and person.availablility: # if move and person is not in social and person is not going to work
                 same_cbg = self.random_boolean(self.prefer_cbg)
 
                 hh = self.select_hh(person.cbg, size=1)[0] if same_cbg else self.select_hh(size=1)[0] # choose a random household in the same cbg
