@@ -8,10 +8,10 @@ from inter_hh import InterHousehold
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
-    'Mining, Quarrying, and Oil and Gas Extraction': 100,
-    'Utilities': 5,
+    'Mining, Quarrying, and Oil and Gas Extraction': 50,
+    'Utilities': 10,
     'Construction': 50,
-    'Manufacturing': 200,
+    'Manufacturing': 50,
     'Wholesale Trade': 20,
     'Retail Trade': 20,
     'Transportation and Warehousing': 20,
@@ -21,7 +21,7 @@ category_weight = {
     'Professional, Scientific, and Technical Services': 20,
     'Management of Companies and Enterprises': 10,
     'Administrative and Support and Waste Management and Remediation Services': 10,
-    'Education': 30,
+    'Education': 50,
     'Medical': 25,
     'Arts, Entertainment, and Recreation': 10,
     'Restaurants and Other Eating Places': 15,
@@ -49,7 +49,7 @@ class Simulate:
             pop_hr = self.city_info[poi_name]['popularity_by_hour']
             pop_day = self.city_info[poi_name]['popularity_by_day']
 
-            cur_poi = POI(poi_name, visit, bucket, same_day, pop_hr, pop_day)
+            cur_poi = POI(poi_name, visit, bucket, same_day, pop_hr, pop_day, self.settings['time'])
             poi_dict[poi_name] = cur_poi
 
         return poi_dict
@@ -114,14 +114,12 @@ class Simulate:
         total_count = sum(occupation_count.values())
         total_weight = sum(category_weight.values())
 
-        print(total_population, total_count, total_weight)
-
         occupation_population = {}
         for poi in poi_dict:
             category = category_dict[poi]
             weight = category_weight[category]
-            count = occupation_count[poi]
-            occupation_population[poi] = int((count / total_count) * (weight / total_weight) / (count) / (category_count[category]) * total_population)
+            #count = occupation_count[poi] #commented since all occupations are not redundunt in this case
+            occupation_population[poi] = int(weight / (total_weight / len(category_weight)) * (total_population / total_count))
 
         hhlist = hh_dict.keys()
 
@@ -131,7 +129,6 @@ class Simulate:
                 if occupation is None: continue
                 occupation_population[occupation] -= 1
                 person.set_occupation(occupation)
-                #print(person)
 
     def select_occupation(self, person, category_dict, occupation_population):
         occupations = list(occupation_population.keys())
@@ -153,7 +150,7 @@ class Simulate:
         
 
 
-    def timestep(self, poi_dict, hh_dict, popularity_matrix):
+    def timestep(self, clock, poi_dict, hh_dict, popularity_matrix):
         '''
             Calculates Each Timestep
         '''
@@ -162,20 +159,29 @@ class Simulate:
             Releasing people from households TODO: categorize people
         '''
 
+        total_poi_population = 0
+        total_hh_population = sum(len(household.population) for household in hh_dict.values())
+        for poi in poi_dict.values():
+            total_poi_population += poi.population
+
+        print(clock)
+        print("hh:  ", total_hh_population, "poi: ", total_poi_population)
+
         # Role-based Movement
         for hh in hh_dict.keys():
-            cur_hh = hh_dict[hh]
-            for person in cur_hh.population:
-                # TODO 집에서 나갈 확률
-                # if random.choices([True, False], [1, 10])[0]:
-                #     target_poi = random.choices(
-                #         popularity_matrix[0], popularity_matrix[1])[0]
+            curr_hh = hh_dict[hh]
+            for person in curr_hh.population:
+                shouldWork = person.work_time[0] <= clock and clock <= (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))
+                if person.occupation != None and shouldWork:
+                    poi_dict[person.occupation].add_person_to_work(person)
+                    curr_hh.population.remove(person)
 
-                if person.occupation is not None: poi_dict[person.occupation].add_person_to_work(person)
-                cur_hh.population.remove(person) 
+            # with open("output.txt", "a") as file:
+            #     file.write(str(curr_hh) + '\n')
+
 
         # Interhouse Movement
-        #self.interhouse.next()
+        self.interhouse.next()
 
         '''
             Movement of people in each timestep
@@ -186,17 +192,20 @@ class Simulate:
             cur_poi = poi_dict[poi]
             cur_poi.current_people.rotate(-1)
 
-            popped_people = cur_poi.current_people[-1]
+            popped_people = cur_poi.current_people[len(cur_poi.current_people) - 1]
+
             cur_poi.current_people[-1] = []
 
             for person in popped_people:
                 person, target = cur_poi.send_person(person, poi_dict)
-                if target == "home":
+                person.household.add_member(person)
+
+                '''if target == "home":
                     person.household.add_member(person)
                 elif target == "out of state":
                     person.household.add_member(person)
                 else:
-                    poi_dict[target].add_person(person)
+                    poi_dict[target].add_person(person)'''
 
         return poi_dict, hh_dict
 
@@ -205,6 +214,7 @@ class Simulate:
     def start(self):
 
         time = 0
+        clock = self.settings['start_time']
 
         poi_dict = self.get_city_info()
         hh_dict = self.get_hh_info()
@@ -212,19 +222,15 @@ class Simulate:
         category_dict = self.analyze_category()
         self.distribute_occupation(hh_dict, poi_dict, category_dict)
 
-        # print(hh_dict)
-        # for key, value in hh_dict.items():
-        #     print(f"Key: {key}, Value: {value}")
-
         hh_return_dict = {}
         poi_return_dict = {}
 
         popularity_matrix = self.get_popularity_matrix(poi_dict)
 
         for i in range(self.settings['time']):
-            #print("timestep" + str(time))
-            poi_dict, hh_dict = self.timestep(poi_dict, hh_dict, popularity_matrix)
+            poi_dict, hh_dict = self.timestep(clock, poi_dict, hh_dict, popularity_matrix)
             time += 1
+            clock = self.settings['start_time'] + time//60
 
             # Print info!
             old_out = sys.stdout

@@ -4,16 +4,17 @@ import random
 
 class POI():
 
-    def __init__(self, name, visit, bucket, same_day, pop_hr, pop_day):  # time_step field?
+    def __init__(self, name, visit, bucket, same_day, pop_hr, pop_day, simul_time = 600):  # time_step field?
         bucket = json.loads(bucket)
         self.name = name
-        temp_queue = [[] for i in range(500)]
+        temp_queue = [[] for i in range(simul_time)]
         self.current_people = deque(temp_queue)
         self.visit = visit
         self.bucketed_dwell_time = bucket
         self.same_day_brands = same_day
         self.pop_hr = pop_hr
         self.pop_day = pop_day
+        self.population = 0
 
     def add_person(self, person):
         values = ["<5", "5-10", "11-20", "21-60", "61-120", "121-240", ">240"]
@@ -46,6 +47,7 @@ class POI():
         else:
             self.current_people[random_integer - 1].append(person)
 
+        self.population += 1
         person.availablility = False
 
     def add_person_to_work(self,person):
@@ -55,12 +57,13 @@ class POI():
             self.current_people.append(deque())
         else:
             self.current_people[total_worktime - 1].append(person)
-            
+
+        self.population += 1
         person.availablility = False
 
     def send_person(self, person, poi_dict):
         # print(self.same_day_brands)
-        instate_sum = 0
+        '''instate_sum = 0
         next_poi_count = 1  # bc outstate is already a part of next poi list
         outstate_sum = 0
         outstate_count = 0
@@ -98,8 +101,16 @@ class POI():
         next_poi_weights.append(outstate_avg / next_poi_sum)
         next_poi_weights.append(home_weight_modified / next_poi_sum)
 
-        next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
+        next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]'''
 
+        '''
+            Just returning Home for now
+        '''
+
+        next_poi = 'home'
+
+        self.population -= 1
+        #print(self.population)
         if next_poi is "home":
             person.availablility = True
 
