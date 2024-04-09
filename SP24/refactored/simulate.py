@@ -169,10 +169,10 @@ class Simulate:
 
         # Role-based Movement
         for hh in hh_dict.keys():
-            curr_hh = hh_dict[hh]
+            curr_hh:Household = hh_dict[hh]
             for person in curr_hh.population:
                 shouldWork = person.work_time[0] <= clock and clock <= (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))
-                if person.occupation != None and shouldWork:
+                if person.occupation != None and shouldWork and person.hh_id == person.location.id: # when the person is at home
                     poi_dict[person.occupation].add_person_to_work(person)
                     curr_hh.population.remove(person)
 

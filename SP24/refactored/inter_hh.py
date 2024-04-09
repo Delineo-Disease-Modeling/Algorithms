@@ -49,7 +49,7 @@ class InterHousehold:
             guests:list[Person] = np.random.choice(self.p_by_cbg[cbg], size=size, replace=False)
         else:
             guests:list[Person] = np.random.choice(self.people, size=size, replace=False)
-        return guests
+        return [g for g in guests if g.availablility] # only return those who are availiable
 
 
     def select_hh(self, cbg=None, size:int=1) -> list[Household]:
