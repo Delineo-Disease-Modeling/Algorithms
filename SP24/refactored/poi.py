@@ -56,7 +56,7 @@ class POI():
             self.current_people[time - 1].append(person)
 
         self.population += 1
-        person.availablility = False
+        person.availability = False
 
     def remove_people(self, clock, poi_dict):
         self.current_people.rotate(-1)
@@ -71,7 +71,7 @@ class POI():
                 person.left_from_work = False
             else:
                 person.household.add_member(person) #poi to home
-                person.availablility = True
+                person.availability = True
             self.population -= 1
         
         if (720 <= clock and clock <= 780) or (1050 <= clock and clock <= 1140): #if lunch time (12 - 13) or dinner time (1730 - 1900) 

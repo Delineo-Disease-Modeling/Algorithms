@@ -151,15 +151,17 @@ class Simulate:
         return occupation
         
     def move_to_work(self, clock, curr_hh, poi_dict, person):
+        can_go_out = True
         if person.occupation != None:
             work_start_time = person.work_time[0] * 60
             work_end_time = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) * 60
             shouldWork = work_start_time <= clock and clock < work_end_time
             if shouldWork and person.hh_id == person.location.id: #when person is at "its own" home
+                can_go_out = False
                 poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person)
                 curr_hh.population.remove(person)
-                return True
-        return False
+                
+        return can_go_out
 
     def day_to_day(self, curr_hh, poi_dict, person):
         random_poi_name = random.choice(list(poi_dict.keys()))
@@ -176,9 +178,9 @@ class Simulate:
         for hh in hh_dict.keys():
             curr_hh:Household = hh_dict[hh]
             for person in curr_hh.population:
-                if not self.move_to_work(clock, curr_hh, poi_dict, person):
-                    None
-                    #self.day_to_day(curr_hh, poi_dict, person) #10% goes out to random pois
+                can_go_out = self.move_to_work(clock, curr_hh, poi_dict, person)
+                # if person.availability and random.random() <= 10 / 100 and person.hh_id == person.location.id: #10% goes out to random pois
+                #     self.day_to_day(curr_hh, poi_dict, person) 
 
         # POIs
         for poi in poi_dict.keys():

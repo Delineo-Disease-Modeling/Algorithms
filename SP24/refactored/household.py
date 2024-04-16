@@ -65,7 +65,7 @@ class Person:
         self.occupation = None
         self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
-        self.availablility = True
+        self.availability = True
         self.left_from_work = False
 
         self.location:Household = household # where is the person now
@@ -431,7 +431,7 @@ def prepare_data_for_papdata(household_list):
                     "sex": person.sex,
                     "age": person.age,
                     "home": person.household.id,
-                    "availability": person.availablility,  # Note the typo correction here
+                    "availability": person.availability,  # Note the typo correction here
                     "work_naics": person.work_naics,
                     "work_time": person.work_time,
                 }
