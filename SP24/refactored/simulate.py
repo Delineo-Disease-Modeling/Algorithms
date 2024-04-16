@@ -150,26 +150,22 @@ class Simulate:
 
         return occupation
         
-    def move_hh_to_poi(self, clock, curr_hh, poi_dict, person):
+    def move_to_work(self, clock, curr_hh, poi_dict, person):
         if person.occupation != None:
             work_start_time = person.work_time[0] * 60
             work_end_time = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) * 60
-            work_start_time += random.randint(-30, 30)
-            work_end_time += random.randint(-30, 30) #person might come / leave early / late
-
-            shouldWork = work_start_time <= clock and clock <= work_end_time
+            shouldWork = work_start_time <= clock and clock < work_end_time
             if shouldWork and person.hh_id == person.location.id: #when person is at "its own" home
-                poi_dict[person.occupation].add_person_to_work(person)
+                poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person)
                 curr_hh.population.remove(person)
+                return True
+        return False
 
-    def move_poi_to_poi(self, clock, curr_poi, poi_dict, person):
-        person, target = curr_poi.next_poi(person, poi_dict)
-        if target != None:
-            person.poi_left_time = clock
-            person.left_from_work = True
-            poi_dict[target].add_person(person)
-            poi_dict[target].population += 1
-            curr_poi.population -= 1
+    def day_to_day(self, curr_hh, poi_dict, person):
+        random_poi_name = random.choice(list(poi_dict.keys()))
+        poi_dict[random_poi_name].add_person_to_none_work(person)
+        curr_hh.population.remove(person)
+
 
     def timestep(self, clock, poi_dict, hh_dict, popularity_matrix):
         '''
@@ -180,31 +176,14 @@ class Simulate:
         for hh in hh_dict.keys():
             curr_hh:Household = hh_dict[hh]
             for person in curr_hh.population:
-                self.move_hh_to_poi(clock, curr_hh, poi_dict, person)
-
-            # with open("output.txt", "a") as file:
-            #     file.write(str(curr_hh) + '\n')
+                if not self.move_to_work(clock, curr_hh, poi_dict, person):
+                    None
+                    #self.day_to_day(curr_hh, poi_dict, person) #10% goes out to random pois
 
         # POIs
         for poi in poi_dict.keys():
             curr_poi = poi_dict[poi]
-            curr_poi.current_people.rotate(-1)
-
-            popped_people = curr_poi.current_people[len(curr_poi.current_people) - 1]
-            curr_poi.current_people[-1] = []
-
-            for person in popped_people:
-                if person.left_from_work:
-                    poi_dict[person.occupation].back_from_work(clock, person) #poi to poi
-                else:
-                    person.household.add_member(person) #poi to home
-                    person.availablility = True
-                curr_poi.population -= 1
-            
-            if (720 <= clock and clock <= 780) or (1050 <= clock and clock <= 1140): #if lunch time (12 - 13) or dinner time (1730 - 1900) 
-                for people in curr_poi.current_people:
-                    for person in people:
-                        self.move_poi_to_poi(clock, curr_poi, poi_dict, person)
+            curr_poi.remove_people(clock, poi_dict)
                     
 
         # Interhouse Movement
@@ -215,11 +194,14 @@ class Simulate:
         '''
 
         total_poi_population = 0
+        each_poi_population = []
         total_hh_population = sum(len(household.population) for household in hh_dict.values())
         for poi in poi_dict.values():
             total_poi_population += poi.population
+            each_poi_population.append(poi.population)
         print(clock // 60, ":", f"{clock%60:02d}")
-        print("hh:  ", total_hh_population, "poi: ", total_poi_population)
+        print("hh:  ", total_hh_population, "poi: ", total_poi_population, " => ", each_poi_population)
+
 
         return poi_dict, hh_dict
 

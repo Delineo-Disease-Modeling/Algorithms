@@ -16,7 +16,7 @@ class POI():
         self.pop_day = pop_day
         self.population = 0
 
-    def add_person(self, person):
+    def add_person_to_none_work(self, person):
         values = ["<5", "5-10", "11-20", "21-60", "61-120", "121-240", ">240"]
         sum = self.bucketed_dwell_time["<5"] + self.bucketed_dwell_time["5-10"] + self.bucketed_dwell_time["11-20"] + \
             self.bucketed_dwell_time["21-60"] + self.bucketed_dwell_time["61-120"] + \
@@ -48,29 +48,44 @@ class POI():
             self.current_people[random_integer - 1].append(person)
 
         self.population += 1
-        person.availablility = False
 
-    def add_person_to_work(self,person):
-        total_worktime = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))*60 - person.work_time[0]*60
-
-        if total_worktime > len(self.current_people):
+    def add_person_to_work(self, time, person):
+        if time > len(self.current_people):
             self.current_people.append(deque())
         else:
-            self.current_people[total_worktime - 1].append(person)
+            self.current_people[time - 1].append(person)
 
         self.population += 1
         person.availablility = False
 
-    def back_from_work (self, clock, person):
-        total_worktime =  (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))*60 - clock
-        if total_worktime > len(self.current_people):
-            self.current_people.append(deque())
-        else:
-            self.current_people[total_worktime - 1].append(person)
+    def remove_people(self, clock, poi_dict):
+        self.current_people.rotate(-1)
 
-        self.population += 1
-        person.availablility = False
-        person.left_from_work = False
+        popped_people = self.current_people[len(self.current_people) - 1]
+        self.current_people[-1] = []
+
+        for person in popped_people:
+            if person.occupation != None and person.left_from_work:
+                work_end_time = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) * 60
+                poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person) #poi to poi
+                person.left_from_work = False
+            else:
+                person.household.add_member(person) #poi to home
+                person.availablility = True
+            self.population -= 1
+        
+        if (720 <= clock and clock <= 780) or (1050 <= clock and clock <= 1140): #if lunch time (12 - 13) or dinner time (1730 - 1900) 
+            for people in self.current_people:
+                for person in people:
+                    if not person.availability: self.break_from_work(poi_dict, self, people, person)
+
+    def break_from_work(self, poi_dict, curr_poi, people, person):
+        person, next_poi = curr_poi.next_poi(person, poi_dict)
+        if next_poi != None:
+            person.left_from_work = True
+            people.remove(person) #pop from curr_poi
+            curr_poi.population -= 1
+            poi_dict[next_poi].add_person_to_none_work(person) #add to next_poi
 
     def next_poi(self, person, poi_dict):
         instate_sum = 0
