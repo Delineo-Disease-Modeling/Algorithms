@@ -25,12 +25,8 @@ class InterHousehold:
                 self.hh_by_cbg[cbg] = list([hh])
                 self.p_by_cbg[cbg] = list(hh.population)
         
-       
-
         self.social_hh:set[Household] = set()
         self.movement_people:set[Person] = set()
-        
-
 
         self.individual_movement_frequency = 0.2
 
@@ -77,7 +73,7 @@ class InterHousehold:
 
         self.individual_movement()
         self.social_event()
-        #print(f"InterHousehold iteration {self.iteration}")
+        print(f"InterHousehold iteration {self.iteration}")
         self.iteration += 1
         
         # self.children_movement()
@@ -115,7 +111,7 @@ class InterHousehold:
                 hh.social_days += 1
 
 
-        number = int(self.social_event_frequency * len(self.hh_list)) # define a certain number of households that will host social events
+        number = int(self.social_event_frequency * len(self.hh_list)) - len(self.social_hh) # define a certain number of households that will host social events
 
         hh_social:list[Household] = np.random.choice(self.hh_list, size=number, replace=False) # choose hosueholds
 
@@ -132,24 +128,29 @@ class InterHousehold:
 
 
     def individual_movement(self):
-        for person in list(self.movement_people):
+        for person in self.movement_people:
             # put the person back to its original household
             person.assign_household(person.household)
-            # remove person from movement list
-            self.movement_people.discard(person)
+        self.movement_people = set()
 
         # Generate a random number between 0 and 1 for each person
         # and select the persono if the number is less than or equal to individual_movement_frequency
-        selected_person = [person for person, rand in zip(self.people, np.random.rand(len(self.people))) if rand <= self.individual_movement_frequency]
+        random_numbers = np.random.rand(len(self.people))
+        selection_mask = random_numbers < 0.2
+        selected_people:list[Person] = np.array(self.people)[selection_mask]
 
-        for person in selected_person:
-            if person.location.social_days == 0 and person.availablility: # if move and person is not in social and person is not going to work
+        for person in selected_people:
+
+            if not person.location.is_social() and person.availablility: # if move and person is not in social and person is not going to work
                 same_cbg = self.random_boolean(self.prefer_cbg)
 
-                hh = self.select_hh(person.cbg, size=1)[0] if same_cbg else self.select_hh(size=1)[0] # choose a random household in the same cbg
+                if same_cbg:
+                    hh_index = np.random.randint(0, len(self.hh_by_cbg[person.cbg]))
+                    hh = self.hh_by_cbg[person.cbg][hh_index]
+                else:
+                    hh_index = np.random.randint(0, len(self.hh_list))
+                    hh = self.hh_list[hh_index]           
                 
-                while (hh.id == person.location.id and len(self.hh_list) >= 2 and hh.social_days > 0): # if person belongs to its household, there are enough household for selction, and the household is hosting social, reselct household
-                    hh = self.select_hh(person.cbg, size=1)[0] if same_cbg else self.select_hh(size=1)[0]
-                
-                person.assign_household(hh)
-                self.movement_people.add(person)
+                if (hh.id != person.location.id or not hh.is_social()):
+                    person.assign_household(hh)
+                    self.movement_people.add(person)
