@@ -77,7 +77,7 @@ class InterHousehold:
 
         self.individual_movement()
         self.social_event()
-        print(f"InterHousehold iteration {self.iteration}")
+        #print(f"InterHousehold iteration {self.iteration}")
         self.iteration += 1
         
         # self.children_movement()
