@@ -51,7 +51,7 @@ class POI():
         person.availablility = False
 
     def add_person_to_work(self,person):
-        total_worktime = ((person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) - person.work_time[0])*60
+        total_worktime = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))*60 - person.work_time[0]*60
 
         if total_worktime > len(self.current_people):
             self.current_people.append(deque())
@@ -61,9 +61,54 @@ class POI():
         self.population += 1
         person.availablility = False
 
-    def send_person(self, person, poi_dict):
-        # print(self.same_day_brands)
-        '''instate_sum = 0
+    def back_from_work (self, clock, person):
+        total_worktime =  (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24))*60 - clock
+        if total_worktime > len(self.current_people):
+            self.current_people.append(deque())
+        else:
+            self.current_people[total_worktime - 1].append(person)
+
+        self.population += 1
+        person.availablility = False
+        person.left_from_work = False
+
+    def next_poi(self, person, poi_dict):
+        instate_sum = 0
+        #outstate_sum = 0
+        #outstate_count = 0
+        next_poi_list = []
+
+        for brand_name in self.same_day_brands.keys():
+            if brand_name in poi_dict.keys():
+                instate_sum += self.same_day_brands[brand_name]
+                next_poi_list.append(brand_name)
+            #else:
+                #outstate_sum += self.same_day_brands[brand_name]
+                #outstate_count += 1
+
+        #outstate_avg = outstate_sum / outstate_count if outstate_count != 0 else 1
+        #next_poi_sum = outstate_avg + instate_sum
+
+        #next_poi_list.append("out of state")
+
+        next_poi_weights = []
+        for brand_name in next_poi_list:
+            if brand_name in poi_dict.keys():
+                next_poi_weights.append(self.same_day_brands[brand_name])
+            else:
+                continue
+
+        #next_poi_weights.append(outstate_avg / next_poi_sum)
+
+        if next_poi_list == []:
+            next_poi = None
+        else:
+            next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
+
+        return [person, next_poi]
+    
+    def next_poi_or_home(self, person, poi_dict):
+        instate_sum = 0
         next_poi_count = 1  # bc outstate is already a part of next poi list
         outstate_sum = 0
         outstate_count = 0
@@ -87,7 +132,6 @@ class POI():
         next_poi_list.append("out of state")
         next_poi_list.append("home")
 
-        # next_poi_list = ['Dollar General', 'out of state', 'home']
         # final total sum
         next_poi_sum += home_weight_modified
         next_poi_weights = []
@@ -101,27 +145,6 @@ class POI():
         next_poi_weights.append(outstate_avg / next_poi_sum)
         next_poi_weights.append(home_weight_modified / next_poi_sum)
 
-        next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]'''
-
-        '''
-            Just returning Home for now
-        '''
-
-        next_poi = 'home'
-
-        self.population -= 1
-        #print(self.population)
-        if next_poi == "home":
-            person.availablility = True
-
-        # print(instate_sum)
-        # print(outstate_count)
-        # print(outstate_sum)
-        # print(next_poi_count)
-        # print(next_poi_sum)
-        # print(home_weight_modified)
-        # print(next_poi_list)
-        # print(next_poi_weights)
-        # print(next_poi)
+        next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
 
         return [person, next_poi]
