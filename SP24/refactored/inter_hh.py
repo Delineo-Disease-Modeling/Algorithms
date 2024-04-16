@@ -45,7 +45,7 @@ class InterHousehold:
             guests:list[Person] = np.random.choice(self.p_by_cbg[cbg], size=size, replace=False)
         else:
             guests:list[Person] = np.random.choice(self.people, size=size, replace=False)
-        return [g for g in guests if g.availablility] # only return those who are availiable
+        return [g for g in guests if g.availability] # only return those who are availiable
 
 
     def select_hh(self, cbg=None, size:int=1) -> list[Household]:
@@ -141,7 +141,7 @@ class InterHousehold:
 
         for person in selected_people:
 
-            if not person.location.is_social() and person.availablility: # if move and person is not in social and person is not going to work
+            if not person.location.is_social() and person.availability: # if move and person is not in social and person is not going to work
                 same_cbg = self.random_boolean(self.prefer_cbg)
 
                 if same_cbg:
