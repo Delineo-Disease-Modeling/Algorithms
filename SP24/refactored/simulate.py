@@ -151,17 +151,14 @@ class Simulate:
         return occupation
         
     def move_to_work(self, clock, curr_hh, poi_dict, person):
-        can_go_out = True
-        if person.occupation != None:
+        if person.occupation is not None:
             work_start_time = person.work_time[0] * 60
             work_end_time = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) * 60
             shouldWork = work_start_time <= clock and clock < work_end_time
-            if shouldWork and person.hh_id == person.location.id: #when person is at "its own" home
-                can_go_out = False
+            if shouldWork and person.hh_id == person.location.id:
                 poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person)
-                curr_hh.population.remove(person)
-                
-        return can_go_out
+                return False  # should be removed from their household
+        return True  # No need to remove person from household
 
     def day_to_day(self, curr_hh, poi_dict, person):
         random_poi_name = random.choice(list(poi_dict.keys()))
@@ -173,27 +170,45 @@ class Simulate:
         '''
             Movement of people in each timestep
         '''
+        removals = []
+
 
         # Role-based Movement
-        for hh in hh_dict.keys():
-            curr_hh:Household = hh_dict[hh]
+        for hh_id, curr_hh in hh_dict.items():
             for person in curr_hh.population:
                 can_go_out = self.move_to_work(clock, curr_hh, poi_dict, person)
+                if not can_go_out:
+                # Mark person for removal after processing
+                    removals.append((curr_hh, person))
+                elif person.availability and random.random() <= 0.10 and person.hh_id == person.location.id: #10% chance to go to random POIs
+                    self.day_to_day(curr_hh, poi_dict, person)
+                    removals.append((curr_hh, person))
+
+
                 # if person.availability and random.random() <= 10 / 100 and person.hh_id == person.location.id: #10% goes out to random pois
-                #     self.day_to_day(curr_hh, poi_dict, person) 
+                #     self.day_to_day(curr_hh, poi_dict, person)
+
+
+        for curr_hh, person in removals:
+            if person in curr_hh.population:
+                curr_hh.population.remove(person)
+
 
         # POIs
         for poi in poi_dict.keys():
             curr_poi = poi_dict[poi]
             curr_poi.remove_people(clock, poi_dict)
-                    
+                   
+
 
         # Interhouse Movement
         self.interhouse.next()
 
+
         '''
             Get each population for each time step
         '''
+
 
         total_poi_population = 0
         each_poi_population = []
