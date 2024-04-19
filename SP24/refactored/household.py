@@ -97,7 +97,8 @@ class Person:
                 self.location.population.remove(self)
 
             # add the person to the designated location
-            hh.population.append(self)
+            if self not in hh.population:
+                hh.population.append(self)
             
             self.location = hh
 
@@ -180,14 +181,18 @@ class Household(Population):
         self.social_days = 0
         self.social_max_duration = 0
         
-        
-        for person in self.population:
-            if person.hh_id != self.id:
+        for person in list(self.population):
+            if person.household.id != self.id:
                 person.assign_household(person.household)
-        
     
     def is_social(self) -> bool:
         return self.social_days > 0
+
+    def has_hosts(self) -> bool:
+        for person in self.population:
+            if person.household.id == self.id:
+                return True
+        return False
 
 
     def to_dict(self):
