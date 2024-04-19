@@ -28,9 +28,9 @@ class InterHousehold:
         self.social_hh:set[Household] = set()
         self.movement_people:set[Person] = set()
 
-        self.individual_movement_frequency = 0.2
+        self.individual_movement_frequency = 0.01
 
-        self.social_event_frequency = 0.1
+        self.social_event_frequency = 0.005
         self.social_guest_num = 10
         self.social_max_duration = 3
 
@@ -117,13 +117,14 @@ class InterHousehold:
 
         for hh in hh_social: # iterate through the randomly selected households
             if not hh.is_social(): # if the household is not hosting social
-                if hh.population: # the household has its original population
+                if hh.has_hosts(): # the household has its original population
                     self.social_hh.add(hh)
                     hh.start_social(duration=np.random.randint(1, self.social_max_duration + 1))
                     guest_num = np.random.randint(1, self.social_guest_num + 1)
                     guest = self.select_guest(hh.cbg, size=guest_num) if self.random_boolean(self.prefer_cbg) else self.select_guest(size=guest_num)
+                    
                     for person in guest:
-                        if person.hh_id != hh.id and person not in hh.population: # if the person does not belong to the household member and is not a guest yet
+                        if person.household.id != hh.id and person not in hh.population and not person.location.is_social(): # if the person does not belong to the household member and is not a guest yet
                             person.assign_household(hh)
 
 
