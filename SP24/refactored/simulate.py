@@ -163,7 +163,7 @@ class Simulate:
     def day_to_day(self, curr_hh, poi_dict, person):
         random_poi_name = random.choice(list(poi_dict.keys()))
         poi_dict[random_poi_name].add_person_to_none_work(person)
-        curr_hh.population.remove(person)
+        return False
 
 
     def timestep(self, clock, poi_dict, hh_dict, popularity_matrix):
