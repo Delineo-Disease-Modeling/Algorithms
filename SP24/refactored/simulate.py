@@ -184,14 +184,9 @@ class Simulate:
                     self.day_to_day(curr_hh, poi_dict, person)
                     removals.append((curr_hh, person))
 
-
-                # if person.availability and random.random() <= 10 / 100 and person.hh_id == person.location.id: #10% goes out to random pois
-                #     self.day_to_day(curr_hh, poi_dict, person)
-
-
-        for curr_hh, person in removals:
-            if person in curr_hh.population:
-                curr_hh.population.remove(person)
+            for curr_hh, person in removals:
+                if person in curr_hh.population:
+                    curr_hh.population.remove(person)
 
 
         # POIs
@@ -202,7 +197,7 @@ class Simulate:
 
 
         # Interhouse Movement
-        self.interhouse.next()
+        #self.interhouse.next()
 
 
         '''
