@@ -1,31 +1,26 @@
 import json
 import pandas as pd
+from household import Household, Person
 
 class Papdata:
     """
     A class to manage and process data for people, homes, and places.
-    
-    Attributes:
-        hh_info (dict): Information about households, including members and their details.
-        place_path (str): File path for the CSV file containing data about places.
-        out_path (str): Output file path where the processed data will be saved as JSON. Defaults to 'output/papdata.json'.
-        pap_dict (dict): A dictionary structured to hold processed people, homes, and places data.
     """
 
 
-    def __init__(self, hh_info: dict, place_path: str, out_path='output/papdata.json'):
+    def __init__(self, hh_info: list[Household], place_path: str, out_path='output/papdata.json'):
         """
         Initializes the Papdata class with household information, places data path, and output path.
         
         Parameters:
-            hh_info (dict): A dictionary containing detailed information about households.
+            hh_info (list): A list of all households.
             place_path (str): The path to a CSV file containing data about various places.
             out_path (str): The path to save the output JSON file. Defaults to 'output/papdata.json'.
         """
         self.hh_info = hh_info
         self.place_path = place_path
         self.out_path = out_path
-        self.pap_dict = {"people":{}, "homes":{}, "places":{}}
+        self.pap_dict:dict = {"people":{}, "homes":{}, "places":{}}
 
     def read_place(self) -> pd.DataFrame:
         """
@@ -41,7 +36,6 @@ class Papdata:
     def generate(self):
         """
         Processes the household information and places data to populate the pap_dict.
-        This includes adding homes and persons data from hh_info and places data from the CSV file.
         """
         # add homes and persons
         '''
@@ -59,18 +53,13 @@ class Papdata:
                     "work end time":person.work_time[1]}
         '''
 
-        for home_id, home_details in self.hh_info.items():
-            self.pap_dict["homes"][int(home_id)] = {"cbg": home_details['cbg'], "members": len(home_details['population'])}
-            for person_id, person_details in home_details['population'].items():
-                self.pap_dict["people"][person_id] = {
-                    "sex": person_details['sex'], 
-                    "age": person_details['age'], 
-                    "home": person_details['home'], 
-                    "availability": person_details['availability'], 
-                    "work place": person_details['work_naics'],
-                    "work start time": person_details['work_time'][0], 
-                    "work end time": person_details['work_time'][1]
-                }
+        # add homes and persons
+        for h in self.hh_info:
+            self.pap_dict["homes"][int(h.id)] = h.to_dict()
+            for p in h.population:
+                self.pap_dict["people"][int(p.id)] = p.to_dict()
+
+
 
         # add places
         places = self.read_place()
