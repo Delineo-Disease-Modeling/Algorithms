@@ -48,6 +48,7 @@ class POI():
             self.current_people[random_integer - 1].append(person)
 
         self.population += 1
+        person.availability = False
 
     def add_person_to_work(self, time, person):
         if time > len(self.current_people):

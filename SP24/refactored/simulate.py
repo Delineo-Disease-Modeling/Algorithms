@@ -197,7 +197,7 @@ class Simulate:
 
 
         # Interhouse Movement
-        #self.interhouse.next()
+        self.interhouse.next()
 
 
         '''
