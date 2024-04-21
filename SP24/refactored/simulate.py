@@ -238,7 +238,7 @@ class Simulate:
         for i in range(self.settings['time']):
             poi_dict, hh_dict = self.timestep(clock, poi_dict, hh_dict, popularity_matrix)
             time += 1
-            clock = self.settings['start_time'] * 60 + time
+            clock = (self.settings['start_time'] * 60 + time)%1440
 
             # Print info!
             old_out = sys.stdout
