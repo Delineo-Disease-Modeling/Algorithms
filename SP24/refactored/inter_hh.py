@@ -222,7 +222,7 @@ class InterHousehold:
                         guest = self.select_population_by_number(self.people_df, guest_num, "p", True)
                     
                     for person in guest:
-                        if person.household.id != hh.id and not person.location.is_social(): # if the person does not belong to the household member and is not in a social
+                        if person.household.id != hh.id and not person.location.is_social() and person.availability: # if the person does not belong to the household member and is not in a social and person is availiable
                             person.assign_household(hh)
 
 
