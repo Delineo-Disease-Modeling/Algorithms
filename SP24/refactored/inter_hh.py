@@ -5,7 +5,9 @@ import numpy as np
 class InterHousehold:
     def __init__(self, hh_list:list[Household]):
         self.iteration = 1
-        self.hh_list = hh_list
+        self.hh_list:list[Household] = np.array(hh_list)
+        self.people_list  = [] # currently not used
+
 
         # we create a map that map person id to the person object
         self.id_to_person:dict[int, Person] = {}
@@ -21,14 +23,17 @@ class InterHousehold:
                 people_data.append(p.to_dict())
                 # map id to person
                 self.id_to_person[p.id] = p
+                self.people_list.append(p)
         
         self.people_df = pd.DataFrame(people_data)
         self.household_df = pd.DataFrame(household_data)
+        self.people_list:list[Person] = np.array(self.people_list)
 
-        self.verbose = False
+        self.verbose = True
         
         self.social_hh:set[Household] = set()
         self.movement_people:set[Person] = set()
+        self.children:set[tuple[Person, Person]] = set() # (child, parent)
 
         self.individual_movement_frequency = 0.2
 
@@ -37,16 +42,56 @@ class InterHousehold:
         self.social_max_duration = 3
         self.social_event_hh_cap = 0.1 # percentage of the population
 
-        self.school_children_frequency = 0.3
+        self.school_children_frequency = 0.18
+
+
+
         self.regular_visitation_frequency = 0.15
 
         self.prefer_cbg = 0.7 # possibility that guests come from the same cbg
 
-    def get_population_id(self) -> list[Person]:
-        return list(self.id_to_person.keys())
+    def update_df(self):
+        # update availability
+        self.people_df['availability'] = self.people_df['id'].map(lambda x: self.id_to_person[x].availability)
+        self.people_df['at_home'] = self.people_df['id'].map(lambda x: self.id_to_person[x].at_home()) 
+
+
+        '''
+        self.people_df[['availability', 'at_home']] = self.people_df['id'].apply(lambda x: pd.Series({
+            'availability': self.id_to_person.get(x).availability,
+            'at_home': self.id_to_person.get(x).at_home(),
+        }))
+        '''
     
-    def get_population(self) -> list[Person]:
-        return list(self.id_to_person.values())
+    
+
+    def filter_df(self, df:pd.DataFrame, **kwargs) -> pd.DataFrame:
+        for key, (operation, value) in kwargs.items():
+            if key not in df.columns:
+                raise KeyError(f"Column {key} not found in DataFrame.")
+            
+            # Apply filter based on operation
+            if operation == '==':
+                df = df[df[key] == value]
+            elif operation == '!=':
+                df = df[df[key] != value]
+            elif operation == '<':
+                df = df[df[key] < value]
+            elif operation == '<=':
+                df = df[df[key] <= value]
+            elif operation == '>':
+                df = df[df[key] > value]
+            elif operation == '>=':
+                df = df[df[key] >= value]
+            elif operation == 'in':
+                if not isinstance(value, list):
+                    raise ValueError("For 'in' operation, value must be a list.")
+                df = df[df[key].isin(value)]
+            else:
+                raise ValueError(f"Unsupported operation {operation}")
+        
+        return df
+
     
 
     def select_population_by_probability(self, df:pd.DataFrame, probability:float, mode:str, **kwargs) -> list[Household] | list[Person]:
@@ -71,30 +116,8 @@ class InterHousehold:
             raise ValueError("Mode must be 'h' (household) or 'p' (person).")
         if not (0 <= probability <= 1):
             raise ValueError("Probability must be between 0 and 1.")
-
-        for key, (operation, value) in kwargs.items():
-            if key not in df.columns:
-                raise KeyError(f"Column {key} not found in DataFrame.")
             
-            # Apply filter based on operation
-            if operation == '==':
-                df = df[df[key] == value]
-            elif operation == '!=':
-                df = df[df[key] != value]
-            elif operation == '<':
-                df = df[df[key] < value]
-            elif operation == '<=':
-                df = df[df[key] <= value]
-            elif operation == '>':
-                df = df[df[key] > value]
-            elif operation == '>=':
-                df = df[df[key] >= value]
-            elif operation == 'in':
-                if not isinstance(value, list):
-                    raise ValueError("For 'in' operation, value must be a list.")
-                df = df[df[key].isin(value)]
-            else:
-                raise ValueError(f"Unsupported operation {operation}")
+        df = self.filter_df(df, **kwargs)
 
         df = df["id"]
         if mode == "h":
@@ -123,30 +146,9 @@ class InterHousehold:
 
         if mode not in ['h', 'p']:
             raise ValueError("Mode must be 'h' (household) or 'p' (person).")
-        
-        for key, (operation, value) in kwargs.items():
-            if key not in df.columns:
-                raise KeyError(f"Column {key} not found in DataFrame.")
+    
             
-            # Apply filter based on operation
-            if operation == '==':
-                df = df[df[key] == value]
-            elif operation == '!=':
-                df = df[df[key] != value]
-            elif operation == '<':
-                df = df[df[key] < value]
-            elif operation == '<=':
-                df = df[df[key] <= value]
-            elif operation == '>':
-                df = df[df[key] > value]
-            elif operation == '>=':
-                df = df[df[key] >= value]
-            elif operation == 'in':
-                if not isinstance(value, list):
-                    raise ValueError("For 'in' operation, value must be a list.")
-                df = df[df[key].isin(value)]
-            else:
-                raise ValueError(f"Unsupported operation {operation}")
+        df = self.filter_df(df, **kwargs)
 
         df = df["id"]
         
@@ -173,49 +175,54 @@ class InterHousehold:
 
 
     def next(self):
+        self.update_df()
         self.individual_movement()
         self.social_event()
+        self.children_movement()
         print(f"InterHousehold iteration {self.iteration}")
         self.iteration += 1
-
+        
         if self.verbose:
             hosts = 0
             guests = 0
             social = 0
-            population = self.get_population()
-            for p in population:
+            for p in self.people_list:
                 if p.location.id == p.household.id:
                     hosts += 1
                 elif p.location.is_social():
                     social += 1
                 else:
                     guests += 1
+
             print(f"hosts: {hosts}, guests: {guests}, social: {social} ----- total: {hosts + guests + social}")
 
-        # self.children_movement()
 
     
     def children_movement(self):
-        pass
-        # for hh in self.hh_list:
-        #     children = []
-        #     adults = []
-        #     for person in hh.population:
-        #         if person.age <= 12:
-        #             children.append(person)
-        #         else:
-        #             adults.append(person)
+        # move children and parent to their own household
+        for c, p in self.children: # (child, parent)
+            c.assign_household(c.household)
+            p.assign_household(p.household)
+            
 
-        #     children_num = len(children) if len(children) < 3 else 3
-        #     adult_num = len(adults) if len(adults) < 2 else 2
+        children:list[Person] = self.select_population_by_probability(self.people_df, self.school_children_frequency, "p", age=('<', 12), availability=('==', True), at_home=('==', True))
+        for child in children:
+            parent = self.select_population_by_number(self.people_df, 1, "p", True, home=("==", child.household.id), age=('>=', 18), availability=('==', True), at_home=('==', True))
+            if len(parent) > 0:
+                parent = parent[0]
+                # move the child with its parent
+                # select destination household
+                same_cbg = self.random_boolean(self.prefer_cbg)
+                if same_cbg:
+                    hh = self.select_population_by_number(self.household_df, 1, "h", True, cbg=("==", child.cbg), id=("!=", child.household.id))[0]
+                else:
+                    hh = self.select_population_by_number(self.household_df, 1, "h", True, id=("!=", child.household.id))[0]
+                
+                # assign to new houses
+                child.assign_household(hh)
+                parent.assign_household(hh)
+                self.children.add((child, parent))
 
-        #     if children_num > 0 and adult_num > 0 and self.random_boolean(self.school_children_frequency):
-        #         children = np.random.choice(children, size=children_num, replace=False)
-        #         adults = np.random.choice(adults, size=adult_num, replace=False)
-
-        #         hh:Household = np.random.choice(self.hh_list, replace=False)
-        #         for person in children + adults:
-        #             pass
 
 
     def social_event(self):
@@ -234,20 +241,20 @@ class InterHousehold:
 
         for hh in hh_social: # iterate through the randomly selected households
             if not hh.is_social() and hh.has_hosts(): # if the household is not hosting social and the household has its original population
-                    self.social_hh.add(hh)
-                    hh.start_social(duration=np.random.randint(1, self.social_max_duration + 1))
+                self.social_hh.add(hh)
+                hh.start_social(duration=np.random.randint(1, self.social_max_duration + 1))
 
-                    # select guests
-                    guest_num = np.random.randint(1, self.social_guest_num + 1)
-                    same_cbg = self.random_boolean(self.prefer_cbg)
-                    if same_cbg:
-                        guest = self.select_population_by_number(self.people_df, guest_num, "p", True, cbg=('==', hh.cbg))
-                    else:
-                        guest = self.select_population_by_number(self.people_df, guest_num, "p", True)
-                    
-                    for person in guest:
-                        if person.household.id != hh.id and not person.location.is_social() and person.availability: # if the person does not belong to the household member and is not in a social and person is availiable
-                            person.assign_household(hh)
+                # select guests
+                guest_num = np.random.randint(1, self.social_guest_num + 1)
+                same_cbg = self.random_boolean(self.prefer_cbg)
+                if same_cbg:
+                    guest = self.select_population_by_number(self.people_df, guest_num, "p", True, cbg=('==', hh.cbg), age=('>=', 18), at_home=('==', True))
+                else:
+                    guest = self.select_population_by_number(self.people_df, guest_num, "p", True, age=('>=', 18), at_home=('==', True))
+                
+                for person in guest:
+                    if person.household.id != hh.id and not person.location.is_social() and person.availability: # if the person does not belong to the household member and is not in a social and person is availiable
+                        person.assign_household(hh)
 
 
     def individual_movement(self):
@@ -256,7 +263,7 @@ class InterHousehold:
             person.assign_household(person.household)
         self.movement_people = set()
 
-        selected_people:list[Person] = self.select_population_by_probability(self.people_df, self.individual_movement_frequency, "p")
+        selected_people:list[Person] = self.select_population_by_probability(self.people_df, self.individual_movement_frequency, "p", age=('>=', 18), at_home=('==', True))
 
         for person in selected_people:
             if not person.location.is_social() and person.availability: # if move and person is not in social and person is not going to work
@@ -316,44 +323,49 @@ class Random:
         
         return sample
     
-    @staticmethod
-    def mapped_population_by_number(population_id: list | np.ndarray | pd.Series, map_data: dict, num: int):
+    def mapped_population_by_number(population_id, map_data, num):
         """
-        Samples a fixed number of population IDs and maps each selected ID to its corresponding object using a provided dictionary. This method returns the list of objects after mapping.
-
+        Samples a fixed number of population IDs and maps each selected ID to its corresponding object using a provided dictionary. 
+        This method efficiently returns a list of objects corresponding to the mapped IDs.
+        
         Parameters:
             population_id (list | np.ndarray | pd.Series): The IDs of the population to sample from.
             map_data (dict): Dictionary that maps each ID to its corresponding object.
             num (int): Fixed number of IDs to sample.
-
+        
         Returns:
             list: Mapped objects of the sampled population IDs.
-
+        
         Raises:
-            TypeError: If population_id is neither an ndarray nor a pd.Series.
-            ValueError: If the number of elements to sample is out of acceptable range.
+            TypeError: If the type of population_id is not supported.
+            ValueError: If the number of elements to sample is out of an acceptable range or if num is not a non-negative integer.
             KeyError: If a key from the population IDs is missing in map_data.
         """
 
-        # Validate num is within the allowable range
+        if num == 0:
+            return []
+
         if not isinstance(num, int) or num < 0:
             raise ValueError("Number of elements to sample must be a non-negative integer.")
         if num > len(population_id):
             raise ValueError("Number of elements to sample cannot exceed the size of the population.")
 
-        # Use Random class method to select indices
-        index_list = Random.select_fixed_number(0, len(population_id), num)
-
-        # Attempt to map each selected index using map_data
         try:
+            # Sampling indices directly from population_id if it is a pd.Series, or using a random choice for arrays or lists
             if isinstance(population_id, pd.Series):
-                sample = [map_data[population_id.iat[index]] for index in index_list]
+                sampled_ids = population_id.sample(n=num, replace=False)
+            elif isinstance(population_id, (np.ndarray, list)):
+                sampled_ids = np.random.choice(population_id, num, replace=False)
             else:
-                sample = [map_data[population_id[index]] for index in index_list]
+                raise TypeError("population_id must be a list, np.ndarray, or pd.Series.")
+            
+            # Mapping sampled IDs to objects
+            mapped_objects = [map_data[_id] for _id in sampled_ids]
+
         except KeyError as e:
             raise KeyError(f"Missing key in map_data: {e}")
 
-        return sample
+        return mapped_objects
 
 
     @staticmethod
@@ -390,35 +402,3 @@ class Random:
         selected_numbers = np.where(random_draws)[0] + start
 
         return selected_numbers
-
-
-    @staticmethod
-    def select_fixed_number(start:int, end:int, num:int) -> np.ndarray:
-        """
-        Select a fixed number of elements randomly from a specified range [start, end) without replacement.
-
-        Parameters:
-            start (int): The starting number of the range (inclusive).
-            end (int): The ending number of the range (exclusive).
-            num (int): The number of elements to select.
-
-        Returns:
-            np.ndarray: An array of randomly selected numbers.
-
-        Example:
-            >>> Random.select_fixed_number(0, 100, 5)
-            array([42, 7, 58, 94, 21])  # Example output; actual output will vary
-        """
-
-        if end <= start:
-            raise ValueError("End must be greater than start.")
-
-        if not isinstance(num, int) or num < 0:
-            raise ValueError("Number of elements to select must be a non-negative integer.")
-
-        if num > (end - start):
-            raise ValueError("Number of elements to select cannot be more than the number of elements in the range.")
-
-        random_indices = np.random.choice(range(start, end), num, replace=False)
-
-        return random_indices
