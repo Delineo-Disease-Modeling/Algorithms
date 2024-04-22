@@ -5,6 +5,7 @@ import json
 import csv
 from household import Person, Household, poi_category, age_category
 from inter_hh import InterHousehold
+from papdata import Papdata
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
@@ -38,6 +39,10 @@ class Simulate:
         self.category_info = category_info
         self.interhouse = InterHousehold(hh_info)
 
+        # papdata generation
+        papdata = Papdata(self.hh_info, 'input/barnsdall.pois.csv')
+        papdata.generate()
+        
     def get_city_info(self):
 
         poi_dict = {}

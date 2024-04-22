@@ -93,20 +93,30 @@ class Person:
         if self.location.id != hh.id: # check if the person is already in designated household
             
             # remove the person from the current location
-            if self in self.location.population:
+            try:
                 self.location.population.remove(self)
+            except ValueError as e:
+                # print(f'key is not found when removing Person {self.id} from Household {self.location.id}')
+                pass
 
             # add the person to the designated location
             if self not in hh.population:
                 hh.population.append(self)
             
             self.location = hh
+    
+    def at_home(self) -> bool:
+        return self.household.id == self.location.id
 
     def to_dict(self):
         return {
+            'id':self.id,
+            'cbg':self.cbg,
             'sex': self.sex,
-            'age': self.age,
-            'home': self.household.id,
+            'age': self.age, # used by interhousehold movement
+            'home': self.household.id, # used by interhousehold movement
+            'availability':self.availability, # used by interhousehold movement
+            'at_home':self.at_home(), # used by interhousehold movement
         }
 
     def __str__(self):
@@ -197,6 +207,7 @@ class Household(Population):
 
     def to_dict(self):
         return {
+            'id':self.id,
             'cbg': self.cbg,
             'members': len(self.population)
         }
