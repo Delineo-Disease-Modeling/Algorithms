@@ -104,6 +104,8 @@ class Person:
 
     def to_dict(self):
         return {
+            'id':self.id,
+            'cbg':self.cbg,
             'sex': self.sex,
             'age': self.age,
             'home': self.household.id,
@@ -197,6 +199,7 @@ class Household(Population):
 
     def to_dict(self):
         return {
+            'id':self.id,
             'cbg': self.cbg,
             'members': len(self.population)
         }
