@@ -1,8 +1,6 @@
-import json
-import csv
-import numpy as np
 from household import Household, Person
 import pandas as pd
+import numpy as np
 
 class InterHousehold:
     def __init__(self, hh_list:list[Household]):
@@ -42,7 +40,7 @@ class InterHousehold:
         self.school_children_frequency = 0.3
         self.regular_visitation_frequency = 0.15
 
-        self.prefer_cbg = 0.8 # possibility that guests come from the same cbg
+        self.prefer_cbg = 0.7 # possibility that guests come from the same cbg
 
     def get_population_id(self) -> list[Person]:
         return list(self.id_to_person.keys())
@@ -53,13 +51,13 @@ class InterHousehold:
 
     def select_population_by_probability(self, df:pd.DataFrame, probability:float, mode:str, **kwargs) -> list[Household] | list[Person]:
         """
-        Filters the DataFrame based on provided keyword arguments and selects a population by probability.
-        
+        Filters the DataFrame based on provided keyword arguments using advanced comparison operations and selects a population by probability.
+
         Parameters:
             df (pd.DataFrame): The DataFrame containing the population data.
             probability (float): The probability of selecting each entry.
             mode (str): Mode of mapping; 'h' for household and 'p' for person.
-            **kwargs: Keyword arguments specifying filtering criteria where keys are column names and values are the filtering values.
+            **kwargs: Keyword arguments specifying filtering criteria where keys are column names and values are tuples containing (operation, value).
 
         Returns:
             list: Mapped values of the selected population based on the mode.
@@ -74,13 +72,29 @@ class InterHousehold:
         if not (0 <= probability <= 1):
             raise ValueError("Probability must be between 0 and 1.")
 
-        for key, value in kwargs.items():
+        for key, (operation, value) in kwargs.items():
             if key not in df.columns:
                 raise KeyError(f"Column {key} not found in DataFrame.")
-            if isinstance(value, list):
+            
+            # Apply filter based on operation
+            if operation == '==':
+                df = df[df[key] == value]
+            elif operation == '!=':
+                df = df[df[key] != value]
+            elif operation == '<':
+                df = df[df[key] < value]
+            elif operation == '<=':
+                df = df[df[key] <= value]
+            elif operation == '>':
+                df = df[df[key] > value]
+            elif operation == '>=':
+                df = df[df[key] >= value]
+            elif operation == 'in':
+                if not isinstance(value, list):
+                    raise ValueError("For 'in' operation, value must be a list.")
                 df = df[df[key].isin(value)]
             else:
-                df = df[df[key] == value]
+                raise ValueError(f"Unsupported operation {operation}")
 
         df = df["id"]
         if mode == "h":
@@ -90,13 +104,14 @@ class InterHousehold:
 
     def select_population_by_number(self, df:pd.DataFrame, num:int, mode:str, fallback=False, **kwargs) -> list[Household] | list[Person]:
         """
-        Filters the DataFrame based on provided keyword arguments and selects a fixed number of population entries.
+        Filters the DataFrame based on provided keyword arguments and selects a fixed number of population entries using advanced comparison operations.
 
         Parameters:
             df (pd.DataFrame): The DataFrame containing the population data.
             num (int): The number of entries to select.
             mode (str): Mode of mapping; 'h' for household and 'p' for person.
-            **kwargs: Keyword arguments specifying filtering criteria where keys are column names and values are the filtering values.
+            fallback (bool): If true, select all available entries if `num` exceeds available entries.
+            **kwargs: Keyword arguments specifying filtering criteria where keys are column names and values are tuples containing (operation, value).
 
         Returns:
             list: Mapped values of the selected population based on the mode.
@@ -108,14 +123,30 @@ class InterHousehold:
 
         if mode not in ['h', 'p']:
             raise ValueError("Mode must be 'h' (household) or 'p' (person).")
-
-        for key, value in kwargs.items():
+        
+        for key, (operation, value) in kwargs.items():
             if key not in df.columns:
                 raise KeyError(f"Column {key} not found in DataFrame.")
-            if isinstance(value, list):
+            
+            # Apply filter based on operation
+            if operation == '==':
+                df = df[df[key] == value]
+            elif operation == '!=':
+                df = df[df[key] != value]
+            elif operation == '<':
+                df = df[df[key] < value]
+            elif operation == '<=':
+                df = df[df[key] <= value]
+            elif operation == '>':
+                df = df[df[key] > value]
+            elif operation == '>=':
+                df = df[df[key] >= value]
+            elif operation == 'in':
+                if not isinstance(value, list):
+                    raise ValueError("For 'in' operation, value must be a list.")
                 df = df[df[key].isin(value)]
             else:
-                df = df[df[key] == value]
+                raise ValueError(f"Unsupported operation {operation}")
 
         df = df["id"]
         
@@ -128,7 +159,7 @@ class InterHousehold:
         if mode == "h":
             return Random.mapped_population_by_number(df, self.id_to_household, num)
         elif mode == "p":
-            return Random.mapped_population_by_number(df, self.id_to_person, num)        
+            return Random.mapped_population_by_number(df, self.id_to_person, num)
 
         
     def random_boolean(self, probability_of_true:float):
@@ -161,11 +192,6 @@ class InterHousehold:
                     guests += 1
             print(f"hosts: {hosts}, guests: {guests}, social: {social} ----- total: {hosts + guests + social}")
 
-
-            
-            
-
-        
         # self.children_movement()
 
     
@@ -201,8 +227,6 @@ class InterHousehold:
             else:
                 hh.social_days += 1
 
-
-
         hh_social:list[Household] = self.select_population_by_probability(self.household_df, self.social_event_frequency, "h")
 
         if (len(self.social_hh) + len(hh_social) >= len(self.id_to_household)*self.social_event_hh_cap):
@@ -217,7 +241,7 @@ class InterHousehold:
                     guest_num = np.random.randint(1, self.social_guest_num + 1)
                     same_cbg = self.random_boolean(self.prefer_cbg)
                     if same_cbg:
-                        guest = self.select_population_by_number(self.people_df, guest_num, "p", True, cbg=hh.cbg)
+                        guest = self.select_population_by_number(self.people_df, guest_num, "p", True, cbg=('==', hh.cbg))
                     else:
                         guest = self.select_population_by_number(self.people_df, guest_num, "p", True)
                     
@@ -238,14 +262,13 @@ class InterHousehold:
             if not person.location.is_social() and person.availability: # if move and person is not in social and person is not going to work
                 same_cbg = self.random_boolean(self.prefer_cbg)
                 if same_cbg:
-                    hh = self.select_population_by_number(self.household_df, 1, "h", False, cbg=person.cbg)[0]
+                    hh = self.select_population_by_number(self.household_df, 1, "h", False, cbg=('==', person.cbg))[0]
                 else:
                     hh = self.select_population_by_number(self.household_df, 1, "h", False)[0]
                 
                 if (hh.id != person.location.id or not hh.is_social()):
                     person.assign_household(hh)
                     self.movement_people.add(person)
-    
 
 
 class Random:
@@ -277,16 +300,17 @@ class Random:
         if not 0 <= probability <= 1:
             raise ValueError("Probability must be between 0 and 1.")
         
-        # Convert pd.Series to numpy array if necessary
-        if isinstance(population_id, pd.Series):
-            population_id = population_id.to_numpy()
-        
         # Calculate indices of the population to be sampled
         index_list = Random.select_by_threshold(0, len(population_id), probability)
         
         try:
-            # Retrieve population data from index and map to new values using map_data
-            sample = [map_data[value] for value in population_id[index_list]]
+            if isinstance(population_id, pd.Series):
+                sample = [map_data[population_id.iat[index]] for index in index_list]
+            else:
+                # Retrieve population data from index and map to new values using map_data
+                sample = [map_data[population_id[index]] for index in index_list]
+
+
         except KeyError as e:
             raise KeyError(f"Missing key in map_data: {e}")
         
@@ -310,9 +334,6 @@ class Random:
             ValueError: If the number of elements to sample is out of acceptable range.
             KeyError: If a key from the population IDs is missing in map_data.
         """
-        # Convert pd.Series to numpy array if necessary
-        if isinstance(population_id, pd.Series):
-            population_id = population_id.to_numpy()
 
         # Validate num is within the allowable range
         if not isinstance(num, int) or num < 0:
@@ -325,7 +346,10 @@ class Random:
 
         # Attempt to map each selected index using map_data
         try:
-            sample = [map_data[value] for value in population_id[index_list]]
+            if isinstance(population_id, pd.Series):
+                sample = [map_data[population_id.iat[index]] for index in index_list]
+            else:
+                sample = [map_data[population_id[index]] for index in index_list]
         except KeyError as e:
             raise KeyError(f"Missing key in map_data: {e}")
 
