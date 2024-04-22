@@ -4,7 +4,7 @@ import numpy as np
 
 class InterHousehold:
     def __init__(self, hh_list:list[Household]):
-        self.iteration = 1
+        self.iteration = 0
         self.hh_list:list[Household] = np.array(hh_list)
         self.people_list  = [] # currently not used
 
@@ -120,6 +120,10 @@ class InterHousehold:
         df = self.filter_df(df, **kwargs)
 
         df = df["id"]
+
+        if len(df) == 0:
+            return []
+
         if mode == "h":
             return Random.mapped_population_by_threshold(df, self.id_to_household, probability)
         elif mode == "p":
@@ -151,6 +155,9 @@ class InterHousehold:
         df = self.filter_df(df, **kwargs)
 
         df = df["id"]
+
+        if len(df) == 0:
+            return []
         
         if num < 0 or num > len(df):
             if fallback:
@@ -179,9 +186,8 @@ class InterHousehold:
         self.individual_movement()
         self.social_event()
         self.children_movement()
-        print(f"InterHousehold iteration {self.iteration}")
         self.iteration += 1
-        
+
         if self.verbose:
             hosts = 0
             guests = 0
@@ -194,8 +200,9 @@ class InterHousehold:
                 else:
                     guests += 1
 
-            print(f"hosts: {hosts}, guests: {guests}, social: {social} ----- total: {hosts + guests + social}")
-
+            print(f"InterHousehold iteration {self.iteration:04} ----- hosts: {hosts:04}, guests: {guests:04}, social: {social:04} ----- total: {(hosts + guests + social):04}")
+        else:
+            print(f"InterHousehold iteration {self.iteration:04}")
 
     
     def children_movement(self):
