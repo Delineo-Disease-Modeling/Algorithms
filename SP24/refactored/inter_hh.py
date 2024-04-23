@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 
 class InterHousehold:
-    def __init__(self, hh_list:list[Household]):
+    def __init__(self, hh_list:list[Household], config:dict):
         self.iteration = 0
         self.hh_list:list[Household] = np.array(hh_list)
         self.people_list  = [] # currently not used
@@ -35,25 +35,80 @@ class InterHousehold:
         self.movement_people:set[Person] = set()
         self.children:set[tuple[Person, Person]] = set() # (child, parent)
 
-        self.individual_movement_frequency = 0.2
-
-        self.social_event_frequency = 0.05
-        self.social_guest_num = 4
-        self.social_max_duration = 3
-        self.social_event_hh_cap = 0.1 # percentage of the population
-
-        self.school_children_frequency = 0.18
-
-
-
         self.regular_visitation_frequency = 0.15
 
-        self.prefer_cbg = 0.7 # possibility that guests come from the same cbg
+        self.parse_config(config)
+
+        
+
+    def parse_config(self, config:dict):
+        """
+        Parses the configuration settings for the household interaction simulation with specific parameter ranges.
+
+        Parameters:
+            config (dict): Configuration dictionary containing the 'interhousehold' key with relevant settings.
+
+        Configurations include:
+            individual_movement_frequency (float): Probability of a person moving individually in each timestep [0, 1].
+                - Affects how often people can move from one household to another independently.
+
+            social_event_frequency (float): Probability of a household hosting a social event each timestep [0, 1].
+                - Controls how often households can initiate social events, inviting other individuals.
+
+            social_guest_num (int): Maximum number of guests allowed per social event (positive integer).
+                - Limits the number of people who can attend a social gathering to prevent overcrowding.
+
+            social_max_duration (int): Maximum duration (in timesteps) that a social event can last (positive integer).
+                - Sets the upper limit on how long a social event can continue before it must end.
+
+            social_event_hh_cap (float): Maximum percentage of households that can simultaneously hold social events [0, 1].
+                - Ensures that only a certain fraction of the total households can be involved in social events at any one time to simulate realistic social interaction limits.
+
+            school_children_frequency (float): Probability of children moving along with their parents in a timestep [0, 1].
+                - Determines how often children are likely to change households concurrently with their parents, simulating scenarios like moving for schooling or family events.
+
+            prefer_cbg (float): Probability that people move within the same census block group (CBG) [0, 1].
+                - Influences the likelihood of maintaining geographical closeness when individuals or families move.
+
+        Raises:
+            KeyError: If the necessary settings are not provided in the configuration.
+        """
+        config = config['interhousehold']
+
+        self.individual_movement_frequency = self.validate_config_value(config['individual_movement_frequency'], 0.0, 1.0)
+        self.social_event_frequency = self.validate_config_value(config['social_event_frequency'], 0.0, 1.0)
+        self.social_guest_num = self.validate_config_value(config['social_guest_num'], 1, float('inf'), int)
+        self.social_max_duration = self.validate_config_value(config['social_max_duration'], 1, float('inf'), int)
+        self.social_event_hh_cap = self.validate_config_value(config['social_event_hh_cap'], 0.0, 1.0)
+        self.school_children_frequency = self.validate_config_value(config['school_children_frequency'], 0.0, 1.0)
+        self.prefer_cbg = self.validate_config_value(config['prefer_cbg'], 0.0, 1.0)
+
+    def validate_config_value(self, value, min_val, max_val, type_func=float):
+        """
+        Validates and converts a configuration value ensuring it falls within a specified range.
+
+        Parameters:
+            value: The value to be validated.
+            min_val: The minimum acceptable value.
+            max_val: The maximum acceptable value.
+            type_func: The function to convert the type (default is float).
+
+        Returns:
+            The converted value if valid.
+
+        Raises:
+            ValueError: If the value is out of the specified range.
+        """
+        value = type_func(value)
+        if not (min_val <= value <= max_val):
+            raise ValueError(f"Value {value} out of range [{min_val}, {max_val}]")
+        return value
+
 
     def update_df(self):
         # update availability
         self.people_df['availability'] = self.people_df['id'].map(lambda x: self.id_to_person[x].availability)
-        self.people_df['at_home'] = self.people_df['id'].map(lambda x: self.id_to_person[x].at_home()) 
+        self.people_df['at_home'] = self.people_df['id'].map(lambda x: self.id_to_person[x].at_home())
 
 
         '''
