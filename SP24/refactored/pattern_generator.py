@@ -35,6 +35,3 @@ def merge_files(result_hh_file, result_poi_file, patterns_file):
     # Write aggregated data to patterns.json
     with open(patterns_file, 'w') as patterns_json:
         json.dump(patterns, patterns_json, indent=4)
-
-# Call the function with file names
-merge_files("./output/result_hh.json", "./output/result_poi.json", "patterns.json")

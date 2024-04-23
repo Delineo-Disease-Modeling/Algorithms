@@ -1,31 +1,81 @@
-import pandas as pd
 import yaml
+import pandas as pd
+import os
+import csv
 
-# Read CSV file
-df = pd.read_csv('./input/hagerstown.pois.csv')
+def convert_dict_to_string(input_dict):
+    # Extracting keys and values from the input dictionary
+    keys = list(input_dict.keys())
+    values = list(input_dict.values())
 
-# Initialize dictionary to store data
-data = {}
+    # Convert keys to integers for sorting
+    keys_int = []
+    for key in keys:
+        if key.startswith('<'):
+            keys_int.append(-1)
+        elif key.startswith('>'):
+            keys_int.append(float('inf'))
+        else:
+            range_values = re.findall(r'\d+', key)
+            keys_int.append(sum(map(int, range_values)) / len(range_values))
 
-# Loop through each row in the dataframe
-for _, row in df.iterrows():
-    # Extract relevant data
-    location_name = row['location_name']
-    bucketed_dwell_times = '{"<5":0,"5-10":0,"11-20":0,"21-60":0,"61-120":0,"121-240":0,">240":0}' # Placeholder, as this data is not available in the CSV
-    popularity_by_day = {"Monday": 0, "Tuesday": 0, "Wednesday": 0, "Thursday": 0, "Friday": 0, "Saturday": 0, "Sunday": 0} # Placeholder, as this data is not available in the CSV
-    popularity_by_hour = [0] * 24 # Placeholder, as this data is not available in the CSV
-    raw_visit_counts = 0 # Placeholder, as this data is not available in the CSV
-    related_same_day_brand = {} # Placeholder, as this data is not available in the CSV
-    
-    # Store data in the dictionary
-    data[location_name] = {
-        'bucketed_dwell_times': bucketed_dwell_times,
-        'popularity_by_day': popularity_by_day,
-        'popularity_by_hour': popularity_by_hour,
-        'raw_visit_counts': raw_visit_counts,
-        'related_same_day_brand': related_same_day_brand
-    }
+    # Sorting keys and values based on integer representation of keys
+    sorted_indices = sorted(range(len(keys_int)), key=lambda k: keys_int[k])
 
-# Write data to YAML file
-with open('./input/hagerstown.yaml', 'w') as file:
-    yaml.dump(data, file, default_flow_style=False)
+    # Creating a new dictionary with sorted keys and values
+    sorted_dict = {}
+    for i in sorted_indices:
+        sorted_dict[keys[i]] = values[i]
+
+    # Converting the dictionary to a JSON string
+    json_string = json.dumps(sorted_dict)
+
+    return json_string
+
+def generate_yaml(town):
+    """
+    Generates YAML file for the specified town.
+    """
+
+    csv_file = f'./input/{town}.csv'
+    csv_poi_file = f'./input/{town}.pois.csv'
+
+    # Read the CSV file into a pandas DataFrame
+    df = pd.read_csv(csv_poi_file)
+
+    # Create a dictionary with location_name as key and true/false based on naics_code existence
+    location_dict = {}
+
+    for index, row in df.iterrows():
+        location_name = row["location_name"]
+        naics_code = row["naics_code"]
+        if pd.notna(naics_code):
+            location_dict[location_name] = True
+        else:
+            location_dict[location_name] = False
+
+    data = {}
+
+    # Read CSV file and extract data
+    with open(csv_file, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            if location_dict[row['location_name']]:
+                data[row['location_name']] = {
+                    'bucketed_dwell_times': row['bucketed_dwell_times'],
+                    'popularity_by_day': yaml.safe_load(row['popularity_by_day']),
+                    'popularity_by_hour': yaml.safe_load(row['popularity_by_hour']),
+                    'raw_visit_counts': int(row['raw_visit_counts']),
+                    'related_same_day_brand': yaml.safe_load(row['related_same_day_brand'])
+                }
+
+    yaml_file = f'./input/{town}.yaml'
+
+    with open(yaml_file, mode="w") as yamlfile:
+        yaml.dump(data, yamlfile, default_flow_style=False)
+
+    if os.path.exists(yaml_file):
+        #update_yaml_file(yaml_file)
+        print(f"YAML file generated successfully for town '{town}'")
+    else:
+        print(f"File '{yaml_file}' not found.")

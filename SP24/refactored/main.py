@@ -2,6 +2,8 @@ import yaml
 from household import Household, Person
 from simulate import Simulate
 from inter_hh import InterHousehold
+from pattern_generator import merge_files
+from yaml_generator import generate_yaml
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -136,10 +138,13 @@ if __name__ == "__main__":
     with open('input/simul_settings.yaml', mode="r", encoding='utf-8') as settingstream:
         settings = yaml.safe_load(settingstream)
 
-    with open('input/barnsdall.yaml', mode="r", encoding='utf-8') as citystream:
+    if settings['town'] != 'barnsdall':
+        generate_yaml(settings['town'])
+
+    with open(f'input/{settings['town']}.yaml', mode="r", encoding='utf-8') as citystream:
         city_info = yaml.safe_load(citystream)
 
-    category_info = 'input/barnsdall.pois.csv'
+    category_info = f'input/{settings['town']}.pois.csv'
 
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Person', person_constructor)
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Household', household_constructor)
@@ -159,5 +164,7 @@ if __name__ == "__main__":
     visualize_simulation_results()
 
     visualize_occupation_distribution()
+
+    merge_files("./output/result_hh.json", "./output/result_poi.json", "patterns.json")
 
     

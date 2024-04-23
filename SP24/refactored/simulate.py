@@ -37,10 +37,10 @@ class Simulate:
         self.city_info = city_info
         self.hh_info = hh_info
         self.category_info = category_info
-        self.interhouse = InterHousehold(hh_info)
+        self.interhouse = InterHousehold(hh_info, settings)
 
         # papdata generation
-        papdata = Papdata(self.hh_info, 'input/barnsdall.pois.csv')
+        papdata = Papdata(self.hh_info, f'input/{settings['town']}.pois.csv')
         papdata.generate()
         
     def get_city_info(self):

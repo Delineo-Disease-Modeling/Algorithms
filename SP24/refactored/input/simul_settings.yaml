@@ -1,2 +1,13 @@
+"town": "barnsdall"
 "time": 600
 "start_time": 8
+
+# Interhousehold movement settings:
+interhousehold:
+  individual_movement_frequency: 0.2   # Probability that an individual will move independently in each time step (range: 0.0 to 1.0).
+  social_event_frequency: 0.05         # Probability of a household initiating a social event per time step (range: 0.0 to 1.0).
+  social_guest_num: 4                  # Maximum number of guests allowed at a social event (must be a positive integer).
+  social_max_duration: 3               # Maximum number of time units a social event can last (must be a positive integer).
+  social_event_hh_cap: 0.2             # Maximum fraction of total households that can host social events simultaneously (range: 0.0 to 1.0).
+  school_children_frequency: 0.18      # Probability of children moving with their parents in each time step (range: 0.0 to 1.0).
+  prefer_cbg: 0.7                      # Probability that movements (individual or social event related) occur within the same census block group (CBG) (range: 0.0 to 1.0).
