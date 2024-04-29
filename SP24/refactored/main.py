@@ -165,6 +165,6 @@ if __name__ == "__main__":
 
     visualize_occupation_distribution()
 
-    merge_files("./output/result_hh.json", "./output/result_poi.json", "patterns.json")
+    merge_files("./output/result_hh.json", "./output/result_poi.json", "./output/patterns.json")
 
     
