@@ -5,7 +5,7 @@ import numpy as np
 class InterHousehold:
     def __init__(self, hh_list:list[Household], config:dict):
         self.iteration = 0
-        self.hh_list:list[Household] = np.array(hh_list)
+        self.hh_list:list[Household] = hh_list
         self.people_list  = [] # currently not used
 
 
@@ -29,7 +29,7 @@ class InterHousehold:
         self.household_df = pd.DataFrame(household_data)
         self.people_list:list[Person] = np.array(self.people_list)
 
-        self.verbose = True
+        self.verbose = False
         
         self.social_hh:set[Household] = set()
         self.movement_people:set[Person] = set()

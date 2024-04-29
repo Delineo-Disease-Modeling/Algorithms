@@ -141,10 +141,10 @@ if __name__ == "__main__":
     if settings['town'] != 'barnsdall':
         generate_yaml(settings['town'])
 
-    with open(f'input/{settings['town']}.yaml', mode="r", encoding='utf-8') as citystream:
+    with open(f'input/{settings["town"]}.yaml', mode="r", encoding='utf-8') as citystream:
         city_info = yaml.safe_load(citystream)
 
-    category_info = f'input/{settings['town']}.pois.csv'
+    category_info = f'input/{settings["town"]}.pois.csv'
 
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Person', person_constructor)
     yaml.SafeLoader.add_constructor('tag:yaml.org,2002:python/object:__main__.Household', household_constructor)

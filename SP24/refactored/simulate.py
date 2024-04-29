@@ -6,6 +6,7 @@ import csv
 from household import Person, Household, poi_category, age_category
 from inter_hh import InterHousehold
 from papdata import Papdata
+import os
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
@@ -40,7 +41,7 @@ class Simulate:
         self.interhouse = InterHousehold(hh_info, settings)
 
         # papdata generation
-        papdata = Papdata(self.hh_info, f'input/{settings['town']}.pois.csv')
+        papdata = Papdata(self.hh_info, f'input/{settings["town"]}.pois.csv')
         papdata.generate()
         
     def get_city_info(self):
@@ -347,6 +348,10 @@ class Simulate:
 
         hh_return_dict_converted = convert_to_dict(hh_return_dict)
         poi_return_dict_converted = convert_to_dict(poi_return_dict)
+
+        # Create the directory if it does not exist
+        if not os.path.exists("output"):
+            os.makedirs("output")
 
         with open("output/result_hh.json", "w+", encoding='utf-8') as hhstream:
             json.dump(hh_return_dict_converted, hhstream, ensure_ascii=False, indent=4)

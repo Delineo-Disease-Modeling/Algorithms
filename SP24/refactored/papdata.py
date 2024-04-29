@@ -1,6 +1,7 @@
 import json
 import pandas as pd
 from household import Household, Person
+import os
 
 class Papdata:
     """
@@ -80,5 +81,13 @@ class Papdata:
         """
         Writes the processed data stored in pap_dict to a JSON file specified by out_path.
         """
+
+        # Extract the directory path
+        directory = os.path.dirname(self.out_path)
+
+        # Create the directory if it does not exist
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+
         with open(self.out_path, 'w', encoding='utf-8') as file:
             json.dump(self.pap_dict, file, indent=4)
