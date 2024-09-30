@@ -40,7 +40,7 @@ class Simulate:
         self.interhouse = InterHousehold(hh_info, settings)
 
         # papdata generation
-        papdata = Papdata(self.hh_info, f'input/{settings["town"]}.pois.csv')
+        papdata = Papdata(self.hh_info, f'input/{settings['town']}.pois.csv')
         papdata.generate()
         
     def get_city_info(self):
@@ -162,8 +162,8 @@ class Simulate:
             shouldWork = work_start_time <= clock and clock < work_end_time
             if shouldWork and person.hh_id == person.location.id:
                 poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person)
-                return False  # should be removed from their household
-        return True  # No need to remove person from household
+                return True  # should be removed from their household
+        return False  # No need to remove person from household
 
     def day_to_day(self, curr_hh, poi_dict, person):
         random_poi_name = random.choice(list(poi_dict.keys()))
@@ -181,15 +181,15 @@ class Simulate:
         # Role-based Movement
         for hh_id, curr_hh in hh_dict.items():
             for person in curr_hh.population:
-                can_go_out = self.move_to_work(clock, curr_hh, poi_dict, person)
-                if not can_go_out:
+                is_working = self.move_to_work(clock, curr_hh, poi_dict, person)
+                if is_working:
                 # Mark person for removal after processing
                     removals.append((curr_hh, person))
-                elif person.availability and random.random() <= 0.10 and person.hh_id == person.location.id: #10% chance to go to random POIs
+                elif person.availability and random.random() <= 0.10 and person.hh_id == person.location.id: # 10% chance to go to random POIs
                     self.day_to_day(curr_hh, poi_dict, person)
                     removals.append((curr_hh, person))
 
-            for curr_hh, person in removals:
+            for curr_hh, person in removals: # Update population
                 if person in curr_hh.population:
                     curr_hh.population.remove(person)
 
@@ -347,10 +347,6 @@ class Simulate:
 
         hh_return_dict_converted = convert_to_dict(hh_return_dict)
         poi_return_dict_converted = convert_to_dict(poi_return_dict)
-
-        # Create the directory if it does not exist
-        if not os.path.exists("output"):
-            os.makedirs("output")
 
         with open("output/result_hh.json", "w+", encoding='utf-8') as hhstream:
             json.dump(hh_return_dict_converted, hhstream, ensure_ascii=False, indent=4)
