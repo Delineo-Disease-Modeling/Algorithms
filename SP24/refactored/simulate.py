@@ -6,7 +6,6 @@ import csv
 from household import Person, Household, poi_category, age_category
 from inter_hh import InterHousehold
 from papdata import Papdata
-import os
 
 category_weight = {
     'Agriculture, Forestry, Fishing and Hunting': 20,
