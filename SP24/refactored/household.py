@@ -9,6 +9,7 @@ from enum import Enum
 '''
 
 next_household_id = 0
+next_groupquarter_id = 0
 
 poi_category = {
     '11': 'Agriculture, Forestry, Fishing and Hunting',
@@ -55,16 +56,18 @@ class Person:
     Class for each individual
     '''
 
-    def __init__(self, id, sex, age, cbg, household, hh_id):
+    def __init__(self, id, sex, age, cbg, household, hh_id, tags:dict = None, work_naics=None):
         self.id = id
         self.sex = sex 
         self.age = age
         self.cbg = cbg
         self.household:Household = household
+        self.tags = tags
         self.hh_id = hh_id
         self.occupation = None
         self.occupation_id = 0
         self.work_time = (0, 0) #0 ~ 24
+        self.work_naics = None
         self.availability = True
         self.left_from_work = False
 
@@ -150,6 +153,9 @@ class Population:
         #adding population
         self.population = np.append(self.population, person)
 
+
+
+
 class Household(Population):
 
     '''
@@ -231,6 +237,39 @@ class Household(Population):
     #TODO: Add more functions for leaving/coming back, etc if needed
     #jiwoo: an idea would be to extend from the population info to create
     #more realistic dataset (combination) of population in a household
+
+class GroupQuarter(Population):
+    '''
+    Class for Group Quarters, Nursing Homes, Prisons, etc
+    '''
+    def __init__(self, cbg, total_count=0, population=[], type=None):
+        global next_groupquarter_id
+        super().__init__()
+        self.total_count = total_count
+        self.population = population
+        self.cbg = cbg
+        self.id = next_groupquarter_id
+        self.type = type # Nursing Home, Prison, etc
+        next_groupquarter_id += 1
+
+    def add_member(self, person):
+        self.population.append(person)
+
+    def to_dict(self):
+        return {
+            'id':self.id,
+            'type': self.type,
+            'cbg': self.cbg,
+            'members': len(self.population)
+        }
+
+    def __str__(self):
+        return f"GroupQuarter {self.id}"
+
+    def __repr__(self):
+        return self.__str__()
+
+
     
 '''
     if ran(not imported), yields household assignment values

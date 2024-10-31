@@ -1,8 +1,8 @@
-
-
 "female_percent": 50.5
 "male_percent": 49.5
 
+"household_env": ['urban', 'suburban', 'rural']
+"household_percents": [70.0, 20.0, 10.0]
 
 "family_types": ['married', 'opposite_sex', 'same_sex', 'female_single', 'male_single', 'other']
 "family_percents": [56.5, 7.0, 0.8, 15.7, 13.2, 6.8]
