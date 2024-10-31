@@ -4,10 +4,10 @@ library(rjson)
 key = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
 
 # Read in the functions
-source("./SP24/refactored/pull_datasets.R")
+source("./SP24/refactored/data_download/pull_datasets.R")
 
 # which data to download from geo.json
-jlist <- fromJSON(file="./SP24/refactored/geo.json")
+jlist <- fromJSON(file="./SP24/refactored/data_download/geo.json")
 
 main_fips <- unique(substr(jlist$geos, 1, 2))
 county_fips <- unique(substr(jlist$geos, 3, 5))
