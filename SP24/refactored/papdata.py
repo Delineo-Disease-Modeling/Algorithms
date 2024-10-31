@@ -40,7 +40,7 @@ class Papdata:
         """
         # add homes and persons
         '''
-        for home in self.hh_info:
+        for home in self.hh_info.json:
             home_id = home.population[0].hh_id
             self.pap_dict["homes"][home_id] = {"cbg":home.cbg, "members":len(home.population)}
             for person in home.population:

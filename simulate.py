@@ -410,6 +410,6 @@ if __name__ == "__main__":
         for hh in list_hh:
             hh_info.append(hh)
 
-    # print(hh_info)
+    # print(hh_info.json)
 
     simulation(settings, city_info, hh_info)
