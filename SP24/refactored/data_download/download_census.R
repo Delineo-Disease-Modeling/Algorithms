@@ -1,7 +1,7 @@
 library(here)
 library(rjson)
 
-config <- fromJSON(file = "config.json")
+config <- fromJSON(file = "./SP24/config.json")
 key <- config$key # Census API key
 
 # Read in the functions
