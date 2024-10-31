@@ -20,10 +20,15 @@ main_year = 2019
 decennial_year = 2010
 
 # tables needed in census.py
+# B01001 - percentage of sex by age
+# B09018 - Relationship to Householder for Children Under 18 Years in Households
+# B09019 - Household Type (Including Living Alone) by Relationship
+
+
 # acs_required = c("B01001", "B09018", "B09019", "B09020", "B09021", "B11004", "B11012", 
 #                 "B11016", "B19001", "B22010", "B23009", "B23025", "B25006", "B11001H", 
 #                 "B11001I", "C24010", "C24030")
-acs_required = c("B01001")
+acs_required = c("B09019")
 
 dec_required = c("P43")
 
