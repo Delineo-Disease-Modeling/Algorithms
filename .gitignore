@@ -161,4 +161,4 @@ cython_debug/
 
 .DS_Store
 SP24/refactored/output/*.json
-SP24/refactored/census/*
+SP24/census/*
