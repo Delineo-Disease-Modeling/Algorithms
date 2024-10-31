@@ -1,7 +1,8 @@
 library(here)
 library(rjson)
 
-key = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
+config <- fromJSON(file = "config.json")
+key <- config$key # Census API key
 
 # Read in the functions
 source("./SP24/refactored/data_download/pull_datasets.R")

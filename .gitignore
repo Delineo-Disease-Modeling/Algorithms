@@ -163,3 +163,4 @@ cython_debug/
 SP24/refactored/output/*.json
 SP24/census/*
 SP24/refactored/data_download/*.json
+SP24/config.json
