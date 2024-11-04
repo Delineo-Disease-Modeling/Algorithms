@@ -13,16 +13,19 @@ Children is unique in that they can not be alone in a household and can help us 
 1. We start with the generate family households with 1 or 2 adult w children, using data on # of children in households. 
     Each household should -2 or -1 adult and -# of children from the population)
     This step should use up all the children in the population.
+    
+2. Family Household without children
+    -2 adults from the population
 
-2. Next we generate non family households (living alone and not living alone). 
+3. Next we generate non family households (living alone and not living alone). 
     Each household should -1+ adult from the population.
 
 Now the rest of the population consists of grandparents living with child/grandchild, other relatives, and some special cases.
 
-3. Assign grandparents and other relatives to the existing family households.
+4. Assign grandparents and other relatives to the existing family households.
     Add almost all of the remaining adults to a small portion of the households.
 
-4. The remaining households are the special cases.
+5. The remaining households are the special cases.
 
 5. Iterate through the generated households and refine the age to match the distribution.
 
