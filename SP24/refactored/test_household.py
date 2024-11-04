@@ -1,7 +1,7 @@
 import random
 
 '''
-Cencus population data:
+Census population data:
 '''
 population_distribution = {
     "Male Children": 14.44,
@@ -15,7 +15,7 @@ population_distribution = {
 }
 
 '''
-Census hosuehold data:
+Census household data:
 '''
 # DP02 + B11001
 household_type_distribution = {
@@ -114,7 +114,7 @@ class Person:
 class Household:
     _last_id = 0
 
-    def __init__(self, population: list[Person] = [], cbg: int = None, type: str = None):
+    def __init__(self, population: list = [], cbg: int = None, type: str = None):
         """
         Initializes the Household class
         """
@@ -133,58 +133,53 @@ class Household:
         }
 
 
-'''
-The idea is to generate the number of people in each of the 4 large category (maybe male/female children/adult) first so that the total population would be close to the actual
-distribution. 
-
-Then genreate each household in a specific order based on the composition of the household.
-
-Children is unique in that they can not be alone in a household and can help us determine the age of the parents in the household.
-
-1. We start with the generate 1 or 2 adult households w children, using data on # of children in households. 
-    Each household should -1 or -2 adult and -# of children from the population)
-    This step should use up all the children in the population.
-    
-2. Next we generate living alone households. This should be relatively easy since we have all the data.( male/female householder living alone, over 65 living alone, etc)
-    Each household should -1 adult from the population.
-
-Now the rest of the population consists of grandparents living with child/grandchild, other relatives, and some special cases.
-
-3. Assign grandparents and other relatives to the existing households.
-    Add almost all of the remaining adults to a small portion of the households.
-
-4. The remaining households are the special cases.
-
-5. Iterate through the generated households and refine the age to match the distribution.
-
-This approach should not include any optimization and should be fast in generating the households.
-
-'''
+def generate_number_of_children_4plus():
+    """
+    Generates a number of children 4 or more, with probabilities decreasing as the number increases.
+    """
+    number_of_children_options = [4, 5, 6, 7, 8]
+    probabilities = [0.5, 0.25, 0.15, 0.07, 0.03]  # Adjusted probabilities
+    probabilities = [p / sum(probabilities) for p in probabilities]  # Normalize
+    number_of_children = random.choices(number_of_children_options, weights=probabilities)[0]
+    return number_of_children
 
 
-def gen_basic_people_distribution(total_population):
-    '''
-    returns the number of people in each age and sex group
-    '''
-    return {
-        "Male Children": int(total_population * population_distribution["Male Children"] / 100),
-        "Male Adults": int(total_population * population_distribution["Male Adults"] / 100),
-        "Female Children": int(total_population * population_distribution["Female Children"] / 100),
-        "Female Adults": int(total_population * population_distribution["Female Adults"] / 100),
-    }
+def generate_children_ages(parent_age, number_of_children):
+    """
+    Generates a list of children's ages based on parent's age and number of children.
+    """
+    min_parental_age_at_birth = 15
+    max_parental_age_at_birth = 50
+
+    max_oldest_child_age = min(parent_age - min_parental_age_at_birth, 17)
+    min_oldest_child_age = max(parent_age - max_parental_age_at_birth, 0)
+
+    if max_oldest_child_age < min_oldest_child_age:
+        # Parent is too young; assign child age 0
+        oldest_child_age = 0
+    else:
+        oldest_child_age = random.randint(int(min_oldest_child_age), int(max_oldest_child_age))
+
+    children_ages = [oldest_child_age]
+
+    for _ in range(number_of_children - 1):
+        # Age gap between siblings is between 1 and 3 years
+        age_gap = random.randint(1, 3)
+        child_age = children_ages[-1] - age_gap
+        if child_age < 0:
+            child_age = 0
+        children_ages.append(child_age)
+
+    # Ensure all ages are between 0 and 17
+    children_ages = [max(min(age, 17), 0) for age in children_ages]
+
+    # Shuffle the ages to avoid ordering from oldest to youngest
+    random.shuffle(children_ages)
+
+    return children_ages
 
 
 def gen_households(total_households, total_population):
-    ''' Steps
-    1. generate 2 adult households w children (since children can help us determine the age of the adults)
-        a. 1 child
-        b. 2 children
-        c. 3 children
-        d. 4+ children
-    2. generate living alone households (1 person, could be any age range > 18)
-        a. male living alone
-        b. female living alone
-    '''
     import random
 
     # Initialize people distribution
@@ -216,14 +211,11 @@ def gen_households(total_households, total_population):
         "65+": (65, 90)
     }
 
-    # TODO: need to refince the age of children and parents, younger children should generally (but not always) have
-    #  younger parents, vice versa.
-
     # Generate married couple households with children
     for _ in range(num_married_couple_with_children):
         # Determine number of children
-        number_of_children = random.choices(
-            population=[1, 2, 3, 4],
+        number_of_children_category = random.choices(
+            population=[1, 2, 3, '4+'],
             weights=[
                 children_distribution["two_parent_child_distribution"]["1"],
                 children_distribution["two_parent_child_distribution"]["2"],
@@ -231,6 +223,11 @@ def gen_households(total_households, total_population):
                 children_distribution["two_parent_child_distribution"]["4+"]
             ]
         )[0]
+
+        if number_of_children_category == '4+':
+            number_of_children = generate_number_of_children_4plus()
+        else:
+            number_of_children = int(number_of_children_category)
 
         # Assign age group to parents
         age_group = random.choices(
@@ -253,12 +250,15 @@ def gen_households(total_households, total_population):
 
         household_population = [parent1, parent2]
 
-        # Create children
-        for _ in range(number_of_children):
+        # Generate children's ages
+        children_ages = generate_children_ages(min(parent1_age, parent2_age), number_of_children)
+
+        for child_age in children_ages:
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
-            male_child_prob = people_counts["Male Children"] / total_children_remaining
+            if total_children_remaining <= 0:
+                break
+            male_child_prob = people_counts["Male Children"] / total_children_remaining if total_children_remaining > 0 else 0
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
-            child_age = random.randint(0, 17)
             child = Person(age=child_age, sex=child_sex)
             if child_sex == 0:
                 people_counts["Male Children"] -= 1
@@ -273,8 +273,8 @@ def gen_households(total_households, total_population):
 
     # Generate single mother households with children
     for _ in range(num_single_mother_with_children):
-        number_of_children = random.choices(
-            population=[1, 2, 3, 4],
+        number_of_children_category = random.choices(
+            population=[1, 2, 3, '4+'],
             weights=[
                 children_distribution["single_mother_child_distribution"]["1"],
                 children_distribution["single_mother_child_distribution"]["2"],
@@ -282,6 +282,11 @@ def gen_households(total_households, total_population):
                 children_distribution["single_mother_child_distribution"]["4+"]
             ]
         )[0]
+
+        if number_of_children_category == '4+':
+            number_of_children = generate_number_of_children_4plus()
+        else:
+            number_of_children = int(number_of_children_category)
 
         age_group = random.choices(
             population=list(parent_age_distribution["single_mother_with_children"].keys()),
@@ -294,11 +299,15 @@ def gen_households(total_households, total_population):
         people_counts["Female Adults"] -= 1
         household_population = [mother]
 
-        for _ in range(number_of_children):
+        # Generate children's ages
+        children_ages = generate_children_ages(mother_age, number_of_children)
+
+        for child_age in children_ages:
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
-            male_child_prob = people_counts["Male Children"] / total_children_remaining
+            if total_children_remaining <= 0:
+                break
+            male_child_prob = people_counts["Male Children"] / total_children_remaining if total_children_remaining > 0 else 0
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
-            child_age = random.randint(0, 17)
             child = Person(age=child_age, sex=child_sex)
             if child_sex == 0:
                 people_counts["Male Children"] -= 1
@@ -312,8 +321,8 @@ def gen_households(total_households, total_population):
 
     # Generate single father households with children
     for _ in range(num_single_father_with_children):
-        number_of_children = random.choices(
-            population=[1, 2, 3, 4],
+        number_of_children_category = random.choices(
+            population=[1, 2, 3, '4+'],
             weights=[
                 children_distribution["single_father_child_distribution"]["1"],
                 children_distribution["single_father_child_distribution"]["2"],
@@ -321,6 +330,12 @@ def gen_households(total_households, total_population):
                 children_distribution["single_father_child_distribution"]["4+"]
             ]
         )[0]
+
+        if number_of_children_category == '4+':
+            number_of_children = generate_number_of_children_4plus()
+        else:
+            number_of_children = int(number_of_children_category)
+
         age_group = random.choices(
             population=list(parent_age_distribution["single_father_with_children"].keys()),
             weights=list(parent_age_distribution["single_father_with_children"].values())
@@ -332,11 +347,15 @@ def gen_households(total_households, total_population):
         people_counts["Male Adults"] -= 1
         household_population = [father]
 
-        for _ in range(number_of_children):
+        # Generate children's ages
+        children_ages = generate_children_ages(father_age, number_of_children)
+
+        for child_age in children_ages:
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
-            male_child_prob = people_counts["Male Children"] / total_children_remaining
+            if total_children_remaining <= 0:
+                break
+            male_child_prob = people_counts["Male Children"] / total_children_remaining if total_children_remaining > 0 else 0
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
-            child_age = random.randint(0, 17)
             child = Person(age=child_age, sex=child_sex)
             if child_sex == 0:
                 people_counts["Male Children"] -= 1
@@ -352,7 +371,9 @@ def gen_households(total_households, total_population):
     number_of_living_alone_households = int(total_households * nonfamily_percentages["living_alone"] / 100)
     for _ in range(number_of_living_alone_households):
         total_adults_remaining = people_counts["Male Adults"] + people_counts["Female Adults"]
-        male_adult_prob = people_counts["Male Adults"] / total_adults_remaining
+        if total_adults_remaining <= 0:
+            break
+        male_adult_prob = people_counts["Male Adults"] / total_adults_remaining if total_adults_remaining > 0 else 0
         person_sex = random.choices(population=[0, 1], weights=[male_adult_prob, 1 - male_adult_prob])[0]
         person_age = random.randint(18, 90)
         person = Person(age=person_age, sex=person_sex)
@@ -371,6 +392,7 @@ def gen_households(total_households, total_population):
 
     return households, people
 
+
 def print_households(households):
     for household in households:
         print(f"Household ID: {household.id}")
@@ -382,7 +404,7 @@ def print_households(households):
 
 if __name__ == "__main__":
     total_households = 1000
-    total_population = total_households * avg_household_size
+    total_population = int(total_households * avg_household_size)
 
     hh, people = gen_households(total_households, total_population)
     print_households(hh)
