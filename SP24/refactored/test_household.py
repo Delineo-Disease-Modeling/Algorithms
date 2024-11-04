@@ -216,6 +216,9 @@ def gen_households(total_households, total_population):
         "65+": (65, 90)
     }
 
+    # TODO: need to refince the age of children and parents, younger children should generally (but not always) have
+    #  younger parents, vice versa.
+
     # Generate married couple households with children
     for _ in range(num_married_couple_with_children):
         # Determine number of children
@@ -228,10 +231,6 @@ def gen_households(total_households, total_population):
                 children_distribution["two_parent_child_distribution"]["4+"]
             ]
         )[0]
-
-        # Check if there are enough adults
-        if people_counts["Male Adults"] < 1 or people_counts["Female Adults"] < 1:
-            break
 
         # Assign age group to parents
         age_group = random.choices(
@@ -256,8 +255,6 @@ def gen_households(total_households, total_population):
 
         # Create children
         for _ in range(number_of_children):
-            if people_counts["Male Children"] + people_counts["Female Children"] < 1:
-                break
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
             male_child_prob = people_counts["Male Children"] / total_children_remaining
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
@@ -286,9 +283,6 @@ def gen_households(total_households, total_population):
             ]
         )[0]
 
-        if people_counts["Female Adults"] < 1:
-            break
-
         age_group = random.choices(
             population=list(parent_age_distribution["single_mother_with_children"].keys()),
             weights=list(parent_age_distribution["single_mother_with_children"].values())
@@ -301,8 +295,6 @@ def gen_households(total_households, total_population):
         household_population = [mother]
 
         for _ in range(number_of_children):
-            if people_counts["Male Children"] + people_counts["Female Children"] < 1:
-                break
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
             male_child_prob = people_counts["Male Children"] / total_children_remaining
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
@@ -329,10 +321,6 @@ def gen_households(total_households, total_population):
                 children_distribution["single_father_child_distribution"]["4+"]
             ]
         )[0]
-
-        if people_counts["Male Adults"] < 1:
-            break
-
         age_group = random.choices(
             population=list(parent_age_distribution["single_father_with_children"].keys()),
             weights=list(parent_age_distribution["single_father_with_children"].values())
@@ -345,8 +333,6 @@ def gen_households(total_households, total_population):
         household_population = [father]
 
         for _ in range(number_of_children):
-            if people_counts["Male Children"] + people_counts["Female Children"] < 1:
-                break
             total_children_remaining = people_counts["Male Children"] + people_counts["Female Children"]
             male_child_prob = people_counts["Male Children"] / total_children_remaining
             child_sex = random.choices(population=[0, 1], weights=[male_child_prob, 1 - male_child_prob])[0]
@@ -365,9 +351,6 @@ def gen_households(total_households, total_population):
     # Generate living alone households
     number_of_living_alone_households = int(total_households * nonfamily_percentages["living_alone"] / 100)
     for _ in range(number_of_living_alone_households):
-        if people_counts["Male Adults"] + people_counts["Female Adults"] < 1:
-            break
-
         total_adults_remaining = people_counts["Male Adults"] + people_counts["Female Adults"]
         male_adult_prob = people_counts["Male Adults"] / total_adults_remaining
         person_sex = random.choices(population=[0, 1], weights=[male_adult_prob, 1 - male_adult_prob])[0]
