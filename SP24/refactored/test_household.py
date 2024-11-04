@@ -1,4 +1,6 @@
 import random
+import matplotlib.pyplot as plt
+
 
 '''
 The idea is to generate the number of people in each of the 4 large category (maybe male/female children/adult) first so that the total population would be close to the actual
@@ -229,7 +231,7 @@ def gen_households(total_households, total_population):
     number_of_households_with_children = int(total_households * household_type_distribution["with_children"] / 100)
     num_married_couple_with_children = int(number_of_households_with_children * household_w_children_distribution["married_couple_with_children"])
     num_single_mother_with_children = int(number_of_households_with_children * household_w_children_distribution["single_mother_with_children"])
-    num_single_father_with_children = number_of_households_with_children - num_married_couple_with_children - num_single_mother_with_children
+    num_single_father_with_children = int(number_of_households_with_children * household_w_children_distribution["single_father_with_children"])
 
     # Define age ranges
     age_ranges = {
@@ -245,7 +247,7 @@ def gen_households(total_households, total_population):
     for _ in range(num_married_couple_with_children):
         # Determine number of children
         number_of_children_category = random.choices(
-            population=[1, 2, 3, '4+'],
+            population=['1', '2', '3', '4+'],
             weights=[
                 children_distribution["two_parent_child_distribution"]["1"],
                 children_distribution["two_parent_child_distribution"]["2"],
@@ -297,14 +299,14 @@ def gen_households(total_households, total_population):
             household_population.append(child)
 
         # Create Household
-        household = Household(population=household_population)
+        household = Household(population=household_population, type="married_couple_with_children")
         households.append(household)
         people.extend(household_population)
 
     # Generate single mother households with children
     for _ in range(num_single_mother_with_children):
         number_of_children_category = random.choices(
-            population=[1, 2, 3, '4+'],
+            population=['1', '2', '3', '4+'],
             weights=[
                 children_distribution["single_mother_child_distribution"]["1"],
                 children_distribution["single_mother_child_distribution"]["2"],
@@ -345,14 +347,14 @@ def gen_households(total_households, total_population):
                 people_counts["Female Children"] -= 1
             household_population.append(child)
 
-        household = Household(population=household_population)
+        household = Household(population=household_population, type="single_mother_with_children")
         households.append(household)
         people.extend(household_population)
 
     # Generate single father households with children
     for _ in range(num_single_father_with_children):
         number_of_children_category = random.choices(
-            population=[1, 2, 3, '4+'],
+            population=['1', '2', '3', '4+'],
             weights=[
                 children_distribution["single_father_child_distribution"]["1"],
                 children_distribution["single_father_child_distribution"]["2"],
@@ -393,12 +395,16 @@ def gen_households(total_households, total_population):
                 people_counts["Female Children"] -= 1
             household_population.append(child)
 
-        household = Household(population=household_population)
+        household = Household(population=household_population, type="single_father_with_children")
         households.append(household)
         people.extend(household_population)
 
     # Generate non-family households
 
+
+
+    # print the remaining people counts
+    print("Remaining People Counts:", people_counts)
 
     return households, people
 
@@ -412,9 +418,120 @@ def print_households(households):
         print("-" * 40)
 
 
+def calculate_family_household_distribution(households):
+    import matplotlib.pyplot as plt
+
+    # Initialize counters
+    household_type_counts = {
+        'married_couple_with_children': 0,
+        'single_mother_with_children': 0,
+        'single_father_with_children': 0,
+    }
+
+    children_count_distribution = {
+        'married_couple_with_children': {},
+        'single_mother_with_children': {},
+        'single_father_with_children': {},
+    }
+
+    total_family_households = 0
+
+    # Iterate through households to collect data
+    for hh in households:
+        if hh.type in household_type_counts:
+            total_family_households += 1
+            household_type_counts[hh.type] += 1
+
+            # Count the number of children in the household
+            num_children = sum(1 for person in hh.population if person.age <= 17)
+            if num_children not in children_count_distribution[hh.type]:
+                children_count_distribution[hh.type][num_children] = 0
+            children_count_distribution[hh.type][num_children] += 1
+
+    # Expected distribution percentages
+    expected_household_w_children_distribution = {
+        'married_couple_with_children': household_w_children_distribution['married_couple_with_children'] * 100,
+        'single_mother_with_children': household_w_children_distribution['single_mother_with_children'] * 100,
+        'single_father_with_children': household_w_children_distribution['single_father_with_children'] * 100,
+    }
+
+    # Calculate actual percentages
+    actual_household_w_children_distribution = {}
+    for hh_type, count in household_type_counts.items():
+        actual_household_w_children_distribution[hh_type] = (count / total_family_households * 100) if total_family_households > 0 else 0
+
+    # Compare expected and actual distributions
+    print("Household with Children Distribution (Expected vs Actual):")
+    for hh_type in household_type_counts:
+        expected = expected_household_w_children_distribution[hh_type]
+        actual = actual_household_w_children_distribution[hh_type]
+        print(f"{hh_type}: Expected {expected:.2f}%, Actual {actual:.2f}%")
+
+    # Compare children count distributions
+    for hh_type in children_count_distribution:
+        print(f"\nChildren Count Distribution for {hh_type}:")
+        # Expected distribution
+        if hh_type == 'married_couple_with_children':
+            expected_children_distribution = children_distribution['two_parent_child_distribution']
+        elif hh_type == 'single_mother_with_children':
+            expected_children_distribution = children_distribution['single_mother_child_distribution']
+        elif hh_type == 'single_father_with_children':
+            expected_children_distribution = children_distribution['single_father_child_distribution']
+        else:
+            continue
+
+        # Convert expected distribution to percentages
+        expected_children_distribution_pct = {}
+        for key, value in expected_children_distribution.items():
+            expected_children_distribution_pct[key] = value * 100
+
+        # Actual distribution
+        total_households_type = household_type_counts[hh_type]
+        actual_children_distribution_pct = {}
+        for num_children, count in sorted(children_count_distribution[hh_type].items()):
+            actual_children_distribution_pct[str(num_children)] = (count / total_households_type * 100) if total_households_type > 0 else 0
+
+        # Print expected vs actual
+        print("Number of Children: Expected %, Actual %")
+        for key in expected_children_distribution_pct:
+            expected_pct = expected_children_distribution_pct[key]
+            # For '4+', sum over all counts >=4
+            if key == '4+':
+                actual_pct = sum(value for k, value in actual_children_distribution_pct.items() if int(k) >= 4)
+            else:
+                actual_pct = actual_children_distribution_pct.get(key, 0)
+            print(f"{key}: Expected {expected_pct:.2f}%, Actual {actual_pct:.2f}%")
+
+        # Plot the distributions
+        keys = ['1', '2', '3', '4+']
+        expected_values = [expected_children_distribution_pct.get(k, 0) for k in keys]
+        actual_values = []
+        for k in keys:
+            if k == '4+':
+                actual_value = sum(value for num, value in actual_children_distribution_pct.items() if int(num) >= 4)
+            else:
+                actual_value = actual_children_distribution_pct.get(k, 0)
+            actual_values.append(actual_value)
+
+        x = range(len(keys))
+        width = 0.35
+
+        fig, ax = plt.subplots()
+        ax.bar(x, expected_values, width, label='Expected')
+        ax.bar([i + width for i in x], actual_values, width, label='Actual')
+
+        ax.set_ylabel('Percentage')
+        ax.set_title(f'Children Count Distribution for {hh_type}')
+        ax.set_xticks([i + width / 2 for i in x])
+        ax.set_xticklabels(keys)
+        ax.legend()
+
+        plt.show()
+
 if __name__ == "__main__":
-    total_households = 1000
+    total_households = 10000
     total_population = int(total_households * avg_household_size)
 
     hh, people = gen_households(total_households, total_population)
     print_households(hh)
+    calculate_family_household_distribution(hh)
