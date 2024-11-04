@@ -8,21 +8,21 @@ Then generate each household in a specific order based on the composition of the
 
 Children is unique in that they can not be alone in a household and can help us determine the age of the parents in the household.
 
-1. We start with the generate 1 or 2 adult households w children, using data on # of children in households. 
+1. We start with the generate family households with 1 or 2 adult w children, using data on # of children in households. 
     Each household should -2 or -1 adult and -# of children from the population)
     This step should use up all the children in the population.
 
-2. Next we generate living alone households. This should be relatively easy since we have all the data.( male/female householder living alone, over 65 living alone, etc)
-    Each household should -1 adult from the population.
+2. Next we generate non family households (living alone and not living alone). 
+    Each household should -1+ adult from the population.
 
 Now the rest of the population consists of grandparents living with child/grandchild, other relatives, and some special cases.
 
-4. Assign grandparents and other relatives to the existing households.
+3. Assign grandparents and other relatives to the existing family households.
     Add almost all of the remaining adults to a small portion of the households.
 
-5. The remaining households are the special cases.
+4. The remaining households are the special cases.
 
-6. Iterate through the generated households and refine the age to match the distribution.
+5. Iterate through the generated households and refine the age to match the distribution.
 
 This approach should not include any optimization and should be fast in generating the households.
 
@@ -397,28 +397,8 @@ def gen_households(total_households, total_population):
         households.append(household)
         people.extend(household_population)
 
-    # Generate living alone households
-    number_of_living_alone_households = int(total_households * nonfamily_percentages["living_alone"] / 100)
-    for _ in range(number_of_living_alone_households):
-        total_adults_remaining = people_counts["Male Adults"] + people_counts["Female Adults"]
-        if total_adults_remaining <= 0:
-            break
-        male_adult_prob = people_counts["Male Adults"] / total_adults_remaining if total_adults_remaining > 0 else 0
-        person_sex = random.choices(population=[0, 1], weights=[male_adult_prob, 1 - male_adult_prob])[0]
-        person_age = random.randint(18, 90)
-        person = Person(age=person_age, sex=person_sex)
-        if person_sex == 0:
-            people_counts["Male Adults"] -= 1
-        else:
-            people_counts["Female Adults"] -= 1
+    # Generate non-family households
 
-        household = Household(population=[person])
-        households.append(household)
-        people.append(person)
-
-    print("Remaining People Counts after household generation:", people_counts)
-    print(f"Total households generated: {len(households)}")
-    print(f"Total people generated: {len(people)}")
 
     return households, people
 
