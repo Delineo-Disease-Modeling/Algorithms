@@ -1,6 +1,36 @@
 import random
 
 '''
+The idea is to generate the number of people in each of the 4 large category (maybe male/female children/adult) first so that the total population would be close to the actual
+distribution. 
+
+Then generate each household in a specific order based on the composition of the household.
+
+Children is unique in that they can not be alone in a household and can help us determine the age of the parents in the household.
+
+1. We start with the generate 1 or 2 adult households w children, using data on # of children in households. 
+    Each household should -2 or -1 adult and -# of children from the population)
+    This step should use up all the children in the population.
+
+2. Next we generate living alone households. This should be relatively easy since we have all the data.( male/female householder living alone, over 65 living alone, etc)
+    Each household should -1 adult from the population.
+
+Now the rest of the population consists of grandparents living with child/grandchild, other relatives, and some special cases.
+
+4. Assign grandparents and other relatives to the existing households.
+    Add almost all of the remaining adults to a small portion of the households.
+
+5. The remaining households are the special cases.
+
+6. Iterate through the generated households and refine the age to match the distribution.
+
+This approach should not include any optimization and should be fast in generating the households.
+
+'''
+
+
+
+'''
 Census population data:
 '''
 population_distribution = {
