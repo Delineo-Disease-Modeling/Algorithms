@@ -242,7 +242,7 @@ class Person:
         return {
             "id": self.id,
             "age": self.age,
-            "sex": self.sex,
+            "sex": "m" if self.sex else "f",
             "hh_id": self.hh_id,
             "position_in_hh": self.position_in_hh,
             "tags": self.tags,
@@ -261,6 +261,11 @@ class Household:
         Household._last_id += 1
         self.population = population
         self.cbg = cbg
+
+        # Assign household id to each person in the household
+        for person in self.population:
+            person.hh_id = self.id
+
 
     def to_dict(self):
         return {
@@ -631,6 +636,12 @@ def gen_households(total_households, total_population):
     # Update total family households generated
     total_family_households_generated = total_family_households_generated_with_children + num_married_couple_without_children
     remaining_family_households = total_family_households - total_family_households_generated
+
+
+    ######################################################################################################
+    # Generate remaining family households without children
+    ######################################################################################################
+
 
     # print households
     print_all_households(households)
