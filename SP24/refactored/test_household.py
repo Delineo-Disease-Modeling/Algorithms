@@ -1,3 +1,5 @@
+import random
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -121,7 +123,20 @@ This approach should not include any optimization and should be fast in generati
 #     "living_alone": 28.8,
 #     "not_living_alone": 5.8,
 # }
-#
+
+
+# dp02 and dp05
+# total population over 65: 59307056
+# total households with 1+ over 65: 42291037
+# 59307056 - 42291037 = 17016019
+# 42291037 / 59307056 = 0.713 * 100 = 71.3%
+# 17016019 / 59307056 = 0.287 * 100 = 28.7%
+
+
+#7.2% of U.S. Family Households Were Multigenerational in 2020
+# https://www.census.gov/library/stories/2023/06/several-generations-under-one-roof.html
+
+
 
 '''
 Data Hierarchy:
@@ -130,14 +145,15 @@ Data Hierarchy:
 input_data = {
     "total_households": 10000,
     "avg_household_size": 2.49,
+    "avg_family_size": 3.09,
     "pop_info": {
         "population_distribution": {
-                    "male_child": 11.12,
-                    "male_adult": 38.37,
-                    "female_child": 10.58,
-                    "female_adult": 39.94
+            "male_child": 11.12,
+            "male_adult": 38.37,
+            "female_child": 10.58,
+            "female_adult": 39.94
         },
-        "parent_age_distribution" :{
+        "parent_age_distribution": {
             "married_couple_with_children": {
                 "15-24": 2,
                 "25-34": 25,
@@ -163,7 +179,7 @@ input_data = {
                 "65+": 1
             }
         },
-        "married_couple_without_children_age_distribution" :{
+        "married_couple_without_children_age_distribution": {
             "15-24": 5,
             "25-34": 20,
             "35-44": 20,
@@ -206,26 +222,43 @@ input_data = {
                         }
                     }
                 }
+            },
+            "with_over_65": {
+                "total_percentage": 20.6,
+                "multi_generational": 7.2,
             }
         },
         "nonfamily_households": {
             "total_percentage": 34.6,
-            "living_alone": 28.8,
+            "living_alone": {
+                "total_percentage": 28.8,
+                "male_over_65": 4.0,
+                "female_over_65": 7.7,
+            },
             "not_living_alone": 5.8
         },
-        "married_couples_percentages" : {
+        "married_couples_percentages": {
             "with_children_18_25": 13.51,
             "with_children_under_18": 73.16,
             "without_children": 26.84
-        }
+        },
+        "with_1+_over_65": {
+            "total_percentage": 32.2,
+            "living_alone": 11.6,
+            "with_family": 20.6
+        },
     }
 }
+
+generational_gap = 30
+generational_gap_std = 7
 
 
 class Person:
     _last_id = 0
 
-    def __init__(self, age: int, sex: int, hh_id: int = None, position_in_hh: str = None, tags: dict = None, cbg: int = None):
+    def __init__(self, age: int, sex: int, hh_id: int = None, position_in_hh: str = None, tags: dict = None,
+                 cbg: int = None):
         """
         Initializes the Person class
         """
@@ -265,7 +298,6 @@ class Household:
         # Assign household id to each person in the household
         for person in self.population:
             person.hh_id = self.id
-
 
     def to_dict(self):
         return {
@@ -338,6 +370,7 @@ def get_people_distribution(total_population):
         "female_adult": int(total_population * population_distribution["female_adult"] / total_percentage),
     }
 
+
 def print_all_households(households):
     for household in households:
         print("Household ID:", household.id)
@@ -345,11 +378,11 @@ def print_all_households(households):
             print(person.to_dict())
         print("**********************************************\n")
 
+
 def print_all_people(people):
     for person in people:
         print(person.to_dict())
         print("**********************************************\n")
-
 
 
 def gen_households(total_households, total_population):
@@ -382,20 +415,21 @@ def gen_households(total_households, total_population):
     distribution_with_children = with_children_under_18_info["distribution"]
 
     num_married_couple_with_children = int(
-        number_of_households_with_children * (distribution_with_children["married_couple_with_children"]["total_percentage"] / 100)
+        number_of_households_with_children * (
+                    distribution_with_children["married_couple_with_children"]["total_percentage"] / 100)
     )
 
     num_single_mother_with_children = int(
-        number_of_households_with_children * (distribution_with_children["single_mother_with_children"]["total_percentage"] / 100)
+        number_of_households_with_children * (
+                    distribution_with_children["single_mother_with_children"]["total_percentage"] / 100)
     )
 
     num_single_father_with_children = int(
-        number_of_households_with_children * (distribution_with_children["single_father_with_children"]["total_percentage"] / 100)
+        number_of_households_with_children * (
+                    distribution_with_children["single_father_with_children"]["total_percentage"] / 100)
     )
 
     parent_age_distribution = input_data["pop_info"]["parent_age_distribution"]
-
-
 
     ######################################################################################################
     # Generate married couple households with children under 18
@@ -433,8 +467,8 @@ def gen_households(total_households, total_population):
         age_range = age_ranges[age_group]
 
         # Assign ages to parents
-        parent1_age = np.random.randint(age_range[0], age_range[1]+1)
-        parent2_age = np.random.randint(age_range[0], age_range[1]+1)
+        parent1_age = np.random.randint(age_range[0], age_range[1] + 1)
+        parent2_age = np.random.randint(age_range[0], age_range[1] + 1)
 
         # Create parent Person objects with position_in_hh
         parent1 = Person(age=parent1_age, sex=0, position_in_hh='parent')  # Male
@@ -452,7 +486,10 @@ def gen_households(total_households, total_population):
         for child_age in children_ages:
             total_children_remaining = people_counts["male_child"] + people_counts["female_child"]
 
-            male_child_prob = people_counts["male_child"] / total_children_remaining if total_children_remaining > 0 else 0.5
+            male_child_prob = people_counts["male_child"] / total_children_remaining if total_children_remaining > 0 \
+                else (0.5 * input_data["pop_info"]["population_distribution"]["male_child"]
+                      / input_data["pop_info"]["population_distribution"]["female_child"])
+
             child_sex = np.random.choice([0, 1], p=[male_child_prob, 1 - male_child_prob])
             child = Person(age=child_age, sex=child_sex, position_in_hh='child')
             if child_sex == 0:
@@ -470,8 +507,8 @@ def gen_households(total_households, total_population):
     married_couples_percentages = household_info["married_couples_percentages"]
 
     # Update total number of married couples
-    total_number_of_married_couples = int(num_married_couple_with_children / (married_couples_percentages["with_children_under_18"] / 100))
-
+    total_number_of_married_couples = int(
+        num_married_couple_with_children / (married_couples_percentages["with_children_under_18"] / 100))
 
     ######################################################################################################
     # Generating single parent households
@@ -506,7 +543,7 @@ def gen_households(total_households, total_population):
             p=age_group_probabilities
         )
         age_range = age_ranges[age_group]
-        mother_age = np.random.randint(age_range[0], age_range[1]+1)
+        mother_age = np.random.randint(age_range[0], age_range[1] + 1)
 
         mother = Person(age=mother_age, sex=1, position_in_hh='parent')  # Female
         people_counts["female_adult"] -= 1
@@ -519,7 +556,7 @@ def gen_households(total_households, total_population):
             total_children_remaining = people_counts["male_child"] + people_counts["female_child"]
             male_child_prob = people_counts["male_child"] / total_children_remaining if total_children_remaining > 0 \
                 else (0.5 * input_data["pop_info"]["population_distribution"]["male_child"]
-                      /input_data["pop_info"]["population_distribution"]["female_child"])
+                      / input_data["pop_info"]["population_distribution"]["female_child"])
             child_sex = np.random.choice([0, 1], p=[male_child_prob, 1 - male_child_prob])
             child = Person(age=child_age, sex=child_sex, position_in_hh='child')
             if child_sex == 0:
@@ -562,7 +599,7 @@ def gen_households(total_households, total_population):
             p=age_group_probabilities
         )
         age_range = age_ranges[age_group]
-        father_age = np.random.randint(age_range[0], age_range[1]+1)
+        father_age = np.random.randint(age_range[0], age_range[1] + 1)
 
         father = Person(age=father_age, sex=0, position_in_hh='parent')  # Male
         people_counts["male_adult"] -= 1
@@ -575,7 +612,7 @@ def gen_households(total_households, total_population):
             total_children_remaining = people_counts["male_child"] + people_counts["female_child"]
             male_child_prob = people_counts["male_child"] / total_children_remaining if total_children_remaining > 0 \
                 else (0.5 * input_data["pop_info"]["population_distribution"]["male_child"]
-                      /input_data["pop_info"]["population_distribution"]["female_child"])
+                      / input_data["pop_info"]["population_distribution"]["female_child"])
             child_sex = np.random.choice([0, 1], p=[male_child_prob, 1 - male_child_prob])
             child = Person(age=child_age, sex=child_sex, position_in_hh='child')
             if child_sex == 0:
@@ -591,16 +628,19 @@ def gen_households(total_households, total_population):
     # Part 2: Generate family households without children
     total_family_households = int(total_households * (family_households_info["total_percentage"] / 100))
     total_family_households_generated_with_children = (
-        num_married_couple_with_children +
-        num_single_mother_with_children +
-        num_single_father_with_children     )
+            num_married_couple_with_children +
+            num_single_mother_with_children +
+            num_single_father_with_children)
     number_of_family_households_without_children = total_family_households - total_family_households_generated_with_children
 
     # Number of married couples without children
-    num_married_couple_without_children = int(total_number_of_married_couples * (married_couples_percentages["without_children"] / 100))
-    num_married_couple_without_children = min(num_married_couple_without_children, number_of_family_households_without_children)
+    num_married_couple_without_children = int(
+        total_number_of_married_couples * (married_couples_percentages["without_children"] / 100))
+    num_married_couple_without_children = min(num_married_couple_without_children,
+                                              number_of_family_households_without_children)
 
-    married_couple_without_children_age_distribution = input_data["pop_info"]["married_couple_without_children_age_distribution"]
+    married_couple_without_children_age_distribution = input_data["pop_info"][
+        "married_couple_without_children_age_distribution"]
 
     # Generate married couple households without children
     for _ in range(num_married_couple_without_children):
@@ -615,8 +655,8 @@ def gen_households(total_households, total_population):
         age_range = age_ranges[age_group]
 
         # Assign ages to partners
-        partner1_age = np.random.randint(age_range[0], age_range[1]+1)
-        partner2_age = np.random.randint(age_range[0], age_range[1]+1)
+        partner1_age = np.random.randint(age_range[0], age_range[1] + 1)
+        partner2_age = np.random.randint(age_range[0], age_range[1] + 1)
 
         # Create partner Person objects with position_in_hh
         partner1 = Person(age=partner1_age, sex=0, position_in_hh='partner')  # Male
@@ -637,21 +677,170 @@ def gen_households(total_households, total_population):
     total_family_households_generated = total_family_households_generated_with_children + num_married_couple_without_children
     remaining_family_households = total_family_households - total_family_households_generated
 
+    ######################################################################################################
+    # Add grandparents to family households with children to make them multi-generational
+    ######################################################################################################
+    num_multi_generational_households = int(
+        total_family_households * (family_households_info["with_over_65"]["multi_generational"] / 100))
+
+    family_households_with_children = [
+        hh for hh in households
+        if any(person.position_in_hh == 'child' and person.age < 18 for person in hh.population)
+    ]
+
+    selected_households = random.sample(
+        family_households_with_children,
+        k=min(num_multi_generational_households, len(family_households_with_children))
+    )
+
+    for household in selected_households:
+        # Determine the number of grandparents (1 or 2)
+        num_grandparents = np.random.randint(1, 3)
+
+        parent_ages = [person.age for person in household.population if person.position_in_hh == 'parent']
+        if not parent_ages:
+            print("ERROR: No parents found in household")
+            continue
+
+        youngest_parent_age = min(parent_ages)
+
+        for _ in range(num_grandparents):
+            # Determine grandparent's sex based on population distribution
+            male_grandparent_prob = people_counts["male_adult"] / (
+                    people_counts["male_adult"] + people_counts["female_adult"]
+            )
+            grandparent_sex = np.random.choice([0, 1], p=[male_grandparent_prob, 1 - male_grandparent_prob])
+
+            # Calculate grandparent's age (parent's age + generational gap)
+            grandparent_generational_gap = np.random.normal(30, 7)
+            grandparent_generational_gap = int(max(18, min(45, grandparent_generational_gap))) #cap
+            grandparent_age = youngest_parent_age + grandparent_generational_gap
+
+            # Create the grandparent
+            grandparent = Person(age=grandparent_age, sex=grandparent_sex, position_in_hh='grandparent')
+
+            # Update the people counts
+            if grandparent_sex == 0:
+                people_counts["male_adult"] -= 1
+            else:
+                people_counts["female_adult"] -= 1
+
+            # Add the grandparent to the household
+            household.population.append(grandparent)
+
+            #add the grandparent to the people list
+            people.append(grandparent)
+
 
     ######################################################################################################
     # Generate remaining family households without children
     ######################################################################################################
 
+    # get people left for family households
+    avg_family_size = input_data["avg_family_size"]
+    total_family_population = int(family_households_info["total_percentage"] / 100 * total_households * avg_family_size)
+    remaining_family_population = total_family_population - len(people)
+    ratio = remaining_family_population / (remaining_family_households)
+    #
+    # print("\tRemaining Family Population:", remaining_family_population)
+    # print("\tRemaining Family Households:", remaining_family_households)
+    # print("\tRatio:", ratio)
 
-    # print households
-    print_all_households(households)
+    #TODO fix logic later, for now just randomly genreate:
+    # couple with adult children
+    # single father with adult children
+    # single mother with adult children
+    # Adult siblings living together
 
-    print("Remaining Family Households:", remaining_family_households) #TODO This is not correct, still have 27% family households
-    print("Remaining Non Family Households:", total_households - len(households) - remaining_family_households)
-    print("Remaining Total Households:", total_households - len(households))
+    for _ in range(remaining_family_households):
+        household_type = np.random.choice(
+            ["couple_with_adult_children", "single_father_with_adult_children",
+             "single_mother_with_adult_children", "adult_siblings_living_together"],
+            p=[0.55, 0.05, 0.15, 0.25]
+        )
 
+        def gen_adult_child():
+            #age should be exponentially distributed, where the likelihood of having a child decreases with age
+            age_bins = np.arange(18, 45)
+            scale = 5
+            weights = np.exp(-((age_bins - 18) / scale))
+            weights = weights / weights.sum()
+            adult_child_age = np.random.choice(age_bins, p=weights)
+
+            #gen sex based on population distribution
+            total_adult_remaining = people_counts["male_adult"] + people_counts["female_adult"]
+            male_adult_prob = people_counts["male_adult"] / total_adult_remaining if total_adult_remaining > 0 \
+                else (0.5 * input_data["pop_info"]["population_distribution"]["male_adult"]/
+                        input_data["pop_info"]["population_distribution"]["female_adult"])
+            sex = np.random.choice([0, 1], p=[male_adult_prob, 1-male_adult_prob])
+
+            return Person(age=adult_child_age, sex=sex, position_in_hh='child')
+
+        household_population = []
+
+        if household_type in ["couple_with_adult_children", "single_father_with_adult_children", "single_mother_with_adult_children"]:
+            #gen adult children
+            num_adult_children = np.random.choice([1, 2, 3], p=[0.8, 0.18, 0.02])
+            for _ in range(num_adult_children):
+                adult_child = gen_adult_child()
+                household_population.append(adult_child)
+
+            #gen parents based on the adult children's age
+            oldest_child_age = max([child.age for child in household_population])
+            age_gap = np.random.normal(generational_gap, generational_gap_std)
+            parent1_age = oldest_child_age + int(age_gap)
+
+            if household_type == "couple_with_adult_children":
+                parent2_age = np.random.randint(parent1_age - 5, parent1_age + 5)
+                parent1 = Person(age=parent1_age, sex=0, position_in_hh="parent")  # Male
+                parent2 = Person(age=parent2_age, sex=1, position_in_hh="parent")  # Female
+                people_counts["male_adult"] -= 1
+                people_counts["female_adult"] -= 1
+                household_population.extend([parent1, parent2])
+
+            elif household_type == "single_father_with_adult_children":
+                parent1 = Person(age=parent1_age, sex=0, position_in_hh="parent")  # Male
+                people_counts["male_adult"] -= 1
+                household_population.append(parent1)
+
+            elif household_type == "single_mother_with_adult_children":
+                parent1 = Person(age=parent1_age, sex=1, position_in_hh="parent")  # Female
+                people_counts["female_adult"] -= 1
+                household_population.append(parent1)
+
+
+        elif household_type == "adult_siblings_living_together":
+            # Generate siblings (2–4 adults)
+            num_siblings = np.random.randint(2, 5)
+            for _ in range(num_siblings):
+                sibling_age = np.random.randint(18,54)
+                total_adult_remaining = people_counts["male_adult"] + people_counts["female_adult"]
+                male_adult_prob = people_counts["male_adult"] / total_adult_remaining if total_adult_remaining > 0 \
+                    else (0.5 * input_data["pop_info"]["population_distribution"]["male_adult"] /
+                          input_data["pop_info"]["population_distribution"]["female_adult"])
+                sibling_sex = np.random.choice([0, 1], p=[male_adult_prob, 1 - male_adult_prob])
+                sibling = Person(age=sibling_age, sex=sibling_sex, position_in_hh="sibling")
+                people_counts["male_adult" if sibling_sex == 0 else "female_adult"] -= 1
+                household_population.append(sibling)
+
+        # Create Household
+        household = Household(population=household_population)
+        households.append(household)
+        people.extend(household_population)
+
+
+
+
+
+
+
+    # # print households
+    # print_all_households(households)
+
+    print("Remaining Households:", total_households - len(households))
     print("Remaining People Counts after Family Households:", people_counts)
     return households, people
+
 
 if __name__ == "__main__":
     total_households = input_data["total_households"]
