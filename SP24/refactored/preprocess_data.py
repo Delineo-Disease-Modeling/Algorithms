@@ -30,7 +30,7 @@ def preprocess_csv(file_path):
         for row in reader:
             safegraph_place_id = row['safegraph_place_id']
             location_name = row['location_name']
-            
+
             if not safegraph_place_id:
                 continue  # Skip rows without a safegraph_place_id
 
@@ -55,7 +55,8 @@ def preprocess_csv(file_path):
                 'related_same_day_brand': related_same_day_brand,
                 'related_same_month_brand': related_same_month_brand,
                 'popularity_by_hour': popularity_by_hour,
-                'popularity_by_day': popularity_by_day
+                'popularity_by_day': popularity_by_day,
+                'capacity': int(row['raw_visit_counts']) if row['raw_visit_counts'] else 0  # Added capacity field
             }
 
             # Add to location_dict
