@@ -2,7 +2,7 @@ import random
 
 import matplotlib.pyplot as plt
 import numpy as np
-
+from tqdm import tqdm
 '''
 The idea is to generate the number of people in each of the 4 large categories (male/female children/adults) first so that the total population would be close to the actual
 distribution.
@@ -809,12 +809,12 @@ def generate_nonfamily_households(total_households, nonfamily_households, input_
                 nonfamily_size_counts["7+"] += 1
             else:
                 nonfamily_size_counts[str(size)] += 1
-    print("Nonfamily Households Size Counts:", nonfamily_size_counts)
+    #print("Nonfamily Households Size Counts:", nonfamily_size_counts)
 
     # Calculate the remaining households needed for each size
     nonfamily_households_needed_by_size = {k: int(v * nonfamily_households / 100) - nonfamily_size_counts[k]
                                            for k, v in nonfamily_households_size_count.items()}
-    print("Nonfamily Households Needed by Size:", nonfamily_households_needed_by_size)
+    #print("Nonfamily Households Needed by Size:", nonfamily_households_needed_by_size)
 
     # Generate the remaining mismatched part
     for size, count in nonfamily_households_needed_by_size.items():
@@ -971,7 +971,7 @@ def gen_households(total_households, total_population):
     ######################################################################################################
     # Part 3: Generate non-family households
     ######################################################################################################
-    print("Generating non-family households...")
+    #print("Generating non-family households...")
     nonfamily_households = total_households - len(households)
     households, people = generate_nonfamily_households(
         total_households,
@@ -984,6 +984,10 @@ def gen_households(total_households, total_population):
     )
 
     print("Final People Counts:", people_counts)
+
+    #calculate people off by percentage
+    people_off_by_percentage = {k: round((v / total_population * 100), 2) for k, v in people_counts.items()}
+    print("People off by percentage:", people_off_by_percentage)
 
     return households, people
 
