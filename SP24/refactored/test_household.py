@@ -133,9 +133,8 @@ This approach should not include any optimization and should be fast in generati
 # 17016019 / 59307056 = 0.287 * 100 = 28.7%
 
 
-#7.2% of U.S. Family Households Were Multigenerational in 2020
+# 7.2% of U.S. Family Households Were Multigenerational in 2020
 # https://www.census.gov/library/stories/2023/06/several-generations-under-one-roof.html
-
 
 
 '''
@@ -227,7 +226,7 @@ input_data = {
                 "total_percentage": 20.6,
                 "multi_generational": 7.2,
             },
-            "size_distribution": { #b11016
+            "size_distribution": {  # b11016
                 '2': 44.17,
                 '3': 22.54,
                 '4': 18.69,
@@ -243,7 +242,18 @@ input_data = {
                 "male_over_65": 4.0,
                 "female_over_65": 7.7,
             },
-            "not_living_alone": 5.8
+            "not_living_alone": 5.8,
+            "size_distribution": {
+                '1': 80.02,
+                '2': 16.62,
+                '3': 2.08,
+                '4': 0.89,
+                '5': 0.25,
+                '6': 0.08,
+                '7+': 0.06
+            }
+            #b09016
+
         },
         "married_couples_percentages": {
             "with_children_18_25": 13.51,
@@ -260,6 +270,7 @@ input_data = {
 
 generational_gap = 30
 generational_gap_std = 7
+
 
 # Person class definition
 class Person:
@@ -290,6 +301,7 @@ class Person:
             "cbg": self.cbg
         }
 
+
 # Household class definition
 class Household:
     _last_id = 0
@@ -316,6 +328,7 @@ class Household:
             "cbg": self.cbg
         }
 
+
 # Helper functions
 
 def generate_number_of_children_4plus():
@@ -328,6 +341,7 @@ def generate_number_of_children_4plus():
     probabilities = probabilities / probabilities.sum()  # Normalize
     number_of_children = np.random.choice(number_of_children_options, p=probabilities)
     return number_of_children
+
 
 def generate_children_ages(parent_age, number_of_children, max_child_age=17, twin_probability=0.05):
     """
@@ -367,6 +381,7 @@ def generate_children_ages(parent_age, number_of_children, max_child_age=17, twi
 
     return children_ages
 
+
 def get_people_distribution(total_population):
     population_distribution = input_data["pop_info"]["population_distribution"]
     total_percentage = sum(population_distribution.values())
@@ -378,6 +393,7 @@ def get_people_distribution(total_population):
         "female_adult": int(total_population * population_distribution["female_adult"] / total_percentage),
     }
 
+
 def print_all_households(households):
     for household in households:
         print("Household ID:", household.id)
@@ -385,13 +401,16 @@ def print_all_households(households):
             print(person.to_dict())
         print("**********************************************\n")
 
+
 def print_all_people(people):
     for person in people:
         print(person.to_dict())
         print("**********************************************\n")
 
+
 # Function to generate households with children under 18
-def generate_households_with_children_under_18(number_of_households_with_children, distribution_with_children, parent_age_distribution, age_ranges, people_counts, households, people):
+def generate_households_with_children_under_18(number_of_households_with_children, distribution_with_children,
+                                               parent_age_distribution, age_ranges, people_counts, households, people):
     # Generate married couple households with children under 18
     num_married_couple_with_children = int(
         number_of_households_with_children * (
@@ -478,12 +497,15 @@ def generate_households_with_children_under_18(number_of_households_with_childre
         household = Household(population=household_population, type="family")
         households.append(household)
         people.extend(household_population)
-        num_married_couple_generated +=1
+        num_married_couple_generated += 1
     # Return the number of married couples generated
     return num_married_couple_generated, num_single_mother_with_children, num_single_father_with_children
 
+
 # Function to generate single parent households with children under 18
-def generate_single_parent_households_with_children(num_single_mother_with_children, num_single_father_with_children, distribution_with_children, parent_age_distribution, age_ranges, people_counts, households, people):
+def generate_single_parent_households_with_children(num_single_mother_with_children, num_single_father_with_children,
+                                                    distribution_with_children, parent_age_distribution, age_ranges,
+                                                    people_counts, households, people):
     # Generate single mother households with children under 18
     for _ in range(num_single_mother_with_children):
         num_children_dist = distribution_with_children["single_mother_with_children"]["number_of_children"]
@@ -596,8 +618,11 @@ def generate_single_parent_households_with_children(num_single_mother_with_child
         households.append(household)
         people.extend(household_population)
 
+
 # Function to generate family households without children
-def generate_family_households_without_children(num_married_couple_without_children, married_couple_without_children_age_distribution, age_ranges, people_counts, households, people):
+def generate_family_households_without_children(num_married_couple_without_children,
+                                                married_couple_without_children_age_distribution, age_ranges,
+                                                people_counts, households, people):
     # Generate married couple households without children
     for _ in range(num_married_couple_without_children):
         # Assign age group to partners
@@ -628,6 +653,7 @@ def generate_family_households_without_children(num_married_couple_without_child
         household = Household(population=household_population, type="family")
         households.append(household)
         people.extend(household_population)
+
 
 # Function to add grandparents to households
 def add_grandparents_to_households(num_multi_generational_households, households, people_counts, people):
@@ -679,8 +705,10 @@ def add_grandparents_to_households(num_multi_generational_households, households
             # add the grandparent to the people list
             people.append(grandparent)
 
+
 # Function to generate remaining family households
-def generate_remaining_family_households(remaining_family_households, input_data, age_ranges, people_counts, households, people):
+def generate_remaining_family_households(remaining_family_households, input_data, age_ranges, people_counts, households,
+                                         people):
     # TODO: Implement logic for generating remaining family households
     # For now, generate placeholder households
     def gen_placeholder_household(count, pph, households, people):
@@ -699,7 +727,7 @@ def generate_remaining_family_households(remaining_family_households, input_data
                     people_counts["female_adult"] -= 1
 
                 population.append(p)
-            h = Household(population=population, type="family_placeholder")
+            h = Household(population=population, type="family")
             households.append(h)
             people.extend(population)
 
@@ -721,12 +749,99 @@ def generate_remaining_family_households(remaining_family_households, input_data
         else:
             generated_household_size_counts[str(size)] += 1
 
-    remaining_family_households_count_by_size = {k: v - generated_household_size_counts[k] for k, v in get_hh_size_count(len(households)+remaining_family_households).items()}
+    remaining_family_households_count_by_size = {k: v - generated_household_size_counts[k] for k, v in
+                                                 get_hh_size_count(
+                                                     len(households) + remaining_family_households).items()}
 
     # generate placeholder households using the remaining family households count by size
     for size, count in remaining_family_households_count_by_size.items():
         hh_size = int(size) if size != "7+" else 7
         gen_placeholder_household(count, hh_size, households, people)
+
+
+# Function to generate non-family households
+def generate_nonfamily_households(total_households, nonfamily_households, input_data, age_ranges, people_counts, households, people):
+    living_alone = input_data["household_info"]["nonfamily_households"]["living_alone"]
+    nonfamily_size_distribution = input_data["household_info"]["nonfamily_households"]["size_distribution"]
+    hh_type = "nonfamily"
+
+    # Generate male single-person households over 65
+    for _ in range(int(total_households * living_alone["male_over_65"] / 100)):
+        p = Person(age=np.random.randint(65, 90), sex=0, position_in_hh="alone")
+        people.append(p)
+        people_counts["male_adult"] -= 1
+        h = Household(population=[p], type=hh_type)
+        households.append(h)
+
+    # Generate female single-person households over 65
+    for _ in range(int(total_households * living_alone["female_over_65"] / 100)):
+        p = Person(age=np.random.randint(65, 90), sex=1, position_in_hh="alone")
+        people.append(p)
+        people_counts["female_adult"] -= 1
+        h = Household(population=[p], type=hh_type)
+        households.append(h)
+
+    # Generate single-person households aged 18-64
+    for _ in range(int(total_households * (
+            living_alone["total_percentage"] - living_alone["female_over_65"] - living_alone["male_over_65"]) / 100)):
+        age = np.random.randint(18, 65)
+        total_people_remaining = people_counts["male_adult"] + people_counts["female_adult"]
+        male_prob = people_counts["male_adult"] / total_people_remaining if total_people_remaining > 0 else 0.5
+        sex = np.random.choice([0, 1], p=[male_prob, 1 - male_prob])
+        p = Person(age=age, sex=sex, position_in_hh="alone")
+        people.append(p)
+        if p.sex == 0:
+            people_counts["male_adult"] -= 1
+        else:
+            people_counts["female_adult"] -= 1
+        h = Household(population=[p], type=hh_type)
+        households.append(h)
+
+    # Generate remaining nonfamily households
+    nonfamily_households_size_count = {k: v for k, v in nonfamily_size_distribution.items()}
+    nonfamily_size_counts = {size: 0 for size in nonfamily_size_distribution.keys()}
+
+    # Count the number of households already generated
+    for household in households:
+        if household.type == "nonfamily":
+            size = len(household.population)
+            if size >= 7:
+                nonfamily_size_counts["7+"] += 1
+            else:
+                nonfamily_size_counts[str(size)] += 1
+    print("Nonfamily Households Size Counts:", nonfamily_size_counts)
+
+    # Calculate the remaining households needed for each size
+    nonfamily_households_needed_by_size = {k: int(v * nonfamily_households / 100) - nonfamily_size_counts[k]
+                                           for k, v in nonfamily_households_size_count.items()}
+    print("Nonfamily Households Needed by Size:", nonfamily_households_needed_by_size)
+
+    # Generate the remaining mismatched part
+    for size, count in nonfamily_households_needed_by_size.items():
+        size = int(size) if size != "7+" else 7
+        if count <= 0:
+            continue
+        for _ in range(count):
+            if size == 1:  # Skip single-person households here
+                continue
+            population = []
+            for _ in range(size):
+                age = np.random.randint(18, 64)
+                total_people_remaining = people_counts["male_adult"] + people_counts["female_adult"]
+                male_prob = people_counts["male_adult"] / total_people_remaining if total_people_remaining > 0 else 0.5
+                sex = np.random.choice([0, 1], p=[male_prob, 1 - male_prob])
+                p = Person(age=age, sex=sex, position_in_hh="nonfamily_member")
+                people.append(p)
+                if p.sex == 0:
+                    people_counts["male_adult"] -= 1
+                else:
+                    people_counts["female_adult"] -= 1
+                population.append(p)
+            h = Household(population=population, type="nonfamily")
+            households.append(h)
+
+    return households, people
+
 
 # Main function to generate households
 def gen_households(total_households, total_population):
@@ -852,56 +967,56 @@ def gen_households(total_households, total_population):
         people
     )
 
-    # Plotting and printing code remains the same
 
-    # print households
-    # print_all_households(households)
+    ######################################################################################################
+    # Part 3: Generate non-family households
+    ######################################################################################################
+    print("Generating non-family households...")
+    nonfamily_households = total_households - len(households)
+    households, people = generate_nonfamily_households(
+        total_households,
+        nonfamily_households,
+        input_data,
+        age_ranges,
+        people_counts,
+        households,
+        people
+    )
 
-    # plot a histogram of the number of people in household as percentages follow size_distribution
-    # Generate histogram for household size distribution
+    print("Final People Counts:", people_counts)
 
-    # Plot a histogram of the number of people in household as percentages and compare with reference data
-    household_size_distribution = input_data["household_info"]["family_households"]["size_distribution"]
-    household_sizes = ["2", "3", "4", "5", "6", "7+"]
+    return households, people
 
-    # Initialize counts for generated data
-    household_size_counts = {size: 0 for size in household_sizes}
-    for household in households:
-        size = len(household.population)
-        if size >= 7:
-            household_size_counts["7+"] += 1
-        else:
-            household_size_counts[str(size)] += 1
 
-    print("Household Size Counts:", household_size_counts)
 
-    # Calculate percentages for generated data
-    total_households_generated = sum(household_size_counts.values())
-    household_size_percentages = {
-        size: (count / total_households_generated) * 100
-        for size, count in household_size_counts.items()
-    }
+######################################################################################################
+#data validation
+######################################################################################################
 
-    # Reference data percentages
-    reference_percentages = [household_size_distribution[size] for size in household_sizes]
-
-    # Plot the histogram
+def plot_household_size_distribution(generated_data, reference_data, household_sizes, title):
+    """
+    Function to plot household size distribution.
+    :param generated_data: Dictionary of generated household size percentages.
+    :param reference_data: List of reference household size percentages.
+    :param household_sizes: List of household size categories (e.g., ["1", "2", "3", ...]).
+    :param title: Title for the plot.
+    """
     plt.figure(figsize=(12, 7))
     bar_width = 0.35
     x_indices = range(len(household_sizes))
 
     # Plot reference data (left)
     plt.bar(x_indices,
-            reference_percentages,
+            reference_data,
             width=bar_width, color='orange', label='Reference Data')
 
     # Plot generated data (right)
     plt.bar([x + bar_width for x in x_indices],
-            [household_size_percentages[size] for size in household_sizes],
+            [generated_data[size] for size in household_sizes],
             width=bar_width, color='lightblue', label='Generated Data')
 
     # Add titles and labels
-    plt.title("Comparison of Family Household Size Distribution", fontsize=16)
+    plt.title(f"Comparison of {title} Household Size Distribution", fontsize=16)
     plt.xlabel("Household Size", fontsize=14)
     plt.ylabel("Percentage of Total Households (%)", fontsize=14)
     plt.xticks([x + bar_width / 2 for x in x_indices], household_sizes, fontsize=12)
@@ -909,17 +1024,64 @@ def gen_households(total_households, total_population):
     plt.legend(fontsize=12)
     plt.grid(axis='y', linestyle='--', alpha=0.7)
     plt.tight_layout()
-
     plt.show()
 
-    print("Remaining Households:", total_households - len(households))
-    print("Remaining People Counts after Family Households:", people_counts)
-    return households, people
 
-# Main execution
+def visualize_hh_size(hh):
+    # Plot family household size distribution
+    family_household_size_distribution = input_data["household_info"]["family_households"]["size_distribution"]
+    family_household_sizes = ["2", "3", "4", "5", "6", "7+"]
+    family_household_size_counts = {size: 0 for size in family_household_sizes}
+    for household in hh:
+        if household.type == "family":
+            size = len(household.population)
+            if size >= 7:
+                family_household_size_counts["7+"] += 1
+            else:
+                family_household_size_counts[str(size)] += 1
+    total_family_households_generated = sum(family_household_size_counts.values())
+    family_household_size_percentages = {
+        size: (count / total_family_households_generated) * 100
+        for size, count in family_household_size_counts.items()
+    }
+    plot_household_size_distribution(
+        family_household_size_percentages,
+        [family_household_size_distribution[size] for size in family_household_sizes],
+        family_household_sizes,
+        "Family"
+    )
+
+    # Plot non-family household size distribution
+    nonfamily_household_size_distribution = input_data["household_info"]["nonfamily_households"]["size_distribution"]
+    nonfamily_household_sizes = ["1", "2", "3", "4", "5", "6", "7+"]
+    nonfamily_household_size_counts = {size: 0 for size in nonfamily_household_sizes}
+    for household in hh:
+        if household.type == "nonfamily":
+            size = len(household.population)
+            if size >= 7:
+                nonfamily_household_size_counts["7+"] += 1
+            else:
+                nonfamily_household_size_counts[str(size)] += 1
+    total_nonfamily_households_generated = sum(nonfamily_household_size_counts.values())
+    nonfamily_household_size_percentages = {
+        size: (count / total_nonfamily_households_generated) * 100
+        for size, count in nonfamily_household_size_counts.items()
+    }
+    plot_household_size_distribution(
+        nonfamily_household_size_percentages,
+        [nonfamily_household_size_distribution[size] for size in nonfamily_household_sizes],
+        nonfamily_household_sizes,
+        "Non-Family"
+    )
+
+
 if __name__ == "__main__":
     total_households = input_data["total_households"]
     avg_household_size = input_data["avg_household_size"]
     total_population = int(total_households * avg_household_size)
 
     hh, people = gen_households(total_households, total_population)
+    # assert len(hh) == total_households, f"Expected {total_households} households, but got {len(hh)} households."
+
+    visualize_hh_size(hh)
+
