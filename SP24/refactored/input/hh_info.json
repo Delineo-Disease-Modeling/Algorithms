@@ -1,0 +1,39 @@
+{
+  "hh_by_size": {
+    "total": 100.00,
+    "family_households": 63.99,
+    "family_2_person_household": 28.26,
+    "family_3_person_household": 14.42,
+    "family_4_person_household": 11.96,
+    "family_5_person_household": 5.64,
+    "family_6_person_household": 2.23,
+    "family_7_or_more_person_household": 1.47,
+    "nonfamily_households": 36.01,
+    "nonfamily_1_person_household": 28.81,
+    "nonfamily_2_person_household": 5.98,
+    "nonfamily_3_person_household": 0.75,
+    "nonfamily_4_person_household": 0.32,
+    "nonfamily_5_person_household": 0.09,
+    "nonfamily_6_person_household": 0.03,
+    "nonfamily_7_or_more_person_household": 0.02
+  },
+  "hh_by_type": {
+    "total": 100.00,
+    "married_couple_household": 46.91,
+    "married_with_children_under_18": 17.71,
+    "married_no_children_under_18": 29.20,
+    "cohabiting_couple_household": 7.33,
+    "cohabiting_with_children_under_18": 2.31,
+    "cohabiting_no_children_under_18": 5.02,
+    "female_householder_no_spouse_present": 27.42,
+    "female_living_alone": 15.63,
+    "female_with_children_under_18": 4.78,
+    "female_with_relatives_no_children_under_18": 5.75,
+    "female_with_only_nonrelatives": 1.26,
+    "male_householder_no_spouse_present": 18.34,
+    "male_living_alone": 12.98,
+    "male_with_children_under_18": 1.21,
+    "male_with_relatives_no_children_under_18": 2.59,
+    "male_with_only_nonrelatives": 1.56
+  }
+}
