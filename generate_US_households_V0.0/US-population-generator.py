@@ -281,15 +281,14 @@ class Person:
     person_id: int
     household_id: int
     county_code: str
+    cbg: str
     gender: str  # 'M' or 'F'
     age: int
     relate_head: int  # 1: head, 2: partner, 3: child, 4: relative, 5: non-relative
 
 class SyntheticPopulationGenerator:
     def __init__(self, census_data: dict, cz_data: dict ):
-        """Initialize with census data from the specified JSON file."""
-        # with open(census_data_path, 'r') as f:
-            # self.census_data = json.load(f)
+        """Initialize with input census data."""
         self.census_data = census_data
         self.cz_data = cz_data
         # Set up counters for IDs
@@ -297,6 +296,7 @@ class SyntheticPopulationGenerator:
         self.next_household_id = 1
         
         # Age distributions (simplified)
+        # TODO: Create a function to derive age distributions from additional census data
         self.age_distributions = {
             'householder': {'mean': 50, 'std': 15, 'min': 18, 'max': 95},
             'spouse_partner': {'mean': 48, 'std': 15, 'min': 18, 'max': 95},
@@ -350,7 +350,8 @@ class SyntheticPopulationGenerator:
         
         if is_family:
             # Family households
-            if random.random() < 0.7:  # Most family households have a partner
+            percent_married = (county_data["opposite-sex spouse"] + county_data["same-sex spouse"]) / county_data["family_households"]
+            if random.random() < percent_married:  # Most family households have a partner
                 has_partner = True
                 household_size -= 1  # Account for partner
             
@@ -362,6 +363,8 @@ class SyntheticPopulationGenerator:
             
             # Determine if has other relatives and how many
             if household_size > 1:
+                percent_other_relatives = (county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]) / county_data["family_households"]
+                # TODO: Use percent_other_relatives to determine number of relatives
                 relative_count = min(household_size - 1, np.random.poisson(1))
                 has_relatives = relative_count
                 household_size -= relative_count
@@ -370,7 +373,9 @@ class SyntheticPopulationGenerator:
             has_nonrelatives = max(0, household_size - 1)  # -1 for the head
         else:
             # Non-family households
-            if random.random() < 0.2:  # Some non-family households have unmarried partners
+            non_family_households = county_data["total_households"] - county_data["total_family_households"]
+            percent_unmarried = (county_data["opposite-sex unmarried_partner"] + county_data["same-sex unmarried_partner"]) / non_family_households
+            if random.random() < percent_unmarried:  # Some non-family households have unmarried partners
                 has_partner = True
                 household_size -= 1
             
@@ -386,7 +391,7 @@ class SyntheticPopulationGenerator:
             'num_nonrelatives': has_nonrelatives
         }
     
-    def generate_household(self, county_code: str) -> List[Person]:
+    def generate_household(self, county_data, county_code: str, cbg: str) -> List[Person]:
         """Generate all members of a single household."""
         household_id = self.next_household_id
         self.next_household_id += 1
@@ -400,6 +405,7 @@ class SyntheticPopulationGenerator:
             person_id=self.next_person_id,
             household_id=household_id,
             county_code=county_code,
+            cbg=cbg,
             gender=head_gender,
             age=self.generate_age('householder'),
             relate_head=1  # 1: head
@@ -411,13 +417,15 @@ class SyntheticPopulationGenerator:
         if household_composition['has_partner']:
             partner_gender = 'F' if head_gender == 'M' else 'M'
             # Same-sex couples exist too
-            if random.random() < 0.05:  # Approximately 5% of couples are same-sex
+            percent_ss_couples = (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"]) / (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"] + county_data["opposite-sex unmarried_partner"] + county_data["opposite-sex spouse"])
+            if random.random() < percent_ss_couples: 
                 partner_gender = head_gender
                 
             partner = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
                 county_code=county_code,
+                cbg=cbg,
                 gender=partner_gender,
                 age=self.generate_age('spouse_partner'),
                 relate_head=2  # 2: partner
@@ -425,13 +433,15 @@ class SyntheticPopulationGenerator:
             self.next_person_id += 1
             household_members.append(partner)
         
+        # TODO: For all non-head members and partners, determine gender via additional census data
         # Add children
         for _ in range(household_composition['num_children']):
-            child_gender = 'M' if random.random() < 0.51 else 'F'  # Slightly more males at birth
+            child_gender = 'M' if random.random() < 0.5 else 'F'  
             child = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
                 county_code=county_code,
+                cbg=cbg,
                 gender=child_gender,
                 age=self.generate_age('child'),
                 relate_head=3  # 3: child
@@ -444,15 +454,22 @@ class SyntheticPopulationGenerator:
             relative_gender = 'M' if random.random() < 0.5 else 'F'
             
             # Decide which type of relative
+            # TODO: The son-in-law and daughter-in-law categories imply adult children in the home
+                # Revise this to better reflect the actual distribution of relatives
+            tot_other_relatives = county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]
             relative_type = random.choices(
                 ['parent', 'sibling', 'grandchild', 'other_relative'],
-                weights=[0.2, 0.2, 0.3, 0.3]
+                weights=[county_data["parent"]+county_data["parent-in-law"]/tot_other_relatives # parent
+                        , county_data["brother_or_sister"]/tot_other_relatives # sibling
+                        , county_data["grandchild"]/tot_other_relatives # grandchild
+                        , county_data["other_relative"]/tot_other_relatives] # other_relative
             )[0]
             
             relative = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
                 county_code=county_code,
+                cbg=cbg,
                 gender=relative_gender,
                 age=self.generate_age(relative_type),
                 relate_head=4  # 4: relative
@@ -469,6 +486,7 @@ class SyntheticPopulationGenerator:
                 person_id=self.next_person_id,
                 household_id=household_id,
                 county_code=county_code,
+                cbg=cbg,
                 gender=nonrel_gender,
                 age=self.generate_age(nonrel_type),
                 relate_head=5  # 5: non-relative
@@ -478,7 +496,7 @@ class SyntheticPopulationGenerator:
         
         return household_members
     
-    def generate_county_population(self, county_code: str, target_households: int = None) -> List[Person]:
+    def generate_county_population(self, county_code: str, target_households: int = None, cz_population: int = 0) -> List[Person]:
         """Generate a synthetic population for a specific county."""
         county_data = self.census_data[county_code]
         
@@ -486,10 +504,17 @@ class SyntheticPopulationGenerator:
         if target_households is None:
             target_households = min(10000, county_data["total_households"] // 10)
         
+        # Create households for each cbg in the county
         population = []
-        for _ in range(target_households):
-            household = self.generate_household(county_code)
-            population.extend(household)
+        county_cbgs = self.cz_data['GEOIDs']; county_cbgs = [i for i in county_cbgs if i[2:5] == county_code]
+        for cbg in county_cbgs:
+            # Determine number of households in this cbg
+            cbg_population = self.cz_data['GEOIDs'][cbg]
+            pop_fraction = cbg_population / cz_population
+            cbg_households = int(target_households * pop_fraction)
+            for _ in range(cbg_households):
+                household = self.generate_household(county_data, county_code, cbg)
+                population.extend(household)
             
         return population
     
@@ -506,7 +531,7 @@ class SyntheticPopulationGenerator:
             cz_population = sum(county_pop)    
             sample_factor = cz_population / county_data["total_population"]
             target_households = int(county_data["total_households"] * sample_factor)
-            county_population = self.generate_county_population(county_code, target_households)
+            county_population = self.generate_county_population(county_code, target_households, cz_population)
             population.extend(county_population)
             print("Generated", len(county_population), "people in", target_households, "households for county", county_code, "(", str(np.round(100*sample_factor, 2)), "% of population)")
         return population
@@ -549,9 +574,9 @@ class SyntheticPopulationGenerator:
         print(f"Population saved to {output_path}")
 
 
-def main():
+def main(input_file: str):
     # Get population estimates for CGBs in CZ output
-    with open('CZ_output_test1.yaml', mode="r", encoding="utf-8") as file:
+    with open(input_file, mode="r", encoding="utf-8") as file:
             cz_data = yaml.full_load(file)
 
     # Create data puller
@@ -565,7 +590,7 @@ def main():
     STATE_FIPS = states[0]
     COUNTIES_FIPS = list(set([i[2:5] for i in cbgs]))
 
-    census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS)
+    census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS, "census_data.json")
 
     
     # Create population generator
@@ -585,4 +610,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Prompt user for input file
+    input_file = input("Enter the path to the input file: ")
+    main(input_file)

@@ -1,0 +1,2 @@
+"VACCINATION": 0.8 # % of population vaccinated
+"VARIANTS": {"Omicron": 0.25, "Delta": 0.75} # % of population infected with each variant
