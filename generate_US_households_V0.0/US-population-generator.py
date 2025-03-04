@@ -572,7 +572,54 @@ class SyntheticPopulationGenerator:
         population_df = pd.DataFrame([vars(p) for p in population])
         population_df.to_csv(output_path, index=False)
         print(f"Population saved to {output_path}")
+        return population_df
 
+
+def convert_data(df, output_file):
+    """
+    Convert data frame with person and household information into a specific dictionary format
+    
+    Args:
+        input_file (str): Path to input CSV file
+        output_file (str): Path to output JSON file
+    """
+    
+    # Initialize output dictionary
+    output = {
+        "people": {},
+        "homes": {}
+    }
+    
+    # Create mappings
+    # For sex: M -> 0, F -> 1
+    sex_mapping = {"M": 0, "F": 1}
+    
+    # Process each row in the dataframe
+    for index, row in df.iterrows():
+        person_id = str(row['person_id'])
+        household_id = str(row['household_id'])
+        
+        # Add person to people dictionary
+        output["people"][person_id] = {
+            "sex": sex_mapping.get(row['gender']),
+            "age": row['age'],
+            "home": household_id
+        }
+        
+        # Add or update household in homes dictionary
+        if household_id not in output["homes"]:
+            output["homes"][household_id] = {
+                "cbg": row['cbg'],
+                "members": 1
+            }
+        else:
+            output["homes"][household_id]["members"] += 1
+    
+    # Write the output to a JSON file
+    with open(output_file, 'w') as f:
+        json.dump(output, f, indent=4)
+    
+    return output
 
 def main(input_file: str):
     # Get population estimates for CGBs in CZ output
@@ -606,7 +653,9 @@ def main(input_file: str):
         print(f"{key}: {value}")
     
     # Save the population to CSV
-    generator.save_population(population, "synthetic_population.csv")
+    population = generator.save_population(population, "synthetic_population.csv")
+
+    convert_data(population, "population.json")
 
 
 if __name__ == "__main__":
