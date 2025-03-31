@@ -22,13 +22,13 @@ class Config:
         self.states = ["Maryland", "Pennsylvania"]
         self.core_cbg = "240430006012"
         self.min_cluster_pop = 5000
-        self.output_dir = r"E:\Dileno Diesease Modelling\Algorithms\CZ Code"
+        self.output_dir = r"./output"
         self.paths = {
-            "shapefile_md": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\tl_2010_24_bg10\tl_2010_24_bg10.shp",
-            "shapefile_pa": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\tl_2010_42_bg10\tl_2010_42_bg10.shp",
-            "patterns_csv": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\patterns.csv",
-            "poi_csv": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\2021_05_05_03_core_poi.csv",
-            "population_csv": r"Algorithms/Data-Files-1/safegraph_cbg_population_estimate.csv",
+            "shapefile_md": r"./data/tl_2010_24_bg10/tl_2010_24_bg10.shp",
+            "shapefile_pa": r"./data/tl_2010_42_bg10/tl_2010_42_bg10.shp",
+            "patterns_csv": r"./data/patterns.csv",
+            "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
+            "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
             "output_yaml": "cbg_info.yaml",
             "output_html": "map_with_black_clusters.html"
         }
