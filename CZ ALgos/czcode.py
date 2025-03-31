@@ -50,7 +50,40 @@ class Config:
         ]
         # Ensure output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
-
+    
+    def __init__(self, cbg, zip_code, name, min_pop):
+        search = SearchEngine()
+        if isinstance(zip_code, list):
+            self.states = [ search.by_zipcode(zip).state for zip in zip_code ]
+        else:
+            self.states = [ search.by_zipcode(zip_code) ]
+        
+        self.location_name = name
+        self.core_cbg = cbg
+        self.min_cluster_pop = min_pop
+        self.output_dir = r"./output"
+        self.paths = {
+            "shapefile_md": r"./data/tl_2010_24_bg10/tl_2010_24_bg10.shp",
+            "shapefile_pa": r"./data/tl_2010_42_bg10/tl_2010_42_bg10.shp",
+            "patterns_csv": r"./data/patterns.csv",
+            "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
+            "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
+            "output_yaml": "cbg_info.yaml",
+            "output_html": "map_with_black_clusters.html"
+        }
+        self.map = {
+            "default_location": [0.0, 0.0],
+            "zoom_start": 12
+        }
+        self.ratio_colors = {
+            0.8: "#0000FF",  # Blue
+            0.6: "#008000",  # Green
+            0.4: "#FFFF00",  # Yellow
+            0.2: "#FFA500",  # Orange
+            0.0: "#FF0000",  # Red
+        }
+        self.black_cbgs = [ ]
+        os.makedirs(self.output_dir, exist_ok=True)
 
 # ----------------------------
 # Logging Setup
@@ -444,7 +477,7 @@ class Visualizer:
                 return self.config.map["default_location"]
 
         center = safe_center()
-        map_obj = folium.Map(location=center, zoom_start=self.config.map["zoom_start"])
+        self.map_obj = folium.Map(location=center, zoom_start=self.config.map["zoom_start"])
         features = []
         for i, cbg in enumerate(algorithm_result[0]):
             try:
@@ -461,7 +494,7 @@ class Visualizer:
                 features.append(feature)
             except Exception:
                 self.logger.error(f"Error processing CBG {cbg} for map", exc_info=True)
-        map_obj.add_child(plugins.TimestampedGeoJson(
+        self.map_obj.add_child(plugins.TimestampedGeoJson(
             {'type': 'FeatureCollection', 'features': features},
             period='PT6H',
             add_last_point=True,
@@ -475,9 +508,9 @@ class Visualizer:
                 folium.GeoJson(
                     json.loads(shape.to_json()),
                     style_function=lambda x: {'fillColor': '#000000', 'color': '#000000', 'fillOpacity': 0.7}
-                ).add_to(map_obj)
+                ).add_to(self.map_obj)
         output_map_path = os.path.join(self.config.output_dir, self.config.paths["output_html"])
-        map_obj.save(output_map_path)
+        self.map_obj.save(output_map_path)
         self.logger.info(f"Map saved to {output_map_path}")
 
 
@@ -555,7 +588,45 @@ def main():
     exporter.generate_yaml_output(G, algorithm_result)
 
     logger.info("Processing complete")
+    
 
+def generate_cz(cbg, zip, name, min_pop):
+    config = Config(cbg, zip, name, min_pop)
+
+    logger = setup_logging(config)
+    logger.info("Starting clustering analysis")
+
+    # Data loading
+    data_loader = DataLoader(config, logger)
+    zip_codes = data_loader.get_zip_codes()
+    logger.info(f"Retrieved {len(zip_codes)} zip codes")
+    df = data_loader.load_safegraph_data(zip_codes)
+    poif = data_loader.load_poi_data(zip_codes, df)
+    gdf = data_loader.load_shapefiles()
+    _ = data_loader.get_population_data()  # Population data is cached in cbg_population
+
+    # Graph generation
+    graph_builder = GraphBuilder(logger)
+    G = graph_builder.gen_graph(df)
+
+    # Run clustering algorithm (using greedy_weight here)
+    clustering_algo = Clustering(config, logger)
+    algorithm_result = clustering_algo.greedy_weight(G, config.core_cbg, config.min_cluster_pop)
+    logger.info(f"Clustering complete: {len(algorithm_result[0])} CBGs, population: {algorithm_result[1]}")
+    movement_stats = Helpers.calculate_movement_stats(G, algorithm_result[0])
+    logger.info(f"Movement stats: IN {movement_stats['in']}, OUT {movement_stats['out']}, Ratio {movement_stats['ratio']:.4f}")
+
+    # Generate map visualizations
+    visualizer = Visualizer(config, logger)
+    visualizer.generate_maps(G, gdf, algorithm_result, poif, df)
+
+    # Generate YAML output
+    exporter = Exporter(config, logger)
+    exporter.generate_yaml_output(G, algorithm_result)
+
+    logger.info("Processing complete")
+    
+    return algorithm_result, visualizer.map_obj
 
 if __name__ == "__main__":
     try:
