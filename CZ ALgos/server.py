@@ -20,18 +20,18 @@ def route_generate_cz():
   cluster, map = generate_cz(request.json['cbg'], request.json['zip_code'], request.json['name'], request.json['min_pop'])
   cluster, size = ( list(set([ str(int(float(i))) for i in cluster[0] ])), cluster[1] )
     
-  resp = requests.post('http://localhost:1890/convenience-zones', json={
-    'name': request.json['name'],
-    'label': request.json['label'],
-    'lat_long': request.json['lat_long'],
-    'cbg_list': cluster,
-    'size': size
-  })
+  # resp = requests.post('http://localhost:1890/convenience-zones', json={
+  #   'name': request.json['name'],
+  #   'label': request.json['label'],
+  #   'lat_long': request.json['lat_long'],
+  #   'cbg_list': cluster,
+  #   'size': size
+  # })
   
-  if not resp.ok:
-    return make_response(jsonify({
-      'message': 'Could not upload cluster to database'  
-    }), 500)
+  # if not resp.ok:
+  #   return make_response(jsonify({
+  #     'message': 'Could not upload cluster to database'  
+  #   }), 500)
   
   return jsonify({
     'cluster': cluster,

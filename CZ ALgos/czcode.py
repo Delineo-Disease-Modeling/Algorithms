@@ -56,7 +56,7 @@ class Config:
         if isinstance(zip_code, list):
             self.states = [ search.by_zipcode(zip).state for zip in zip_code ]
         else:
-            self.states = [ search.by_zipcode(zip_code) ]
+            self.states = [ search.by_zipcode(zip_code).state ]
         
         self.location_name = name
         self.core_cbg = cbg
@@ -247,11 +247,14 @@ class Helpers:
         movement_in = 0
         movement_out = 0
         for cbg in cluster_cbgs:
-            for neighbor in G.adj[cbg]:
-                if neighbor in cluster_cbgs:
-                    movement_in += G.adj[cbg][neighbor]['weight'] / 2
-                else:
-                    movement_out += G.adj[cbg][neighbor]['weight']
+            try:
+                for neighbor in G.adj[cbg]:
+                    if neighbor in cluster_cbgs:
+                        movement_in += G.adj[cbg][neighbor]['weight'] / 2
+                    else:
+                        movement_out += G.adj[cbg][neighbor]['weight']
+            except:
+                pass
         total = movement_in + movement_out
         return {'in': movement_in, 'out': movement_out, 'ratio': movement_in / total if total > 0 else 0}
 
