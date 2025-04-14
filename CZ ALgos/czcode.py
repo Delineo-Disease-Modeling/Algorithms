@@ -17,25 +17,36 @@ from uszipcode import SearchEngine
 # Configuration Module
 # ----------------------------
 class Config:
-    def __init__(self):
-        self.location_name = "hagerstown"
-        self.states = ["Maryland", "Pennsylvania"]
-        self.core_cbg = "240430006012"
-        self.min_cluster_pop = 5000
-        self.output_dir = r"E:\Dileno Diesease Modelling\Algorithms\CZ Code"
-        self.paths = {
-            "shapefile_md": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\tl_2010_24_bg10\tl_2010_24_bg10.shp",
-            "shapefile_pa": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\tl_2010_42_bg10\tl_2010_42_bg10.shp",
-            "patterns_csv": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\patterns.csv",
-            "poi_csv": r"E:\Dileno Diesease Modelling\Algorithms\Data-Files-1\2021_05_05_03_core_poi.csv",
-            "population_csv": r"Algorithms/Data-Files-1/safegraph_cbg_population_estimate.csv",
-            "output_yaml": "cbg_info.yaml",
-            "output_html": "map_with_black_clusters.html"
-        }
+    def __init__(self, location_name=None, core_cbg=None, min_cluster_pop=5000, states=None, custom_black_cbgs=None):
+        """
+        Initialize a configuration for CBG clustering.
+        
+        Args:
+            location_name: Name of the location (e.g., "baltimore", "hagerstown")
+            core_cbg: Census Block Group ID to use as the core
+            min_cluster_pop: Minimum population for the cluster
+            states: List of state names to include
+            custom_black_cbgs: List of CBGs to highlight in black
+        """
+        self.location_name = location_name or "hagerstown"
+        self.states = states or ["Maryland", "Pennsylvania"]
+        self.core_cbg = core_cbg or "240430006012"
+        self.min_cluster_pop = min_cluster_pop
+        
+        # Set up paths to match where data files are stored
+        self.base_dir = os.path.dirname(os.path.abspath(__file__))
+        self.output_dir = os.path.join(self.base_dir, "output")
+        
+        # Set paths based on states
+        self.paths = self._setup_paths()
+        
+        # Default map settings - will be updated based on location
         self.map = {
-            "default_location": [39.6418, -77.7199],
+            "default_location": [39.6418, -77.7199], # Default Hagerstown coordinates
             "zoom_start": 12
         }
+        
+        # Color scheme for movement ratios
         self.ratio_colors = {
             0.8: "#0000FF",  # Blue
             0.6: "#008000",  # Green
@@ -43,13 +54,184 @@ class Config:
             0.2: "#FFA500",  # Orange
             0.0: "#FF0000",  # Red
         }
-        self.black_cbgs = [
-            "240430002003", "240430003021", "240430001002", "240430001001",
-            "240430008001", "240430008002", "240430008003", "240430007003",
-            "240430010014", "240430010012", "240430010021", "240430102003"
-        ]
+        
+        # Black CBGs - either custom or default for Hagerstown
+        if custom_black_cbgs is not None:
+            self.black_cbgs = custom_black_cbgs
+        elif self.location_name == "hagerstown" and self.core_cbg == "240430006012":
+            self.black_cbgs = [
+                "240430002003", "240430003021", "240430001002", "240430001001",
+                "240430008001", "240430008002", "240430008003", "240430007003",
+                "240430010014", "240430010012", "240430010021", "240430102003"
+            ]
+        else:
+            self.black_cbgs = []
+            
         # Ensure output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
+
+    def _setup_paths(self):
+        """Set up file paths based on configuration"""
+        data_dir = os.path.join(self.base_dir, "Data-Files")
+        
+        paths = {
+            "patterns_csv": os.path.join(data_dir, "patterns.csv"),
+            "poi_csv": os.path.join(data_dir, "2021_05_05_03_core_poi.csv"),
+            "population_csv": os.path.join(data_dir, "safegraph_cbg_population_estimate.csv"),
+            "output_yaml": f"{self.location_name}_cbg_info.yaml",
+            "output_html": f"{self.location_name}_map.html"
+        }
+        
+        # Add shapefile paths based on states
+        self._add_state_shapefiles(paths, data_dir)
+        
+        return paths
+        
+    def _add_state_shapefiles(self, paths, data_dir):
+        """Add shapefile paths for each state in the configuration"""
+        # Map of state names to FIPS codes
+        state_to_fips = {
+            "Alabama": "01", "Alaska": "02", "Arizona": "04", "Arkansas": "05",
+            "California": "06", "Colorado": "08", "Connecticut": "09", "Delaware": "10",
+            "District of Columbia": "11", "Florida": "12", "Georgia": "13", "Hawaii": "15",
+            "Idaho": "16", "Illinois": "17", "Indiana": "18", "Iowa": "19",
+            "Kansas": "20", "Kentucky": "21", "Louisiana": "22", "Maine": "23",
+            "Maryland": "24", "Massachusetts": "25", "Michigan": "26", "Minnesota": "27",
+            "Mississippi": "28", "Missouri": "29", "Montana": "30", "Nebraska": "31",
+            "Nevada": "32", "New Hampshire": "33", "New Jersey": "34", "New Mexico": "35",
+            "New York": "36", "North Carolina": "37", "North Dakota": "38", "Ohio": "39",
+            "Oklahoma": "40", "Oregon": "41", "Pennsylvania": "42", "Rhode Island": "44",
+            "South Carolina": "45", "South Dakota": "46", "Tennessee": "47", "Texas": "48",
+            "Utah": "49", "Vermont": "50", "Virginia": "51", "Washington": "53",
+            "West Virginia": "54", "Wisconsin": "55", "Wyoming": "56"
+        }
+        
+        # Add shapefile paths for each state
+        for state in self.states:
+            state_abbr = state[:2].lower()
+            if state in state_to_fips:
+                fips = state_to_fips[state]
+                shapefile_path = os.path.join(data_dir, f"tl_2010_{fips}_bg10", f"tl_2010_{fips}_bg10.shp")
+                
+                # Just log that the shapefile needs to be available
+                if not os.path.exists(shapefile_path):
+                    print(f"WARNING: Shapefile for {state} not found at {shapefile_path}")
+                    print(f"You need to place the Census Block Group shapefile for {state} at this location.")
+                
+                paths[f"shapefile_{state_abbr}"] = shapefile_path
+            else:
+                print(f"WARNING: No FIPS code found for state: {state}")
+    
+    @classmethod
+    def from_location(cls, location_name, seed_zip=None):
+        """
+        Create a Config instance for a specific location
+        
+        Args:
+            location_name: Name of the location (city, town)
+            seed_zip: Optional ZIP code to help identify the state and area
+            
+        Returns:
+            Config: Configuration instance for the location
+        """
+        from uszipcode import SearchEngine
+        
+        search = SearchEngine()
+        
+        # If we have a seed ZIP code, use it to find location details
+        if seed_zip:
+            location = search.by_zipcode(seed_zip)
+            if not location:
+                raise ValueError(f"Could not find location for ZIP code {seed_zip}")
+            
+            state = location.state
+            state_fips = location.state_fips
+            county_fips = location.county_fips
+            lat = location.lat
+            lng = location.lng
+        else:
+            # Try to find the location by name
+            results = search.by_city(city=location_name)
+            if not results:
+                raise ValueError(f"Could not find location: {location_name}")
+            
+            # Use the first result
+            location = results[0]
+            state = location.state
+            state_fips = location.state_fips
+            county_fips = location.county_fips
+            lat = location.lat
+            lng = location.lng
+        
+        # Generate a core CBG based on the location
+        # Format: State FIPS (2) + County FIPS (3) + Tract (6) + Block Group (1)
+        # We'll use a simplified approach for the tract and block group parts
+        tract = "001001"  # Default tract (will be replaced with actual data if available)
+        block_group = "1"  # Default block group
+        
+        core_cbg = f"{state_fips}{county_fips}{tract}{block_group}"
+        
+        # Create configuration
+        config = cls(
+            location_name=location_name.lower().replace(" ", "_"),
+            core_cbg=core_cbg,
+            states=[state],
+            min_cluster_pop=5000  # Default minimum population
+        )
+        
+        # Update map center based on location
+        if lat and lng:
+            config.map["default_location"] = [lat, lng]
+            
+        return config
+    
+    @classmethod
+    def from_cbg(cls, cbg, min_pop=5000, custom_black_cbgs=None):
+        """
+        Create a Config instance based on a specific CBG
+        
+        Args:
+            cbg: Census Block Group ID
+            min_pop: Minimum population for clustering
+            custom_black_cbgs: List of CBGs to highlight in black
+            
+        Returns:
+            Config: Configuration instance for the CBG area
+        """
+        # Extract state FIPS from CBG (first 2 digits)
+        state_fips = cbg[:2]
+        
+        # Map of FIPS codes to state names
+        fips_to_state = {
+            "01": "Alabama", "02": "Alaska", "04": "Arizona", "05": "Arkansas",
+            "06": "California", "08": "Colorado", "09": "Connecticut", "10": "Delaware",
+            "11": "District of Columbia", "12": "Florida", "13": "Georgia", "15": "Hawaii",
+            "16": "Idaho", "17": "Illinois", "18": "Indiana", "19": "Iowa",
+            "20": "Kansas", "21": "Kentucky", "22": "Louisiana", "23": "Maine",
+            "24": "Maryland", "25": "Massachusetts", "26": "Michigan", "27": "Minnesota",
+            "28": "Mississippi", "29": "Missouri", "30": "Montana", "31": "Nebraska",
+            "32": "Nevada", "33": "New Hampshire", "34": "New Jersey", "35": "New Mexico",
+            "36": "New York", "37": "North Carolina", "38": "North Dakota", "39": "Ohio",
+            "40": "Oklahoma", "41": "Oregon", "42": "Pennsylvania", "44": "Rhode Island",
+            "45": "South Carolina", "46": "South Dakota", "47": "Tennessee", "48": "Texas",
+            "49": "Utah", "50": "Vermont", "51": "Virginia", "53": "Washington",
+            "54": "West Virginia", "55": "Wisconsin", "56": "Wyoming"
+        }
+        
+        if state_fips not in fips_to_state:
+            raise ValueError(f"Invalid state FIPS code in CBG: {state_fips}")
+        
+        state = fips_to_state[state_fips]
+        location_name = f"cbg_{cbg}"  # Default location name based on CBG
+        
+        # Create configuration
+        return cls(
+            location_name=location_name,
+            core_cbg=cbg,
+            min_cluster_pop=min_pop,
+            states=[state],
+            custom_black_cbgs=custom_black_cbgs
+        )
 
 
 # ----------------------------
@@ -94,16 +276,28 @@ class DataLoader:
         Load SafeGraph patterns data, filtering by zip codes.
         """
         filename = f"{self.config.location_name}.csv"
+        # Use os.path.join properly for the current platform
         full_filename = os.path.join(self.config.output_dir, filename)
+        
+        # Debug logging to check path
+        self.logger.info(f"Looking for SafeGraph data at: {full_filename}")
+        
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
             df = pd.read_csv(full_filename)
         except (FileNotFoundError, pd.errors.EmptyDataError):
             self.logger.info(f"File {full_filename} not found. Processing raw data.")
             datalist = []
+            # Check if patterns file exists before trying to read it
+            if not os.path.exists(self.config.paths["patterns_csv"]):
+                self.logger.error(f"Raw patterns file not found at {self.config.paths['patterns_csv']}")
+                raise FileNotFoundError(f"SafeGraph patterns file not found at {self.config.paths['patterns_csv']}")
+                
+            self.logger.info(f"Reading patterns from {self.config.paths['patterns_csv']}")
             with pd.read_csv(self.config.paths["patterns_csv"], chunksize=10000) as reader:
                 for chunk in reader:
                     datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
+            
             df = pd.concat(datalist, axis=0)
             try:
                 df['poi_cbg'] = df['poi_cbg'].astype('int64')
@@ -143,15 +337,42 @@ class DataLoader:
         """
         Load and merge shapefiles for the specified states.
         """
-        self.logger.info("Loading shapefiles")
-        gdf1 = gpd.read_file(self.config.paths["shapefile_md"])
-        gdf2 = gpd.read_file(self.config.paths["shapefile_pa"])
-        gdf = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
+        self.logger.info("Loading shapefiles for states: " + ", ".join(self.config.states))
+        
+        # Get all shapefile paths from config
+        shapefile_keys = [k for k in self.config.paths.keys() if k.startswith("shapefile_")]
+        
+        if not shapefile_keys:
+            self.logger.error("No shapefiles configured for the specified states")
+            raise ValueError("No shapefiles found in configuration")
+        
+        gdfs = []
+        for key in shapefile_keys:
+            shapefile_path = self.config.paths[key]
+            if os.path.exists(shapefile_path):
+                self.logger.info(f"Loading shapefile: {shapefile_path}")
+                try:
+                    gdf = gpd.read_file(shapefile_path)
+                    gdfs.append(gdf)
+                except Exception as e:
+                    self.logger.error(f"Error loading shapefile {shapefile_path}: {e}")
+            else:
+                self.logger.warning(f"Shapefile not found: {shapefile_path}")
+                
+        if not gdfs:
+            self.logger.error("No shapefiles could be loaded")
+            raise FileNotFoundError("No shapefiles could be loaded")
+            
+        # Merge all geodataframes
+        gdf = gpd.GeoDataFrame(pd.concat(gdfs, ignore_index=True))
+        
         # Process coordinates for mapping
+        self.logger.info("Processing shapefile coordinates for mapping")
         gdf['coords'] = gdf['geometry'].apply(lambda x: x.representative_point().coords[:])
         gdf['coords'] = [coords[0] for coords in gdf['coords']]
         gdf['longitude'] = gdf['coords'].apply(lambda x: x[0])
         gdf['latitude'] = gdf['coords'].apply(lambda x: x[1])
+        
         return gdf
 
     def get_population_data(self):
@@ -179,7 +400,7 @@ def distance(lat1, long1, lat2, long2):
 _population_cache = None
 def cbg_population(cbg, config: Config, logger: logging.Logger):
     global _population_cache
-    if _population_cache is None:
+    if (_population_cache is None):
         try:
             _population_cache = pd.read_csv(config.paths["population_csv"], index_col='census_block_group')
         except Exception as e:
@@ -564,3 +785,186 @@ if __name__ == "__main__":
         main_logger = logging.getLogger("cbg_clustering")
         main_logger.critical("Fatal error occurred", exc_info=True)
         raise
+
+# ----------------------------
+# Server Integration Function
+# ----------------------------
+def generate_cz(cbg, zip_code, name, min_pop):
+    """
+    Generate a convenience zone starting from a core CBG.
+    
+    This function is called by server.py to generate a convenience zone
+    for display in the web frontend.
+    
+    Args:
+        cbg (str): Core Census Block Group ID
+        zip_code (str or list): ZIP code(s) for location identification
+        name (str): Location name
+        min_pop (int): Minimum population for the cluster
+        
+    Returns:
+        tuple: (cluster_result, map_object)
+            - cluster_result is a tuple (list_of_cbgs, total_population)
+            - map_object is a folium.Map instance
+    """
+    # Initialize custom black CBGs for specific locations
+    custom_black_cbgs = None
+    
+    # Special handling for Hagerstown (preserve known black CBGs)
+    if name.lower() == "hagerstown" and cbg == "240430006012":
+        custom_black_cbgs = [
+            "240430002003", "240430003021", "240430001002", "240430001001",
+            "240430008001", "240430008002", "240430008003", "240430007003",
+            "240430010014", "240430010012", "240430010021", "240430102003"
+        ]
+    
+    # If we have a seed ZIP code, use it to create config
+    if zip_code:
+        if isinstance(zip_code, list) and zip_code:
+            seed_zip = str(zip_code[0])
+        else:
+            seed_zip = str(zip_code)
+            
+        # Create config from location name and ZIP
+        try:
+            config = Config.from_location(name, seed_zip=seed_zip)
+            # Override with provided core CBG
+            config.core_cbg = cbg
+            config.min_cluster_pop = min_pop
+            config.black_cbgs = custom_black_cbgs or []
+        except Exception as e:
+            print(f"Error creating config from location: {e}")
+            # Fallback to basic configuration if location lookup fails
+            config = Config(
+                location_name=name, 
+                core_cbg=cbg, 
+                min_cluster_pop=min_pop,
+                custom_black_cbgs=custom_black_cbgs
+            )
+    else:
+        # Create config directly from CBG
+        try:
+            config = Config.from_cbg(cbg, min_pop=min_pop, custom_black_cbgs=custom_black_cbgs)
+            config.location_name = name
+        except Exception as e:
+            print(f"Error creating config from CBG: {e}")
+            # Fallback to basic configuration
+            config = Config(
+                location_name=name, 
+                core_cbg=cbg, 
+                min_cluster_pop=min_pop,
+                custom_black_cbgs=custom_black_cbgs
+            )
+    
+    # Set up logging
+    logger = setup_logging(config)
+    logger.info(f"Starting clustering analysis for {name}, core CBG: {cbg}")
+    
+    # Process ZIP codes
+    data_loader = DataLoader(config, logger)
+    if zip_code:
+        if isinstance(zip_code, list):
+            zip_codes = [int(z) for z in zip_code if z]
+        else:
+            zip_codes = [int(zip_code)]
+    else:
+        zip_codes = data_loader.get_zip_codes()
+    
+    logger.info(f"Using {len(zip_codes)} zip codes")
+    
+    # Load data
+    df = data_loader.load_safegraph_data(zip_codes)
+    poif = data_loader.load_poi_data(zip_codes, df)
+    gdf = data_loader.load_shapefiles()
+    
+    # Build graph
+    graph_builder = GraphBuilder(logger)
+    G = graph_builder.gen_graph(df)
+    
+    # Run clustering algorithm
+    clustering_algo = Clustering(config, logger)
+    algorithm_result = clustering_algo.greedy_weight(G, cbg, min_pop)
+    
+    # Create visualization map
+    def safe_center():
+        try:
+            seed = Visualizer.cbg_geocode(config.core_cbg, df, poif, gdf)
+            if seed['latitude'] is None or seed['longitude'] is None:
+                return config.map["default_location"]
+            return [seed['latitude'], seed['longitude']]
+        except Exception as e:
+            logger.warning(f"Error getting center coordinates, using default: {e}")
+            return config.map["default_location"]
+
+    center = safe_center()
+    map_obj = folium.Map(location=center, zoom_start=config.map["zoom_start"])
+    
+    # Add cluster CBGs to map
+    visualizer = Visualizer(config, logger)
+    features = []
+    for i, cbg in enumerate(algorithm_result[0]):
+        try:
+            ratio = Helpers.calculate_cbg_ratio(G, cbg, algorithm_result[0])
+            color = visualizer.get_color_for_ratio(ratio)
+            shape = gdf[gdf['GEOID10'] == cbg]
+            if shape.empty:
+                # Try alternative column name that might be used in shapefiles
+                shape = gdf[gdf['GEOID'] == cbg]
+                if shape.empty:
+                    logger.warning(f"Could not find geometry for CBG {cbg}")
+                    continue
+            
+            shape = shape.to_crs("EPSG:4326")
+            geojson = json.loads(shape.to_json())
+            feature = geojson['features'][0]
+            feature['properties']['times'] = [(pd.Timestamp('today') + pd.Timedelta(i, 'D')).isoformat()]
+            feature['properties']['style'] = {'fillColor': color, 'color': color, 'fillOpacity': 0.7}
+            features.append(feature)
+        except Exception as e:
+            logger.error(f"Error processing CBG {cbg} for map: {e}")
+            
+    map_obj.add_child(plugins.TimestampedGeoJson(
+        {'type': 'FeatureCollection', 'features': features},
+        period='PT6H',
+        add_last_point=True,
+        auto_play=False,
+        loop=False
+    ))
+    
+    # Add black CBGs
+    logger.info(f"Adding {len(config.black_cbgs)} black CBGs to map")
+    for cbg in config.black_cbgs:
+        try:
+            # Try with GEOID10 first (standard for 2010 CBG shapefiles)
+            shape = gdf[gdf['GEOID10'] == cbg]
+            
+            # If not found, try with GEOID (used in some shapefiles)
+            if shape.empty:
+                shape = gdf[gdf['GEOID'] == cbg]
+                
+            if shape.empty:
+                logger.warning(f"Could not find geometry for black CBG {cbg}")
+                continue
+                
+            shape = shape.to_crs("EPSG:4326")
+            geojson_data = json.loads(shape.to_json())
+            
+            # Add black CBG directly to map with popup showing its ID
+            folium.GeoJson(
+                geojson_data,
+                name=f"Black CBG {cbg}",
+                style_function=lambda x: {'fillColor': '#000000', 'color': '#000000', 'fillOpacity': 0.7}
+            ).add_child(folium.Popup(cbg)).add_to(map_obj)
+            
+            logger.info(f"Added black CBG {cbg} to map")
+        except Exception as e:
+            logger.error(f"Error adding black CBG {cbg}: {e}")
+    
+    # Generate YAML output if needed
+    output_yaml_path = os.path.join(config.output_dir, config.paths["output_yaml"])
+    exporter = Exporter(config, logger)
+    exporter.generate_yaml_output(G, algorithm_result)
+    logger.info(f"YAML output saved to {output_yaml_path}")
+    
+    # Return the algorithm result and map
+    return algorithm_result, map_obj
