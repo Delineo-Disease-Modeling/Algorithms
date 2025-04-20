@@ -51,14 +51,19 @@ class Config:
         # Ensure output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
     
-    def __init__(self, cbg, zip_code, name, min_pop):
-        search = SearchEngine()
-        if isinstance(zip_code, list):
-            self.states = [ search.by_zipcode(zip).state for zip in zip_code ]
-        else:
-            self.states = [ search.by_zipcode(zip_code).state ]
+    def __init__(self, cbg, min_pop):
+        zip_codes = []
+        with open(r'./data/zip_to_cbg.json', 'r') as f:
+            zip_to_cbg = json.load(f)
+            for zip, cbgs in zip_to_cbg.items():
+                if cbg in cbgs:
+                    zip_codes.append(zip)
         
-        self.location_name = name
+        
+        search = SearchEngine()
+        self.states = [ search.by_zipcode(zip).state for zip in zip_codes ]
+        
+        self.location_name = f'{cbg}_{min_pop}'
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
@@ -593,8 +598,8 @@ def main():
     logger.info("Processing complete")
     
 
-def generate_cz(cbg, zip, name, min_pop):
-    config = Config(cbg, zip, name, min_pop)
+def generate_cz(cbg, min_pop):
+    config = Config(cbg, min_pop)
 
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
