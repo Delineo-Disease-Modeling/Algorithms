@@ -62,7 +62,7 @@ def route_generate_cz():
     'start_date': request.json['start_date'],
     'size': size
   })
-  
+    
   if not resp.ok:
     return make_response(jsonify({
       'message': 'Could not upload cluster to database'  

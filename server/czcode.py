@@ -224,7 +224,7 @@ def cbg_population(cbg, config: Config, logger: logging.Logger):
             logger.error(f"Error loading population data: {e}")
             return 0
     try:
-        cbg_int = int(cbg)
+        cbg_int = int(float(cbg))
         if cbg_int in _population_cache.index:
             return int(_population_cache.loc[cbg_int].B00002e1)
         else:
