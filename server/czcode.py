@@ -158,11 +158,11 @@ class DataLoader:
         except (FileNotFoundError, pd.errors.EmptyDataError):
             self.logger.info(f"File {full_filename} not found. Processing raw POI data.")
             expanded_zip_codes = zip_codes.copy()
-            for _, row in df.iterrows():
-                if row['visitor_daytime_cbgs']:
-                    for visitor_cbg in json.loads(row['visitor_daytime_cbgs']).keys():
-                        if visitor_cbg not in expanded_zip_codes:
-                            expanded_zip_codes.append(visitor_cbg)
+            # for _, row in df.iterrows():
+            #     if row['visitor_daytime_cbgs']:
+            #         for visitor_cbg in json.loads(row['visitor_daytime_cbgs']).keys():
+            #             if visitor_cbg not in expanded_zip_codes:
+            #                 expanded_zip_codes.append(visitor_cbg)
             datalist = []
             with pd.read_csv(self.config.paths["poi_csv"], chunksize=10000) as reader:
                 for chunk in reader:

@@ -634,6 +634,7 @@ def convert_data(df, cz_data):
 
     for i, row in places.iterrows():
         output['places'][str(i)] = {
+            'placekey': row['placekey'],
             'label': row['location_name'],
             'latitude': row['latitude'],
             'longitude': row['longitude'],

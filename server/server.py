@@ -3,6 +3,8 @@ from flask_cors import CORS, cross_origin
 import json
 from czcode import generate_cz
 from popgen import gen_pop
+from patterns import gen_patterns
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -38,10 +40,17 @@ def route_generate_cz():
   #   }), 500)
   
   # Generate People, Households, Places data
+  print('generating papdata...')
   papdata = gen_pop(geoids)
+  with open(r'./output/papdata.json', 'w') as f:
+    json.dump(papdata, f, indent=4)
   
   # Generate movement patterns
+  print('generating patterns...')
+  patterns = gen_patterns(papdata, datetime.now(), 1)
   
+  with open(r'./output/patterns.json', 'w') as f:
+    json.dump(patterns, f, indent=4)
   
   return jsonify({
     #'id': resp.json()['data']['id'],
