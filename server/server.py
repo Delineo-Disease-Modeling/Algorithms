@@ -51,6 +51,17 @@ def route_generate_cz():
   
   with open(r'./output/patterns.json', 'w') as f:
     json.dump(patterns, f, indent=4)
+    
+  # pp_resp = requests.post('http://localhost:1890/patterns', json={
+  #   'czone_id': resp.json()['data']['id'],
+  #   'papdata': papdata,
+  #   'patterns': patterns
+  # })
+  
+  # if not pp_resp.ok:
+  #   return make_response(jsonify({
+  #     'message': 'Could not upload papdata/patterns to database'  
+  #   }), 500)
   
   return jsonify({
     #'id': resp.json()['data']['id'],
