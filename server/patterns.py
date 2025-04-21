@@ -523,6 +523,7 @@ def gen_patterns(papdata, start_time: datetime, duration=168):
     output = {}
         
     for hour in range(duration):
+        print(f'generating patterns for hr: {hour}')
         current_time = start_time + timedelta(hours=hour)
         current_weekday = current_time.weekday()
         print(f"Simulating hour {hour + 1}/{duration} at {current_time}...")
