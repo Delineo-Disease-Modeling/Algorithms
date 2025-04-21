@@ -285,7 +285,7 @@ class GraphBuilder:
             if isinstance(row['visitor_daytime_cbgs'], str):
                 for visitor_cbg in json.loads(row['visitor_daytime_cbgs']).keys():
                     try:
-                        cbgs.add(int(visitor_cbg))
+                        cbgs.add(int(float(visitor_cbg)))
                     except ValueError:
                         skipped_count += 1
                         cbgs.add(str(visitor_cbg))
@@ -301,8 +301,8 @@ class GraphBuilder:
                 visitor_dict = json.loads(row['visitor_daytime_cbgs'])
                 for visitor_cbg, count in visitor_dict.items():
                     try:
-                        src_cbg = str(int(visitor_cbg)) if visitor_cbg.isdigit() else visitor_cbg
-                        dst_cbg = str(row['poi_cbg'])
+                        src_cbg = str(int(float(visitor_cbg))) if visitor_cbg.isdigit() else visitor_cbg
+                        dst_cbg = str(int(float(row['poi_cbg'])))
                         if src_cbg == dst_cbg:
                             continue  # skip self-loop
                         if G.has_edge(src_cbg, dst_cbg):

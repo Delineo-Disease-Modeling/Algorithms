@@ -11,14 +11,14 @@ import json
 app = Flask(__name__)
 CORS(app)
 
-def gen_and_upload_data(geoids, czone_id):
+def gen_and_upload_data(geoids, czone_id, start_date):
   # Generate People, Households, Places data
   print('generating papdata...')
   papdata = gen_pop(geoids)
   
   # Generate movement patterns
   print('generating patterns...')
-  patterns = gen_patterns(papdata, datetime.now(), 168)
+  patterns = gen_patterns(papdata, start_date, 168)
       
   print('sending data...')
     
@@ -55,7 +55,7 @@ def create_cz(data):
   
   czone_id = resp.json()['data']['id']
   
-  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id))
+  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id, datetime.fromisoformat(data['start_date'])))
   thread.daemon = True
   thread.start()
   
