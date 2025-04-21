@@ -55,7 +55,7 @@ def create_cz(data):
   
   czone_id = resp.json()['data']['id']
   
-  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id, datetime.fromisoformat(data['start_date'])))
+  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id, datetime.fromisoformat(data['start_date'].replace("Z", "+00:00"))))
   thread.daemon = True
   thread.start()
   
