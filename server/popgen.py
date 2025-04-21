@@ -659,7 +659,7 @@ def gen_pop(cz_data):
     STATE_FIPS = states[0]
     COUNTIES_FIPS = list(set([i[2:5] for i in cbgs]))
 
-    census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS, "census_data.json")
+    census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS, None)
     
     # Create population generator
     generator = SyntheticPopulationGenerator(census_data, cz_data)

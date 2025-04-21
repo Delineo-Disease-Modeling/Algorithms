@@ -20,7 +20,7 @@ def gen_and_upload_data(geoids, czone_id):
   
   # Generate movement patterns
   print('generating patterns...')
-  patterns = gen_patterns(papdata, datetime.now(), 1)
+  patterns = gen_patterns(papdata, datetime.now(), 168)
   
   with open(r'./output/patterns.json', 'w') as f:
     json.dump(patterns, f, indent=4)
