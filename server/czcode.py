@@ -461,7 +461,7 @@ class Visualizer:
                     'longitude': cbg_data['longitude'].iloc[0]
                 }
         # Then try to find in POI data.
-        poi_locations = poif[poif['census_block_group'] == int(cbg_id)]
+        poi_locations = poif[poif['census_block_group'] == cbg_id]
         if not poi_locations.empty and not pd.isna(poi_locations['latitude'].iloc[0]):
             return {
                 'latitude': poi_locations['latitude'].iloc[0],
@@ -478,6 +478,10 @@ class Visualizer:
             try:
                 seed = Visualizer.cbg_geocode(self.config.core_cbg, df, poif, gdf)
                 if seed['latitude'] is None or seed['longitude'] is None:
+                    for cbg in algorithm_result[0]:
+                        pos = Visualizer.cbg_geocode(cbg, df, poif, gdf)
+                        if seed['latitude'] is not None and seed['longitude'] is not None:
+                            return pos
                     return self.config.map["default_location"]
                 return [seed['latitude'], seed['longitude']]
             except Exception:
