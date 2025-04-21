@@ -461,7 +461,9 @@ class Visualizer:
                     'longitude': cbg_data['longitude'].iloc[0]
                 }
         # Then try to find in POI data.
-        poi_locations = poif[poif['census_block_group'] == cbg_id]
+        placekeys = df[df['poi_cbg'].astype(float).astype(int) == int(float(cbg_id))]['placekey']
+        poi_locations = poif[poif['placekey'].isin(placekeys)]
+        
         if not poi_locations.empty and not pd.isna(poi_locations['latitude'].iloc[0]):
             return {
                 'latitude': poi_locations['latitude'].iloc[0],
