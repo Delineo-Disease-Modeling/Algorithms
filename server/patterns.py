@@ -445,52 +445,55 @@ def compute_dwell_time_cdf(bucketed_dwell_times):
     return dwell_times, cdf
 
 def preprocess_csv(papdata, file_path):
-	pois_dict = {}
+    pois_dict = {}
  
-	placekeys = [ pap['placekey'] for pap in list(papdata['places'].values()) ]
+    placekeys = [ pap['placekey'] for pap in list(papdata['places'].values()) ]
     
-	with pd.read_csv(file_path, chunksize=10000) as reader:
-		for chunk in reader:
-			for i, row in chunk.iterrows():
-				if row['placekey'] not in placekeys:
-					continue
-				
-				safegraph_place_id = row['safegraph_place_id']
+    with pd.read_csv(file_path, chunksize=10000, usecols=['placekey', 'popularity_by_hour', 'bucketed_dwell_times', 'related_same_month_brand', 'location_name', 'raw_visit_counts', 'raw_visitor_counts', 'visits_by_day', 'related_same_day_brand']) as reader:
+        for chunk in reader:
+            for _, row in [chunk[chunk['placekey'].isin(placekeys)]].iterrows():
+                poi_id = None
 
-				if not safegraph_place_id:
-					continue
-				'''''
+                for id, desc in papdata.items():
+                    if desc['placekey'] == row['placekey']:
+                        poi_id = id
+                        break
+                
+                if poi_id is None:
+                    continue
+
+                '''''
 				# 解析 popularity_by_day
 				popularity_by_day = parse_json_field(row.get('popularity_by_day', '{}'))
 
 				'''''
 
 				# 其他现有逻辑保持不变
-				sum_popularity = sum(parse_json_field(row['popularity_by_hour'])) 
-				probability_by_hour = [p / sum_popularity for p in parse_json_field(row['popularity_by_hour'])] if sum_popularity > 0 else []
+                sum_popularity = sum(parse_json_field(row['popularity_by_hour'])) 
+                probability_by_hour = [p / sum_popularity for p in parse_json_field(row['popularity_by_hour'])] if sum_popularity > 0 else []
 
-				bucketed_dwell_times = parse_json_field(row['bucketed_dwell_times'])
-				dwell_times, dwell_time_cdf = compute_dwell_time_cdf(bucketed_dwell_times)
+                bucketed_dwell_times = parse_json_field(row['bucketed_dwell_times'])
+                dwell_times, dwell_time_cdf = compute_dwell_time_cdf(bucketed_dwell_times)
 
-				related_same_month_brand = parse_json_field(row['related_same_month_brand'])
-				sum_tendency = sum(related_same_month_brand.values())
-				after_tendency = {poi_id : related_same_month_brand.get(pois_dict.get(poi_id, {}).get('location_name', ''), 0) / sum_tendency  if sum_tendency > 0 else 0 for poi_id in pois_dict.keys()}
+                related_same_month_brand = parse_json_field(row['related_same_month_brand'])
+                sum_tendency = sum(related_same_month_brand.values())
+                after_tendency = {poi_id : related_same_month_brand.get(pois_dict.get(poi_id, {}).get('location_name', ''), 0) / sum_tendency  if sum_tendency > 0 else 0 for poi_id in pois_dict.keys()}
 
 				# 更新 pois_dict，添加 popularity_by_day
-				pois_dict[safegraph_place_id] = {
-					'location_name': row['location_name'],
-					'raw_visit_counts': int(row['raw_visit_counts']),
-					'raw_visitor_counts': int(row['raw_visitor_counts']),
-					'visits_by_day': parse_json_field(row['visits_by_day']),
-					'probability_by_hour': probability_by_hour,
-					'dwell_times': dwell_times,
-					'dwell_time_cdf': dwell_time_cdf,
-					'related_same_day_brand': parse_json_field(row['related_same_day_brand']),
-					'after_tendency': after_tendency,
-					#'popularity_by_day': popularity_by_day
-				} 
+                pois_dict[poi_id] = {
+                    'location_name': row['location_name'],
+                    'raw_visit_counts': int(row['raw_visit_counts']),
+                    'raw_visitor_counts': int(row['raw_visitor_counts']),
+                    'visits_by_day': parse_json_field(row['visits_by_day']),
+                    'probability_by_hour': probability_by_hour,
+                    'dwell_times': dwell_times,
+                    'dwell_time_cdf': dwell_time_cdf,
+                    'related_same_day_brand': parse_json_field(row['related_same_day_brand']),
+                    'after_tendency': after_tendency,
+                    #'popularity_by_day': popularity_by_day
+                } 
 
-	return pois_dict
+    return pois_dict
 
 def gen_patterns(papdata, start_time: datetime, duration=168):
     # Constants
