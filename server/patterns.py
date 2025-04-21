@@ -451,10 +451,10 @@ def preprocess_csv(papdata, file_path):
     
     with pd.read_csv(file_path, chunksize=10000, usecols=['placekey', 'popularity_by_hour', 'bucketed_dwell_times', 'related_same_month_brand', 'location_name', 'raw_visit_counts', 'raw_visitor_counts', 'visits_by_day', 'related_same_day_brand']) as reader:
         for chunk in reader:
-            for _, row in [chunk[chunk['placekey'].isin(placekeys)]].iterrows():
+            for _, row in chunk[chunk['placekey'].isin(placekeys)].iterrows():
                 poi_id = None
 
-                for id, desc in papdata.items():
+                for id, desc in papdata['places'].items():
                     if desc['placekey'] == row['placekey']:
                         poi_id = id
                         break
@@ -530,7 +530,6 @@ def gen_patterns(papdata, start_time: datetime, duration=168):
     output = {}
         
     for hour in range(duration):
-        print(f'generating patterns for hr: {hour}')
         current_time = start_time + timedelta(hours=hour)
         current_weekday = current_time.weekday()
         print(f"Simulating hour {hour + 1}/{duration} at {current_time}...")
