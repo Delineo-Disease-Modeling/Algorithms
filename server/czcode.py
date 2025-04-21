@@ -480,7 +480,7 @@ class Visualizer:
                 if seed['latitude'] is None or seed['longitude'] is None:
                     for cbg in algorithm_result[0]:
                         pos = Visualizer.cbg_geocode(cbg, df, poif, gdf)
-                        if seed['latitude'] is not None and seed['longitude'] is not None:
+                        if pos['latitude'] is not None and pos['longitude'] is not None:
                             return pos
                     return self.config.map["default_location"]
                 return [seed['latitude'], seed['longitude']]
