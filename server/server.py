@@ -15,16 +15,11 @@ def gen_and_upload_data(geoids, czone_id):
   # Generate People, Households, Places data
   print('generating papdata...')
   papdata = gen_pop(geoids)
-  with open(r'./output/papdata.json', 'w') as f:
-    json.dump(papdata, f, indent=4)
   
   # Generate movement patterns
   print('generating patterns...')
   patterns = gen_patterns(papdata, datetime.now(), 168)
-  
-  with open(r'./output/patterns.json', 'w') as f:
-    json.dump(patterns, f, indent=4)
-    
+      
   print('sending data...')
     
   resp = requests.post('http://localhost:1890/patterns', json={
