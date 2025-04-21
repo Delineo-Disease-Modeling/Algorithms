@@ -77,7 +77,7 @@ def route_generate_cz():
   if not request.json:
     return make_response(jsonify({'message': 'Please specify a CBG, location name, start date, and minimum population'}), 400)
   
-  return Response(create_cz(request.json.copy()), mimetype='text/plain')
+  return Response(create_cz(request.json.copy()))
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=1880)
