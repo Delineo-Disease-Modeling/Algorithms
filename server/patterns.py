@@ -507,9 +507,13 @@ def gen_patterns(papdata, start_time: datetime, duration=168):
         person.home = person_info.get("home")
         people[int(person_id)] = person
         
+    print('processing csv...')
     pois_dict = preprocess_csv(papdata, './data/patterns.csv')
+    
+    print('processing pois...')
     pois = POIs(pois_dict, alpha=alpha, occupancy_weight=occupancy_weight, tendency_decay=tendency_decay)
-        
+    
+    print('processing sg to place data...')
     safegraph_to_place_id = {}
     place_id_to_safegraph = {}
     place_ids = sorted(papdata["places"].keys(), key=int)
