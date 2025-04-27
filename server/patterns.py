@@ -235,7 +235,7 @@ class POIs:
         # raw_visitor_counts = {poi_id: raw_visitor_counts}
         self.raw_visitor_counts = {poi_id: pois_dict[poi_id]['raw_visitor_counts'] for poi_id in pois_dict}
         # capacities = [{poi_id: capacity} for 30 days]
-        self.capacities = [{poi_id: pois_dict[poi_id]['visits_by_day'][i] for poi_id in pois_dict} for i in range(31)]
+        self.capacities = [{poi_id: pois_dict[poi_id]['visits_by_day'][i] for poi_id in pois_dict} for i in range(30)]
         # probabilities = [{poi_id: probability} for 24 hours]
         self.probabilities = [{poi_id: pois_dict[poi_id]['probability_by_hour'][i] for poi_id in pois_dict} for i in range(24)]
         # {prev_poi_id: {after_poi_id: tendency}}
@@ -247,7 +247,7 @@ class POIs:
         self.dwell_time_cdfs = {poi_id: pois_dict[poi_id]['dwell_time_cdf'] for poi_id in pois_dict}
 
     def get_capacities_by_day(self, current_time):
-        return self.capacities[current_time.day]
+        return self.capacities[min(current_time.day, 29)]
 
     def get_probabilities_by_time(self, current_time):
         return self.probabilities[current_time.hour]
@@ -357,7 +357,7 @@ def leave_poi(people, current_time, pois, place_id_to_safegraph):
         leave_prob = dwell_time_cdf[index]
 
         # Adjust leave probability based on occupancy
-        expected_capacity = pois.capacities[current_time.day].get(poi_id, 1)
+        expected_capacity = pois.capacities[min(current_time.day, 29)].get(poi_id, 1)
         current_occupancy = pois.occupancies.get(poi_id, 0)
         if expected_capacity > 0:
             occupancy_ratio = current_occupancy / expected_capacity

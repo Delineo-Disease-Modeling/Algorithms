@@ -471,6 +471,21 @@ class Visualizer:
             }
         # If not found, return default (None in this case).
         return {'latitude': None, 'longitude': None}
+    
+        # geodata = pd.read_csv('./data/cbg_geographic_data.csv', usecols=['census_block_group', 'latitude', 'longitude'])
+        
+        # try:
+        #     cbg_data = geodata.loc[geodata['census_block_group'] == str(int(float(cbg_id)))].iloc[0]
+            
+        #     return {
+        #             'latitude': cbg_data['latitude'],
+        #             'longitude': cbg_data['longitude']
+        #         }
+        # except:
+        #     return {
+        #             'latitude': None,
+        #             'longitude': None
+        #         }
 
     def generate_maps(self, G, gdf, algorithm_result, poif, df):
         """
