@@ -253,7 +253,7 @@ class POIs:
         return self.probabilities[current_time.hour]
     
     def get_capacities_by_time(self, current_time):
-        return {poi_id: self.capacities[current_time.day][poi_id] * self.probabilities[current_time.hour][poi_id] for poi_id in self.capacities[current_time.day]}
+        return {poi_id: self.capacities[min(current_time.day, 29)][poi_id] * self.probabilities[current_time.hour][poi_id] for poi_id in self.capacities[min(current_time.day, 29)]}
     
     def get_after_tendencies(self, prev_poi_id):
         return {after_poi_id: self.tendency_probabilities[prev_poi_id].get(after_poi_id, 0) for after_poi_id in self.pois}
