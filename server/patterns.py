@@ -235,7 +235,7 @@ class POIs:
         # raw_visitor_counts = {poi_id: raw_visitor_counts}
         self.raw_visitor_counts = {poi_id: pois_dict[poi_id]['raw_visitor_counts'] for poi_id in pois_dict}
         # capacities = [{poi_id: capacity} for 30 days]
-        self.capacities = [{poi_id: pois_dict[poi_id]['visits_by_day'][i] for poi_id in pois_dict} for i in range(30)]
+        self.capacities = [{poi_id: pois_dict[poi_id]['visits_by_day'][i] for poi_id in pois_dict} for i in range(31)]
         # probabilities = [{poi_id: probability} for 24 hours]
         self.probabilities = [{poi_id: pois_dict[poi_id]['probability_by_hour'][i] for poi_id in pois_dict} for i in range(24)]
         # {prev_poi_id: {after_poi_id: tendency}}
