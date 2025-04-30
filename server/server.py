@@ -34,12 +34,13 @@ def gen_and_upload_data(geoids, czone_id, start_date):
     print('error sending data...')
 
 def create_cz(data):
-  yield ''
-  
   geoids, map = generate_cz(data['cbg'], data['min_pop'])
 
   cluster = list(geoids.keys())
   size = sum(list(geoids.values()))
+  
+  print('CLUSTER LIST:')
+  print(cluster)
     
   resp = requests.post('http://localhost:1890/convenience-zones', json={
     'name': data['name'],
@@ -51,6 +52,7 @@ def create_cz(data):
   })
     
   if not resp.ok:
+    print(f'ERROR SENDING DATA - {resp.status_code}')
     return '{}'
   
   czone_id = resp.json()['data']['id']
@@ -59,7 +61,7 @@ def create_cz(data):
   thread.daemon = True
   thread.start()
   
-  yield json.dumps({
+  return json.dumps({
     'id': czone_id,
     'cluster': cluster,
     'size': size,
@@ -77,7 +79,7 @@ def route_generate_cz():
   if not request.json:
     return make_response(jsonify({'message': 'Please specify a CBG, location name, start date, and minimum population'}), 400)
   
-  return Response(create_cz(request.json.copy()))
+  return create_cz(request.json.copy())
 
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=1880)

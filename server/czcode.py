@@ -10,7 +10,7 @@ import geopandas as gpd
 import networkx as nx
 import folium
 import yaml
-from folium import plugins, Marker
+from folium import plugins
 from uszipcode import SearchEngine
 
 # ----------------------------
@@ -18,38 +18,7 @@ from uszipcode import SearchEngine
 # ----------------------------
 class Config:
     def __init__(self):
-        self.location_name = "hagerstown"
-        self.states = ["Maryland", "Pennsylvania"]
-        self.core_cbg = "240430006012"
-        self.min_cluster_pop = 5000
-        self.output_dir = r"./output"
-        self.paths = {
-            "shapefile_md": r"./data/tl_2010_24_bg10/tl_2010_24_bg10.shp",
-            "shapefile_pa": r"./data/tl_2010_42_bg10/tl_2010_42_bg10.shp",
-            "patterns_csv": r"./data/patterns.csv",
-            "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
-            "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
-            "output_yaml": "cbg_info.yaml",
-            "output_html": "map_with_black_clusters.html"
-        }
-        self.map = {
-            "default_location": [39.6418, -77.7199],
-            "zoom_start": 12
-        }
-        self.ratio_colors = {
-            0.8: "#0000FF",  # Blue
-            0.6: "#008000",  # Green
-            0.4: "#FFFF00",  # Yellow
-            0.2: "#FFA500",  # Orange
-            0.0: "#FF0000",  # Red
-        }
-        self.black_cbgs = [
-            "240430002003", "240430003021", "240430001002", "240430001001",
-            "240430008001", "240430008002", "240430008003", "240430007003",
-            "240430010014", "240430010012", "240430010021", "240430102003"
-        ]
-        # Ensure output directory exists
-        os.makedirs(self.output_dir, exist_ok=True)
+        self.__init__('240430006012', 5000)
     
     def __init__(self, cbg, min_pop):
         zip_codes = []
@@ -59,17 +28,15 @@ class Config:
                 if cbg in cbgs:
                     zip_codes.append(zip)
         
-        
         search = SearchEngine()
-        self.states = [ search.by_zipcode(zip).state for zip in zip_codes ]
+        self.states = list(set([ search.by_zipcode(zip).state for zip in zip_codes ]))
         
-        self.location_name = f'{cbg}_{min_pop}'
+        self.location_name = f'{cbg}'
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
         self.paths = {
-            "shapefile_md": r"./data/tl_2010_24_bg10/tl_2010_24_bg10.shp",
-            "shapefile_pa": r"./data/tl_2010_42_bg10/tl_2010_42_bg10.shp",
+            "shapefiles_dir": r"./data/shapefiles/",
             "patterns_csv": r"./data/patterns.csv",
             "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
             "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
@@ -94,12 +61,12 @@ class Config:
 # Logging Setup
 # ----------------------------
 def setup_logging(config: Config):
-    log_path = os.path.join(config.output_dir, "clustering.log")
+    # log_path = os.path.join(config.output_dir, "clustering.log")
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
         handlers=[
-            logging.FileHandler(log_path),
+            # logging.FileHandler(log_path),
             logging.StreamHandler()
         ]
     )
@@ -136,6 +103,8 @@ class DataLoader:
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
             df = pd.read_csv(full_filename)
+            # Ensure that CBGs are read as strings
+            df['poi_cbg'] = df['poi_cbg'].astype('string')
         except (FileNotFoundError, pd.errors.EmptyDataError):
             self.logger.info(f"File {full_filename} not found. Processing raw data.")
             datalist = []
@@ -143,53 +112,28 @@ class DataLoader:
                 for chunk in reader:
                     datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
             df = pd.concat(datalist, axis=0)
-            try:
-                df['poi_cbg'] = df['poi_cbg'].astype('int64')
-            except (ValueError, TypeError):
-                self.logger.warning("Unable to convert poi_cbg to int64")
+            
+            # Convert poi_cbg to proper strings
+            pd.to_numeric(df['poi_cbg'], errors='coerce')
+            df.dropna(subset=['poi_cbg'], inplace=True)
+            # Now force truncation
+            df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
+            
             df.to_csv(full_filename)
             self.logger.info(f"Saved processed data to {full_filename}")
         return df
-
-    def load_poi_data(self, zip_codes, df):
-        """
-        Load Points of Interest (POI) data, filtering by zip codes.
-        """
-        filename = f"{self.config.location_name}.pois.csv"
-        full_filename = os.path.join(self.config.output_dir, filename)
-        try:
-            self.logger.info(f"Loading POI data from {full_filename}")
-            poif = pd.read_csv(full_filename)
-        except (FileNotFoundError, pd.errors.EmptyDataError):
-            self.logger.info(f"File {full_filename} not found. Processing raw POI data.")
-            expanded_zip_codes = zip_codes.copy()
-            # for _, row in df.iterrows():
-            #     if row['visitor_daytime_cbgs']:
-            #         for visitor_cbg in json.loads(row['visitor_daytime_cbgs']).keys():
-            #             if visitor_cbg not in expanded_zip_codes:
-            #                 expanded_zip_codes.append(visitor_cbg)
-            datalist = []
-            with pd.read_csv(self.config.paths["poi_csv"], chunksize=10000) as reader:
-                for chunk in reader:
-                    datalist.append(chunk[chunk['postal_code'].isin(expanded_zip_codes)])
-            poif = pd.concat(datalist, axis=0)
-            poif.to_csv(full_filename)
-            self.logger.info(f"Saved processed POI data to {full_filename}")
-        return poif
 
     def load_shapefiles(self):
         """
         Load and merge shapefiles for the specified states.
         """
         self.logger.info("Loading shapefiles")
-        gdf1 = gpd.read_file(self.config.paths["shapefile_md"])
-        gdf2 = gpd.read_file(self.config.paths["shapefile_pa"])
-        gdf = gpd.GeoDataFrame(pd.concat([gdf1, gdf2], ignore_index=True))
-        # Process coordinates for mapping
-        gdf['coords'] = gdf['geometry'].apply(lambda x: x.representative_point().coords[:])
-        gdf['coords'] = [coords[0] for coords in gdf['coords']]
-        gdf['longitude'] = gdf['coords'].apply(lambda x: x[0])
-        gdf['latitude'] = gdf['coords'].apply(lambda x: x[1])
+        gds = []
+        
+        for state in self.config.states:
+            gds.append(gpd.read_file(f"{self.config.paths['shapefiles_dir']}{state}.geojson"))
+            
+        gdf = gpd.GeoDataFrame(pd.concat(gds, ignore_index=True))
         return gdf
 
     def get_population_data(self):
@@ -277,40 +221,28 @@ class GraphBuilder:
         """
         self.logger.info("Generating graph from movement data")
         G = nx.Graph()
-        skipped_count = 0
-        cbgs = set()
-        # Collect all CBG IDs from patterns data
+        
         for _, row in df.iterrows():
-            cbgs.add(row['poi_cbg'])
-            if isinstance(row['visitor_daytime_cbgs'], str):
-                for visitor_cbg in json.loads(row['visitor_daytime_cbgs']).keys():
-                    try:
-                        cbgs.add(int(float(visitor_cbg)))
-                    except ValueError:
-                        skipped_count += 1
-                        cbgs.add(str(visitor_cbg))
-                        self.logger.debug(f"Non-numeric visitor_cbg: {visitor_cbg}")
-        if skipped_count > 0:
-            self.logger.info(f"Skipped {skipped_count} non-numeric CBG IDs")
-        # Add nodes to graph
-        for cbg in cbgs:
-            G.add_node(str(cbg))
-        # Add edges based on visitor movement
-        for _, row in df.iterrows():
-            if isinstance(row['visitor_daytime_cbgs'], str):
-                visitor_dict = json.loads(row['visitor_daytime_cbgs'])
-                for visitor_cbg, count in visitor_dict.items():
-                    try:
-                        src_cbg = str(int(float(visitor_cbg))) if visitor_cbg.isdigit() else visitor_cbg
-                        dst_cbg = str(int(float(row['poi_cbg'])))
-                        if src_cbg == dst_cbg:
-                            continue  # skip self-loop
-                        if G.has_edge(src_cbg, dst_cbg):
-                            G[src_cbg][dst_cbg]['weight'] += count
-                        else:
-                            G.add_edge(src_cbg, dst_cbg, weight=count)
-                    except ValueError:
-                        continue
+            if not isinstance(row['visitor_daytime_cbgs'], str):
+                continue
+            
+            dst_cbg = row['poi_cbg']
+            
+            visitor_dict = json.loads(row['visitor_daytime_cbgs'])
+            for visitor_cbg, count in visitor_dict.items():
+                try:
+                    src_cbg = str(int(float(visitor_cbg)))
+                    
+                    if src_cbg == dst_cbg:
+                        continue  # ignore self-loops
+                    
+                    if G.has_edge(src_cbg, dst_cbg):
+                        G[src_cbg][dst_cbg]['weight'] += count
+                    else:
+                        G.add_edge(src_cbg, dst_cbg, weight=count)
+                except ValueError:
+                    continue
+
         self.logger.info(f"Generated graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
         return G
 
@@ -322,6 +254,57 @@ class Clustering:
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
+        
+    def greedy_fast(self, G: nx.Graph, u0: str, min_pop: int):
+        self.logger.info(f"Starting greedy_fast algorithm with seed CBG {u0}")
+        population = cbg_population(u0, self.config, self.logger)
+        
+        cluster = [ u0 ]
+        surround = list(set([ j for j in list(G.adj[u0]) if j not in cluster ]))
+        
+        # Find all surrounding cbgs
+        for j in list(G.adj[u0]):
+            if j not in surround and j not in cluster:
+                surround.append(j)
+        
+        if len(surround) == 0:
+            self.logger.warning(f"No adjacent CBGs found. Cannot reach target population.")
+            return cluster, population
+        
+        itr = 0
+        
+        while population < min_pop:
+            max_weight = 0
+            best_cbg = surround[0]
+            
+            for candidate in surround:
+                weight = sum([ G.get_edge_data(candidate, cbg, {}).get('weight', 0) for cbg in cluster ])
+                
+                if weight > max_weight:
+                    max_weight = weight
+                    best_cbg = candidate
+            
+            # Add best CBG to cluster
+            surround.remove(best_cbg)
+            cluster.append(best_cbg)
+            
+            # Update population
+            cbg_pop = cbg_population(best_cbg, self.config, self.logger)
+            population += cbg_pop
+            
+            self.logger.info(f"Iteration {itr}: Added CBG {best_cbg} with pop {cbg_pop}. New total: {population}")
+            
+            # Add the new CBG's neighbors
+            surround.extend([ j for j in list(G.adj[best_cbg]) if j not in cluster ])
+            surround = list(set(surround))
+            
+            itr += 1
+            if itr > 500:
+                self.logger.warning(f"Max iterations exceeded (500). Cannot reach target population.")
+                break
+            
+        return cluster, population       
+            
 
     def greedy_weight(self, G, u0, min_pop):
         """
@@ -437,7 +420,7 @@ class Visualizer:
             return "#FF0000"
 
     @staticmethod
-    def cbg_geocode(cbg_id, df, poif, gdf=None):
+    def cbg_geocode(cbg_id, gdf=None):
         """
         Find geographical coordinates for a Census Block Group (CBG).
         
@@ -452,55 +435,34 @@ class Visualizer:
         Returns:
             Dictionary with keys 'latitude' and 'longitude'.
         """
-        # First try to find in geodataframe if available.
-        if gdf is not None:
-            cbg_data = gdf[gdf['GEOID10'] == cbg_id]
-            if not cbg_data.empty and not pd.isna(cbg_data['latitude'].iloc[0]):
-                return {
-                    'latitude': cbg_data['latitude'].iloc[0],
-                    'longitude': cbg_data['longitude'].iloc[0]
-                }
-        # Then try to find in POI data.
-        placekeys = df[df['poi_cbg'].astype(float).astype(int) == int(float(cbg_id))]['placekey']
-        poi_locations = poif[poif['placekey'].isin(placekeys)]
-        
-        if not poi_locations.empty and not pd.isna(poi_locations['latitude'].iloc[0]):
+        try:
+            point = gdf[gdf['CensusBlockGroup'] == str(int(float(cbg_id)))].representative_point()
+            center = point.iloc[0]
+                    
             return {
-                'latitude': poi_locations['latitude'].iloc[0],
-                'longitude': poi_locations['longitude'].iloc[0]
+                'latitude': center.y,
+                'longitude': center.x
             }
-        # If not found, return default (None in this case).
-        return {'latitude': None, 'longitude': None}
-    
-        # geodata = pd.read_csv('./data/cbg_geographic_data.csv', usecols=['census_block_group', 'latitude', 'longitude'])
-        
-        # try:
-        #     cbg_data = geodata.loc[geodata['census_block_group'] == str(int(float(cbg_id)))].iloc[0]
-            
-        #     return {
-        #             'latitude': cbg_data['latitude'],
-        #             'longitude': cbg_data['longitude']
-        #         }
-        # except:
-        #     return {
-        #             'latitude': None,
-        #             'longitude': None
-        #         }
+        except:
+            return { 'latitude': None, 'longitude': None }
 
-    def generate_maps(self, G, gdf, algorithm_result, poif, df):
+
+    def generate_maps(self, G, gdf, algorithm_result):
         """
         Generate and save map visualizations.
         """
         def safe_center():
             try:
-                seed = Visualizer.cbg_geocode(self.config.core_cbg, df, poif, gdf)
+                seed = Visualizer.cbg_geocode(self.config.core_cbg, gdf)
                 if seed['latitude'] is None or seed['longitude'] is None:
                     for cbg in algorithm_result[0]:
-                        pos = Visualizer.cbg_geocode(cbg, df, poif, gdf)
+                        pos = Visualizer.cbg_geocode(cbg, gdf)
                         if pos['latitude'] is not None and pos['longitude'] is not None:
-                            return pos
+                            return [ pos['latitude'], pos['longitude'] ]
+            
                     return self.config.map["default_location"]
-                return [seed['latitude'], seed['longitude']]
+                
+                return [ seed['latitude'], seed['longitude'] ]
             except Exception:
                 self.logger.warning("Error getting center coordinates, using default", exc_info=True)
                 return self.config.map["default_location"]
@@ -512,7 +474,7 @@ class Visualizer:
             try:
                 ratio = Helpers.calculate_cbg_ratio(G, cbg, algorithm_result[0])
                 color = self.get_color_for_ratio(ratio)
-                shape = gdf[gdf['GEOID10'] == cbg]
+                shape = gdf[gdf['CensusBlockGroup'] == cbg]
                 if shape.empty:
                     continue
                 shape = shape.to_crs("EPSG:4326")
@@ -531,17 +493,13 @@ class Visualizer:
             loop=False
         ))
         for cbg in self.config.black_cbgs:
-            shape = gdf[gdf['GEOID10'] == cbg]
+            shape = gdf[gdf['CensusBlockGroup'] == cbg]
             if not shape.empty:
                 shape = shape.to_crs("EPSG:4326")
                 folium.GeoJson(
                     json.loads(shape.to_json()),
                     style_function=lambda x: {'fillColor': '#000000', 'color': '#000000', 'fillOpacity': 0.7}
                 ).add_to(self.map_obj)
-        output_map_path = os.path.join(self.config.output_dir, self.config.paths["output_html"])
-        self.map_obj.save(output_map_path)
-        self.logger.info(f"Map saved to {output_map_path}")
-
 
 # ----------------------------
 # Export Module
@@ -574,6 +532,7 @@ class Exporter:
                 })
             except Exception:
                 self.logger.error(f"Error processing CBG {cbg} for YAML output", exc_info=True)
+
         output_yaml_path = os.path.join(self.config.output_dir, self.config.paths["output_yaml"])
         with open(output_yaml_path, "w", encoding="utf-8") as outfile:
             yaml.dump(cbg_info_list, outfile)
@@ -593,7 +552,6 @@ def main():
     zip_codes = data_loader.get_zip_codes()
     logger.info(f"Retrieved {len(zip_codes)} zip codes")
     df = data_loader.load_safegraph_data(zip_codes)
-    poif = data_loader.load_poi_data(zip_codes, df)
     gdf = data_loader.load_shapefiles()
     _ = data_loader.get_population_data()  # Population data is cached in cbg_population
 
@@ -610,7 +568,12 @@ def main():
 
     # Generate map visualizations
     visualizer = Visualizer(config, logger)
-    visualizer.generate_maps(G, gdf, algorithm_result, poif, df)
+    visualizer.generate_maps(G, gdf, algorithm_result)
+    
+    # Save map to file
+    output_map_path = os.path.join(config.output_dir, config.paths["output_html"])
+    visualizer.map_obj.save(output_map_path)
+    logger.info(f"Map saved to {output_map_path}")
 
     # Generate YAML output
     exporter = Exporter(config, logger)
@@ -630,7 +593,6 @@ def generate_cz(cbg, min_pop):
     zip_codes = data_loader.get_zip_codes()
     logger.info(f"Retrieved {len(zip_codes)} zip codes")
     df = data_loader.load_safegraph_data(zip_codes)
-    poif = data_loader.load_poi_data(zip_codes, df)
     gdf = data_loader.load_shapefiles()
     _ = data_loader.get_population_data()  # Population data is cached in cbg_population
 
@@ -640,24 +602,18 @@ def generate_cz(cbg, min_pop):
 
     # Run clustering algorithm (using greedy_weight here)
     clustering_algo = Clustering(config, logger)
-    algorithm_result = clustering_algo.greedy_weight(G, config.core_cbg, config.min_cluster_pop)
+    algorithm_result = clustering_algo.greedy_fast(G, config.core_cbg, config.min_cluster_pop)
     logger.info(f"Clustering complete: {len(algorithm_result[0])} CBGs, population: {algorithm_result[1]}")
-    movement_stats = Helpers.calculate_movement_stats(G, algorithm_result[0])
-    logger.info(f"Movement stats: IN {movement_stats['in']}, OUT {movement_stats['out']}, Ratio {movement_stats['ratio']:.4f}")
 
     # Generate map visualizations
     visualizer = Visualizer(config, logger)
-    visualizer.generate_maps(G, gdf, algorithm_result, poif, df)
-
-    # Generate YAML output
-    exporter = Exporter(config, logger)
-    exporter.generate_yaml_output(G, algorithm_result)
+    visualizer.generate_maps(G, gdf, algorithm_result)
     
     # Get per-cbg population data (hh generator needs this)
-    geoids = {str(int(float(cbg))):cbg_population(str(int(float(cbg))), config, logger) for cbg in algorithm_result[0]}
+    geoids = { cbg:cbg_population(cbg, config, logger) for cbg in algorithm_result[0] }
 
     logger.info("Processing complete")
-    
+        
     return geoids, visualizer.map_obj
 
 if __name__ == "__main__":
