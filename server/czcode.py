@@ -1,25 +1,22 @@
 import os
 import json
-import pickle
 import logging
-from math import sin, cos, atan2, pi, sqrt
+import folium
+import yaml
 
 import numpy as np
 import pandas as pd
 import geopandas as gpd
 import networkx as nx
-import folium
-import yaml
+
 from folium import plugins
 from uszipcode import SearchEngine
+from math import sin, cos, atan2, pi, sqrt
 
 # ----------------------------
 # Configuration Module
 # ----------------------------
 class Config:
-    def __init__(self):
-        self.__init__('240430006012', 5000)
-    
     def __init__(self, cbg, min_pop):
         zip_codes = []
         with open(r'./data/zip_to_cbg.json', 'r') as f:
@@ -170,7 +167,7 @@ def cbg_population(cbg, config: Config, logger: logging.Logger):
     try:
         cbg_int = int(float(cbg))
         if cbg_int in _population_cache.index:
-            return int(_population_cache.loc[cbg_int].B00002e1)
+            return int(_population_cache.loc[cbg_int].B00001e1)
         else:
             logger.warning(f"CBG {cbg} not found in population data")
             return 0
@@ -543,7 +540,7 @@ class Exporter:
 # Main Execution Function
 # ----------------------------
 def main():
-    config = Config()
+    config = Config('240430006012', 5000)
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
 
