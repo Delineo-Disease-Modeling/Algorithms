@@ -4,7 +4,6 @@ import logging
 import folium
 import yaml
 
-import numpy as np
 import pandas as pd
 import geopandas as gpd
 import networkx as nx
@@ -36,9 +35,10 @@ class Config:
             "shapefiles_dir": r"./data/shapefiles/",
             "patterns_csv": r"./data/patterns.csv",
             "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
-            "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
+            # "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
+            "population_csv": r"./data/cbg_b01.csv",
             "output_yaml": "cbg_info.yaml",
-            "output_html": "map_with_black_clusters.html"
+            "output_html": "map.html"
         }
         self.map = {
             "default_location": [0.0, 0.0],
@@ -160,14 +160,14 @@ def cbg_population(cbg, config: Config, logger: logging.Logger):
     global _population_cache
     if _population_cache is None:
         try:
-            _population_cache = pd.read_csv(config.paths["population_csv"], index_col='census_block_group')
+            _population_cache = pd.read_csv(config.paths["population_csv"], index_col='census_block_group', usecols=['census_block_group', 'B01003e1'])
         except Exception as e:
             logger.error(f"Error loading population data: {e}")
             return 0
     try:
         cbg_int = int(float(cbg))
         if cbg_int in _population_cache.index:
-            return int(_population_cache.loc[cbg_int].B00001e1)
+            return int(_population_cache.loc[cbg_int].B01003e1)
         else:
             logger.warning(f"CBG {cbg} not found in population data")
             return 0
@@ -273,23 +273,31 @@ class Clustering:
         while population < min_pop:
             max_weight = 0
             best_cbg = surround[0]
+            best_pop = 0
             
             for candidate in surround:
+                if candidate in cluster:
+                    continue
+                
+                cur_pop = cbg_population(candidate, self.config, self.logger)
+                if cur_pop == 0:
+                    continue
+                
                 weight = sum([ G.get_edge_data(candidate, cbg, {}).get('weight', 0) for cbg in cluster ])
                 
                 if weight > max_weight:
                     max_weight = weight
                     best_cbg = candidate
+                    best_pop = cur_pop
             
             # Add best CBG to cluster
             surround.remove(best_cbg)
             cluster.append(best_cbg)
             
             # Update population
-            cbg_pop = cbg_population(best_cbg, self.config, self.logger)
-            population += cbg_pop
+            population += best_pop
             
-            self.logger.info(f"Iteration {itr}: Added CBG {best_cbg} with pop {cbg_pop}. New total: {population}")
+            self.logger.info(f"Iteration {itr}: Added CBG {best_cbg} with pop {best_pop}. New total: {population}")
             
             # Add the new CBG's neighbors
             surround.extend([ j for j in list(G.adj[best_cbg]) if j not in cluster ])
@@ -480,6 +488,9 @@ class Visualizer:
                 feature['properties']['times'] = [(pd.Timestamp('today') + pd.Timedelta(i, 'D')).isoformat()]
                 feature['properties']['style'] = {'fillColor': color, 'color': color, 'fillOpacity': 0.7}
                 features.append(feature)
+                
+                loc = shape.representative_point().iloc[0]
+                folium.Marker(location=[loc.y, loc.x], popup=f'Population: {cbg_population(cbg, self.config, self.logger)}').add_to(self.map_obj)
             except Exception:
                 self.logger.error(f"Error processing CBG {cbg} for map", exc_info=True)
         self.map_obj.add_child(plugins.TimestampedGeoJson(
@@ -540,7 +551,7 @@ class Exporter:
 # Main Execution Function
 # ----------------------------
 def main():
-    config = Config('240430006012', 5000)
+    config = Config('240430006012', 100000)
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
 
