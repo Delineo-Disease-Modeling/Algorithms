@@ -561,3 +561,15 @@ def gen_patterns(papdata, start_time: datetime, duration=168):
         
     return output
     
+if __name__ == '__main__':
+    try:
+        papdata = {}
+        with open('output/papdata.json', 'r') as f:
+            papdata = json.load(f)
+        
+        patterns = gen_patterns(papdata, datetime.now(), 168)
+        with open('output/patterns.json', 'w') as f:
+            json.dump(patterns, f, indent=4)
+    except:
+        print('ERROR: Could not read papdata.json or generated patterns')
+        
