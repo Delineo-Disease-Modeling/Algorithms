@@ -2,10 +2,10 @@ import json
 import random
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Tuple, Optional, Union
+from typing import List, Dict, Any, Optional, Union
 from dataclasses import dataclass
 import requests
-import yaml
+from czcode import generate_cz
 
 
 class CensusDataPuller:
@@ -677,3 +677,13 @@ def gen_pop(cz_data):
     population = generator.save_population(population)
 
     return convert_data(population, cz_data)
+
+if __name__ == '__main__':
+    try:
+        geoids, _ = generate_cz('240430006012', 10_0000)
+        papdata = gen_pop(geoids)
+        
+        with open(r'./output/papdata.json', 'w') as f:
+            json.dump(papdata, f)
+    except:
+        print('ERROR: Could not generated papdata.json')
