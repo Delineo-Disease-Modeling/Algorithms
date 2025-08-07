@@ -26,6 +26,7 @@ class Config:
         
         search = SearchEngine()
         self.states = list(set([ search.by_zipcode(zip).state for zip in zip_codes ]))
+        self.states = list(set(self.states) | set(get_neighboring_states(self.states))) 
         
         self.location_name = f'{cbg}'
         self.core_cbg = cbg
@@ -143,6 +144,24 @@ class DataLoader:
 # ----------------------------
 # Utility Functions & Helpers
 # ----------------------------
+def get_neighboring_states(states):
+    try:
+        neighbors = []
+        with open(r'data/neighbor-states.json', 'r') as f:
+            
+            neighborlist = json.load(f)
+            
+            for state in states:
+                for n in neighborlist:
+                    if n['code'] == state:
+                        neighbors.extend(n['Neighborcodes'])
+                        neighbors = list(set(neighbors))
+                        break
+        return neighbors
+    except:
+        return []
+
+
 def distance(lat1, long1, lat2, long2):
     """
     Calculate haversine distance between two coordinates in kilometers.
@@ -490,7 +509,7 @@ class Visualizer:
                 features.append(feature)
                 
                 loc = shape.representative_point().iloc[0]
-                folium.Marker(location=[loc.y, loc.x], popup=f'Population: {cbg_population(cbg, self.config, self.logger)}').add_to(self.map_obj)
+                folium.Marker(location=[loc.y, loc.x], popup=f'{cbg} - Population: {cbg_population(cbg, self.config, self.logger)}').add_to(self.map_obj)
             except Exception:
                 self.logger.error(f"Error processing CBG {cbg} for map", exc_info=True)
         self.map_obj.add_child(plugins.TimestampedGeoJson(
@@ -551,7 +570,10 @@ class Exporter:
 # Main Execution Function
 # ----------------------------
 def main():
-    config = Config('240430006012', 100000)
+    seed_cbg = '240430002001'
+    min_pop = 150_000
+    
+    config = Config(seed_cbg, min_pop)
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
 
@@ -586,6 +608,24 @@ def main():
     # Generate YAML output
     exporter = Exporter(config, logger)
     exporter.generate_yaml_output(G, algorithm_result)
+    
+    with open(r'output/algorithm_result.json', 'w') as f:
+        json.dump(algorithm_result, f, indent=2)
+        
+    # request from dahbura
+    with open(r'output/cbglistpop.json', 'w') as f:
+        cbglistpop = { 
+            'meta': {
+                'name': 'Hagerstown, MD',
+                'seed_cbg': seed_cbg,
+                'min_pop': min_pop,
+                'total_pop': algorithm_result[1]
+            }
+        }
+        
+        for cbg in algorithm_result[0]:
+            cbglistpop[cbg] = cbg_population(cbg, config, logger)
+        json.dump(cbglistpop, f, indent=2)
 
     logger.info("Processing complete")
     
