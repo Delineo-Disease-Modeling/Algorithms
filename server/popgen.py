@@ -668,10 +668,13 @@ def gen_pop(cz_data):
     population = generator.generate_full_population(sample_factor=0.01)
     
     # Validate the population
-    validation_results = generator.validate_population(population)
-    print("\nPopulation Validation:")
-    for key, value in validation_results.items():
-        print(f"{key}: {value}")
+    try:
+        validation_results = generator.validate_population(population)
+        print("\nPopulation Validation:")
+        for key, value in validation_results.items():
+            print(f"{key}: {value}")
+    except:
+        print("\nERROR: COULD NOT VALIDATE POPULATION\n")
     
     # Save the population to CSV
     population = generator.save_population(population)
