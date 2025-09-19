@@ -9,7 +9,7 @@ import requests
 import json
 
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=['http://localhost:5173', 'https://coviddev.isi.jhu.edu'])
 
 def gen_and_upload_data(geoids, czone_id, start_date):
   # Generate People, Households, Places data
