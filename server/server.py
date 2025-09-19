@@ -9,7 +9,13 @@ import requests
 import json
 
 app = Flask(__name__)
-CORS(app, origins=['http://localhost:5173', 'https://coviddev.isi.jhu.edu'])
+CORS(app,
+  origins=['http://localhost:5173', 'https://coviddev.isi.jhu.edu', 'http://coviddev.isi.jhu.edu', 'https://covidweb.isi.jhu.edu', 'http://covidweb.isi.jhu.edu'],
+  methods=['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
+  allow_headers=['Content-Type', 'Authorization'],
+  expose_headers=['Set-Cookie'],
+  supports_credentials=True
+)
 
 def gen_and_upload_data(geoids, czone_id, start_date):
   # Generate People, Households, Places data
