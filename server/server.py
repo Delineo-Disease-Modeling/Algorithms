@@ -54,7 +54,8 @@ def create_cz(data):
     'longitude': map.location[1],
     'cbg_list': cluster,
     'start_date': data['start_date'],
-    'size': size
+    'size': size,
+    'user_id': data['user_id']
   })
     
   if not resp.ok:
