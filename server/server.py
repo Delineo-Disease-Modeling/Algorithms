@@ -50,6 +50,7 @@ def create_cz(data):
     
   resp = requests.post('http://localhost:1890/convenience-zones', json={
     'name': data['name'],
+    'description': data['description'],
     'latitude': map.location[0],
     'longitude': map.location[1],
     'cbg_list': cluster,
