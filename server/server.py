@@ -1,12 +1,13 @@
-from flask import Flask, request, jsonify, make_response, Response
+from flask import Flask, request, jsonify, make_response, after_this_request
 from flask_cors import CORS, cross_origin
 from czcode import generate_cz
 from popgen import gen_pop
 from patterns import gen_patterns
 from datetime import datetime
-import threading
 import requests
 import json
+from jsonschema import validate
+from schema import gen_cz_schema
 
 app = Flask(__name__)
 CORS(app,
@@ -17,14 +18,14 @@ CORS(app,
   supports_credentials=True
 )
 
-def gen_and_upload_data(geoids, czone_id, start_date):
+def gen_and_upload_data(geoids, czone_id, start_date, length):
   # Generate People, Households, Places data
   print('generating papdata...')
   papdata = gen_pop(geoids)
   
   # Generate movement patterns
   print('generating patterns...')
-  patterns = gen_patterns(papdata, start_date, 168)
+  patterns = gen_patterns(papdata, start_date, length)
       
   print('sending data...')
     
@@ -65,10 +66,13 @@ def create_cz(data):
   
   czone_id = resp.json()['data']['id']
   
-  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id, datetime.fromisoformat(data['start_date'].replace("Z", "+00:00"))))
-  thread.daemon = True
-  thread.start()
-  
+  @after_this_request
+  def call_after_request(response):
+    start_date = data['start_date'].replace("Z", "+00:00")
+    start_date = datetime.fromisoformat(start_date)
+    gen_and_upload_data(geoids, czone_id, start_date, data.get('length', 168))
+    return response
+    
   return json.dumps({
     'id': czone_id,
     'cluster': cluster,
@@ -85,7 +89,12 @@ def route_generate_cz():
     return make_response(jsonify({'message': 'Bad Request'}), 400)
   
   if not request.json:
-    return make_response(jsonify({'message': 'Please specify a CBG, location name, start date, and minimum population'}), 400)
+    return make_response(jsonify({'message': 'Please supply adequate JSON data'}), 400)
+  
+  try:
+    validate(instance=request.json, schema=gen_cz_schema)
+  except:
+    return make_response(jsonify({'message': 'JSON data not valid'}), 400)
   
   return create_cz(request.json.copy())
 
