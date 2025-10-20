@@ -7,7 +7,7 @@ gen_cz_schema = {
     'cbg': { 'type': 'string', 'pattern': '[0-9]{12}'  },
     'min_pop': { 'type': 'integer' },
     'start_date': { 'type': 'string', 'format': 'date-time' },
-    'length': { 'type': 'integer' }
+    'length': { 'type': 'integer', 'minimum': 168, 'maximum': 8760 }
   },
   'required': [ 'user_id', 'name', 'description', 'cbg', 'min_pop', 'start_date' ]
 }
