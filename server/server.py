@@ -30,15 +30,15 @@ def gen_and_upload_data(geoids, czone_id, start_date, length):
   print('sending data...')
     
   resp = requests.post('http://localhost:1890/patterns', json={
-    'czone_id': czone_id,
-    'papdata': papdata,
-    'patterns': patterns
+    'czone_id': int(czone_id),
+    'papdata': json.dumps(papdata),
+    'patterns': json.dumps(patterns)
   })
   
   if resp.ok:
     print('sent!')
   else:
-    print('error sending data...')
+    print(f'error sending data... {resp.status_code}')
 
 def create_cz(data):
   geoids, map = generate_cz(data['cbg'], data['min_pop'])
@@ -56,6 +56,7 @@ def create_cz(data):
     'longitude': map.location[1],
     'cbg_list': cluster,
     'start_date': data['start_date'],
+    'length': data['length'],
     'size': size,
     'user_id': data['user_id']
   })
