@@ -8,6 +8,7 @@ import requests
 import json
 from jsonschema import validate
 from schema import gen_cz_schema
+from io import BytesIO
 
 app = Flask(__name__)
 CORS(app,
@@ -28,11 +29,12 @@ def gen_and_upload_data(geoids, czone_id, start_date, length):
   patterns = gen_patterns(papdata, start_date, length)
       
   print('sending data...')
-    
-  resp = requests.post('http://localhost:1890/patterns', json={
+
+  resp = requests.post('http://localhost:1890/patterns', data={
     'czone_id': int(czone_id),
-    'papdata': json.dumps(papdata),
-    'patterns': json.dumps(patterns)
+  }, files={
+    'papdata': ('papdata.json', BytesIO(json.dumps(papdata).encode()), 'text/plain'),
+    'patterns': ('patterns.json', BytesIO(json.dumps(patterns).encode()), 'text/plain')
   })
   
   if resp.ok:
