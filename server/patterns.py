@@ -1,646 +1,664 @@
+import ast
 import csv
 import json
-from collections import deque
-import random
+import math
+import yaml
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
+from typing import Dict, Any, List, Tuple, Optional
 
-class POI():
-    def __init__(self, name, visit, bucket, same_day, pop_hr, pop_day, simul_time = 600):  # time_step field?
-        bucket = json.loads(bucket)
-        self.name = name
-        temp_queue = [[] for i in range(simul_time)]
-        self.current_people = deque(temp_queue)
-        self.visit = visit
-        self.bucketed_dwell_time = bucket
-        self.same_day_brands = same_day
-        self.pop_hr = pop_hr
-        self.pop_day = pop_day
-        self.population = 0
+WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+# Cache for CBG centroid lookup to avoid reloading the YAML repeatedly
+_CBG_CENTROIDS: Optional[Dict[str, Tuple[float, float]]] = None
 
-    def add_person_to_none_work(self, person):
-        values = ["<5", "5-10", "11-20", "21-60", "61-120", "121-240", ">240"]
-        sum = self.bucketed_dwell_time["<5"] + self.bucketed_dwell_time["5-10"] + self.bucketed_dwell_time["11-20"] + \
-            self.bucketed_dwell_time["21-60"] + self.bucketed_dwell_time["61-120"] + \
-            self.bucketed_dwell_time["121-240"] + \
-            self.bucketed_dwell_time[">240"]
-        weights = [self.bucketed_dwell_time["<5"]/sum, self.bucketed_dwell_time["5-10"]/sum, self.bucketed_dwell_time["11-20"]/sum,
-                   self.bucketed_dwell_time["21-60"]/sum, self.bucketed_dwell_time["61-120"]/sum, self.bucketed_dwell_time["121-240"]/sum, self.bucketed_dwell_time[">240"]/sum]
-
-        random_string = random.choices(values, weights=weights)[0]
-        if (random_string == "<5"):
-            random_integer = random.randint(1, 4)
-        elif (random_string == "5-10"):
-            random_integer = random.randint(5, 10)
-        elif (random_string == "11-20"):
-            random_integer = random.randint(11, 20)
-        elif (random_string == "21-60"):
-            random_integer = random.randint(21, 60)
-        elif (random_string == "61-120"):
-            random_integer = random.randint(61, 120)
-        elif (random_string == "121-240"):
-            random_integer = random.randint(121, 240)
-        elif (random_string == ">240"):
-            random_integer = random.randint(241, 500)
-
-        if random_integer > len(self.current_people):
-            self.current_people.append(deque())
-
-        else:
-            self.current_people[random_integer - 1].append(person)
-
-        self.population += 1
-        person.availability = False
-
-    def add_person_to_work(self, time, person):
-        if time > len(self.current_people):
-            self.current_people.append(deque())
-        else:
-            self.current_people[time - 1].append(person)
-
-        self.population += 1
-        person.availability = False
-
-    def remove_people(self, clock, poi_dict):
-        self.current_people.rotate(-1)
-
-        popped_people = self.current_people[len(self.current_people) - 1]
-        self.current_people[-1] = []
-
-        for person in popped_people:
-            if person.occupation != None and person.left_from_work:
-                work_end_time = (person.work_time[1] if person.work_time[1] > person.work_time[0] else (person.work_time[1] + 24)) * 60
-                poi_dict[person.occupation].add_person_to_work(work_end_time - clock, person) #poi to poi
-                person.left_from_work = False
-            else:
-                person.household.add_member(person) #poi to home
-                person.availability = True
-            self.population -= 1
-        
-        if (720 <= clock and clock <= 780) or (1050 <= clock and clock <= 1140): #if lunch time (12 - 13) or dinner time (1730 - 1900) 
-            for people in self.current_people:
-                for person in people:
-                    if not person.availability: self.break_from_work(poi_dict, self, people, person)
-
-    def break_from_work(self, poi_dict, curr_poi, people, person):
-        person, next_poi = curr_poi.next_poi(person, poi_dict)
-        if next_poi != None:
-            person.left_from_work = True
-            people.remove(person) #pop from curr_poi
-            curr_poi.population -= 1
-            poi_dict[next_poi].add_person_to_none_work(person) #add to next_poi
-
-    def next_poi(self, person, poi_dict):
-        instate_sum = 0
-        #outstate_sum = 0
-        #outstate_count = 0
-        next_poi_list = []
-
-        for brand_name in self.same_day_brands.keys():
-            if brand_name in poi_dict.keys():
-                instate_sum += self.same_day_brands[brand_name]
-                next_poi_list.append(brand_name)
-            #else:
-                #outstate_sum += self.same_day_brands[brand_name]
-                #outstate_count += 1
-
-        #outstate_avg = outstate_sum / outstate_count if outstate_count != 0 else 1
-        #next_poi_sum = outstate_avg + instate_sum
-
-        #next_poi_list.append("out of state")
-
-        next_poi_weights = []
-        for brand_name in next_poi_list:
-            if brand_name in poi_dict.keys():
-                next_poi_weights.append(self.same_day_brands[brand_name])
-            else:
-                continue
-
-        #next_poi_weights.append(outstate_avg / next_poi_sum)
-
-        if next_poi_list == []:
-            next_poi = None
-        else:
-            next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
-
-        return [person, next_poi]
-    
-    def next_poi_or_home(self, person, poi_dict):
-        instate_sum = 0
-        next_poi_count = 1  # bc outstate is already a part of next poi list
-        outstate_sum = 0
-        outstate_count = 0
-        home_constant = 2
-        next_poi_list = []
-
-        for brand_name in self.same_day_brands.keys():
-            if brand_name in poi_dict.keys():
-                instate_sum += self.same_day_brands[brand_name]
-                next_poi_count += 1
-                next_poi_list.append(brand_name)
-            else:
-                outstate_sum += self.same_day_brands[brand_name]
-                outstate_count += 1
-
-        outstate_avg = outstate_sum / outstate_count if outstate_count != 0 else 1
-        next_poi_sum = outstate_avg + instate_sum
-        home_weight = next_poi_sum / next_poi_count if next_poi_count != 0 else 1
-        home_weight_modified = home_weight / home_constant
-
-        next_poi_list.append("out of state")
-        next_poi_list.append("home")
-
-        # final total sum
-        next_poi_sum += home_weight_modified
-        next_poi_weights = []
-        for brand_name in next_poi_list:
-            if brand_name in poi_dict.keys():
-                next_poi_weights.append(
-                    self.same_day_brands[brand_name] / next_poi_sum)
-            else:
-                continue
-
-        next_poi_weights.append(outstate_avg / next_poi_sum)
-        next_poi_weights.append(home_weight_modified / next_poi_sum)
-
-        next_poi = random.choices(next_poi_list, weights=next_poi_weights)[0]
-
-        return [person, next_poi]
-      
-class Person:
-    def __init__(self, id=None, home=None, sex=None, age=None) -> None:
-        self.id = id              # 人员 ID
-        self.home = home          # 家庭 ID
-        self.sex = sex            # 性别
-        self.age = age            # 年龄
-        self.is_poi = False       # 是否在 POI
-        self.visited = {}         # 访问过的 POI 和次数
-        self.total_visited = 0    # 总访问次数
-        self.curr_poi = ""        # 当前 POI
-        self.hour_stayed = 0      # 在当前 POI 停留的小时数
-        self.home_cbg = None      # The family's CBG is used to allocate fixed activity locations.
-        self.primary_activity = None          # Fixed activity types (work, school, etc.)
-        self.primary_location = None          # Fixed event location sign
-        self.primary_start_hour = 0           # Daily activity start time (hour)
-        self.primary_duration_hours = 0       # Daily activity duration (hours)）
-        self.primary_active = False           # Is it currently in a fixed activity?
-
-    def visit(self, poi: str):
-        if poi in self.visited:
-            self.visited[poi] += 1
-        else:
-            self.visited[poi] = 1
-        self.total_visited += 1
-        self.is_poi = True
-        self.curr_poi = poi
-        self.hour_stayed = 1
-
-    def leave(self):
-        self.is_poi = False
-        self.hour_stayed = 0
-        self.curr_poi = ""
-        self.primary_active = False
-
-    def stay(self):
-        self.hour_stayed += 1
-
-    def set_primary_activity(self, activity, location, start_hour, duration_hours):
-        """Record the fixed daily activities of the personnel."""
-        self.primary_activity = activity
-        self.primary_location = location
-        self.primary_start_hour = start_hour % 24
-        self.primary_duration_hours = max(0, duration_hours)
-
-    def scheduled_for_primary(self, current_hour):
-        """Determine whether the current hour falls within a fixed activity period."""
-        if not self.primary_location or self.primary_duration_hours <= 0:
-            return False
-        if self.primary_duration_hours >= 24:
-            return True
-        start = self.primary_start_hour
-        end = (start + self.primary_duration_hours) % 24
-        if start < end:
-            return start <= current_hour < end
-        return current_hour >= start or current_hour < end
-
-    def at_home(self) -> bool:
-        """Check if the person is at home (not in a POI)."""
-        return not self.is_poi
-
-    def to_dict(self):
-        """Convert Person to dictionary for serialization."""
-        return {
-            "id": self.id,
-            "home": self.home,
-            "sex": self.sex,
-            "age": self.age,
-            "is_poi": self.is_poi,
-            "curr_poi": self.curr_poi,
-            "hour_stayed": self.hour_stayed,
-            "total_visited": self.total_visited,
-            "visited": self.visited
-        }
-
-    def __repr__(self) -> str:
-        return (f"Person(id={self.id}, home={self.home}, is_poi={self.is_poi}, "
-                f"curr_poi='{self.curr_poi}', hour_stayed={self.hour_stayed}, "
-                f"total_visited={self.total_visited}, visited={self.visited})")
-
-
-def assign_primary_activity(person):
-    """Assign fixed daily activities to personnel based on age."""
-    age = person.age
-    if age is None:
-        return
-
-    location_suffix = person.home_cbg or person.home or "unknown"
-
-    if 5 <= age < 18:
-        person.set_primary_activity("school", f"school:{location_suffix}", 8, 7)
-    elif 18 <= age < 23:
-        person.set_primary_activity("college", f"college:{location_suffix}", 9, 6)
-    elif 23 <= age < 65:
-        person.set_primary_activity("work", f"work:{location_suffix}", 9, 8)
+def _parse_hour_list(val) -> List[int]:
+    """
+    popularity_by_hour is either already a list or a string like "[0,1,...,24 items]".
+    Return a 24-length list of ints (fallback to zeros).
+    """
+    if isinstance(val, list):
+        arr = val
     else:
-        person.set_primary_activity(None, None, 0, 0)
+        try:
+            arr = ast.literal_eval(val)
+        except Exception:
+            arr = []
+    if not isinstance(arr, list) or len(arr) != 24:
+        return [0] * 24
+    # ensure ints
+    return [int(x) if x is not None else 0 for x in arr]
 
 
-def apply_primary_activities(people, current_time):
-    """At the start of each hour of the simulation, a fixed activity schedule is enforced."""
-    current_hour = current_time.hour
-    for person in people.values():
-        if person.scheduled_for_primary(current_hour):
-            if not person.primary_active:
-                # Enter a fixed activity location and mark it as active.
-                person.visit(person.primary_location)
-                person.primary_active = True
-            else:
-                person.stay()
-        else:
-            if person.primary_active:
-                # Once the scheduled activity ends, you return to a free state (usually going home).）
-                person.leave()
-        
-class POIs:
-    def __init__(self, pois_dict, alpha=0.1, occupancy_weight=1.0, tendency_decay=0.5):
-        self.alpha = alpha
-        self.occupancy_weight = occupancy_weight
-        self.tendency_decay = tendency_decay
-        # pois = [poi_id, ...]
-        self.pois = list(pois_dict.keys())
-        # pois_id_to_index = {poi_id: index}
-        self.poi_id_to_index = {poi_id: index for index, poi_id in enumerate(self.pois)}
-        # raw_visit_counts = {poi_id: raw_visit_counts}
-        self.raw_visit_counts = {poi_id: pois_dict[poi_id]['raw_visit_counts'] for poi_id in pois_dict}
-        # raw_visitor_counts = {poi_id: raw_visitor_counts}
-        self.raw_visitor_counts = {poi_id: pois_dict[poi_id]['raw_visitor_counts'] for poi_id in pois_dict}
-        # capacities = [{poi_id: capacity} for 30 days]
-        self.capacities = [{poi_id: pois_dict[poi_id]['visits_by_day'][i] for poi_id in pois_dict} for i in range(30)]
-        # probabilities = [{poi_id: probability} for 24 hours]
-        self.probabilities = [{poi_id: pois_dict[poi_id]['probability_by_hour'][i] for poi_id in pois_dict} for i in range(24)]
-        # {prev_poi_id: {after_poi_id: tendency}}
-        self.tendency_probabilities = {poi_id: pois_dict[poi_id]['after_tendency'] for poi_id in pois_dict}
-        # {poi_id: occupancy}
-        self.occupancies = {poi_id: 0 for poi_id in pois_dict}
-        # Dwell times and CDFs
-        self.dwell_times = {poi_id: pois_dict[poi_id]['dwell_times'] for poi_id in pois_dict}
-        self.dwell_time_cdfs = {poi_id: pois_dict[poi_id]['dwell_time_cdf'] for poi_id in pois_dict}
-
-    def get_capacities_by_day(self, current_time):
-        return self.capacities[min(current_time.day, 29)]
-
-    def get_probabilities_by_time(self, current_time):
-        return self.probabilities[current_time.hour]
-    
-    def get_capacities_by_time(self, current_time):
-        return {poi_id: self.capacities[min(current_time.day, 29)][poi_id] * self.probabilities[current_time.hour][poi_id] for poi_id in self.capacities[min(current_time.day, 29)]}
-    
-    def get_after_tendencies(self, prev_poi_id):
-        return {after_poi_id: self.tendency_probabilities[prev_poi_id].get(after_poi_id, 0) for after_poi_id in self.pois}
-    
-    def get_dwell_time_cdf(self, poi_id):
-        return self.dwell_times[poi_id], self.dwell_time_cdfs[poi_id]
-    
-    def capacity_occupancy_diff(self, current_time):
-        C = np.array(list(self.get_capacities_by_time(current_time).values()))
-        O = np.array(list(self.occupancies.values()))
-        return np.maximum(C - O, 0)
-    
-    def capacity_occupancy_diff_with_tendency(self, current_time, population):
-        C = np.array(list(self.get_capacities_by_time(current_time).values()))
-        O = np.array(list(self.occupancies.values()))
-        A = np.array([list(self.get_after_tendencies(poi_id).values()) for poi_id in self.pois])
-        
-        # Apply occupancy weight to capacity-occupancy difference
-        capacity_term = np.maximum(C - O, 0) * self.occupancy_weight
-        
-        # Apply tendency decay based on time spent
-        tendency_term = A * self.alpha * (1 - self.tendency_decay)
-        
-        return (tendency_term + capacity_term[:, np.newaxis]) / population
-    
-    def generate_distribution(self, current_time, population):
-        distribution = self.capacity_occupancy_diff(current_time)
-        move_probability = sum(distribution) / population
-        # normalize distribution
-        return move_probability, distribution / np.sum(distribution) if np.sum(distribution) > 0 else np.zeros_like(distribution)
-    
-    def generate_distributions_with_tendency(self, current_time, population):
-        distributions = self.capacity_occupancy_diff_with_tendency(current_time, population)
-        move_probabilities = [sum(distribution) / population for distribution in distributions]
-        # normalize distributions
-        return move_probabilities, [distribution / np.sum(distribution) if np.sum(distribution) > 0 else np.zeros_like(distribution) for distribution in distributions]
-
-    def get_next_poi(self, move_probability, distribution):
-        if np.random.random() < move_probability:
-            return np.random.choice(self.pois, p=distribution)
-        else:
-            return None
-    
-    def leave(self, poi_id):
-        self.occupancies[poi_id] -= 1
-
-    def enter(self, poi_id):
-        self.occupancies[poi_id] += 1
-        
-def enter_poi(people, pois, current_time, hagerstown_pop, safegraph_to_place_id, place_id_to_safegraph):
+def _parse_day_map(val) -> Dict[str, int]:
     """
-    Modified enter_poi to map SafeGraph IDs to papdata["places"] IDs.
-    
-    Args:
-        people: Dictionary of Person objects.
-        pois: POIs object containing POI data.
-        current_time: Current time in the simulation.
-        hagerstown_pop: Population size of Hagerstown.
-        safegraph_to_place_id: Dictionary mapping SafeGraph IDs to papdata["places"] IDs.
-        place_id_to_safegraph: Dictionary mapping papdata["places"] IDs to SafeGraph IDs.
+    popularity_by_day is a JSON/dict mapping weekday->int. It may be a JSON string.
     """
-    move_probability, distribution = pois.generate_distribution(current_time, hagerstown_pop)
-    move_probability_with_tendency, distributions_with_tendency = pois.generate_distributions_with_tendency(current_time, hagerstown_pop)
-    for person_id, person in people.items():
-        if person.primary_active:
-            # No random travel during fixed event periods
-            continue
-        if person.curr_poi == "":
-            next_poi_id = pois.get_next_poi(move_probability, distribution)
-        else:
-            # 将 person.curr_poi 转换回 SafeGraph ID
-            safegraph_poi_id = place_id_to_safegraph.get(person.curr_poi, person.curr_poi)
-            curr_poi_index = pois.poi_id_to_index[safegraph_poi_id]  # 使用 SafeGraph ID 查找索引
-            next_poi_id = pois.get_next_poi(move_probability_with_tendency[curr_poi_index], distributions_with_tendency[curr_poi_index])
-        if next_poi_id is not None:
-            # 映射 SafeGraph ID 到 papdata["places"] ID
-            mapped_poi_id = safegraph_to_place_id.get(next_poi_id, next_poi_id)
-            pois.enter(next_poi_id)  # pois.enter 仍使用 SafeGraph ID
-            person.visit(mapped_poi_id)  # person.visit 使用映射后的 ID
-            
-def leave_poi(people, current_time, pois, place_id_to_safegraph):
-    """
-    Optimized function to simulate leaving a certain POI.
-    
-    Args:
-        people: Dictionary of Person objects.
-        current_time: Current time in the simulation.
-        pois: POIs object containing POI data.
-        place_id_to_safegraph: Dictionary mapping papdata["places"] IDs to SafeGraph IDs.
-    """
-    for person_id, person in people.items():
-        if person.primary_active:
-            # SafeGraph POI exit logic is not processed when a fixed activity is occupied.
-            continue
-        if not person.is_poi:
-            continue  
+    if isinstance(val, dict):
+        d = val
+    else:
+        try:
+            d = json.loads(val)
+        except Exception:
+            try:
+                d = ast.literal_eval(val)
+            except Exception:
+                d = {}
+    out = {k: int(v) for k, v in d.items() if k in WEEKDAYS}
+    # ensure all keys exist
+    for k in WEEKDAYS:
+        out.setdefault(k, 0)
+    return out
 
-        # 映射 person.curr_poi 回 SafeGraph ID
-        poi_id = place_id_to_safegraph.get(person.curr_poi, person.curr_poi)
-        hour_stayed = person.hour_stayed
 
-        # Get dwell time CDF for the current POI
-        dwell_times, dwell_time_cdf = pois.get_dwell_time_cdf(poi_id)
-
-        # Find the probability of leaving based on the dwell time
-        index = next((i for i, dt in enumerate(dwell_times) if dt >= hour_stayed), len(dwell_time_cdf) - 1)
-        leave_prob = dwell_time_cdf[index]
-
-        # Adjust leave probability based on occupancy
-        expected_capacity = pois.capacities[min(current_time.day, 29)].get(poi_id, 1)
-        current_occupancy = pois.occupancies.get(poi_id, 0)
-        if expected_capacity > 0:
-            occupancy_ratio = current_occupancy / expected_capacity
-        else:
-            occupancy_ratio = 0
-
-        # Modify leave probability with occupancy
-        if occupancy_ratio > 1:  # Over-occupied POI
-            leave_prob *= occupancy_ratio
-        else:  # Under-occupied POI
-            leave_prob *= 0.5
-
-        # Clamp leave probability between 0 and 1
-        leave_prob = min(max(leave_prob, 0), 1)
-
-        # Decide if the person leaves
-        if random.random() < leave_prob:
-            person.leave()
-            pois.occupancies[poi_id] = max(0, current_occupancy - 1)  # Decrement occupancy
-        else:
-            person.stay()
-
-def parse_json_field(field):
-    if not field:
-        return {}
+def _safe_int(x, default=0) -> int:
     try:
-        return json.loads(field)
-    except json.JSONDecodeError:
-        return {}
+        return int(x)
+    except Exception:
+        return default
 
-def compute_dwell_time_cdf(bucketed_dwell_times):
+
+def _normalize(v: List[float]) -> List[float]:
+    s = float(sum(v))
+    if s <= 0:
+        return [0.0 for _ in v]
+    return [x / s for x in v]
+
+
+def _ceil_hours_from_minutes(m: Optional[float]) -> int:
+    if m is None:
+        return 1
+    try:
+        m = float(m)
+    except Exception:
+        return 1
+    return max(1, int(math.ceil(m / 60.0)))
+
+
+def _haversine_km(a: Tuple[float, float], b: Tuple[float, float]) -> float:
     """
-    Compute the cumulative distribution function (CDF) of dwell times,
-    grouping 0-60 minutes together and considering 120-240 minutes as covering 120-180 and 180-240.
+    Compute great-circle distance in kilometers between two (lat, lon) pairs.
     """
-    # Map dwell time buckets to representative times in hours
-    dwell_time_buckets = {
-        '<60': 1,          # Group 0-60 minutes together as 1 hour
-        '61-120': 1.5,     # Average of 61-120 minutes = 1.5 hours
-        '121-240': 3,      # Average of 120-180 and 180-240 minutes = 3 hours
-        '>240': 5          # Assume 5 hours for >240 minutes
-    }
-    
-    # Combine counts for 0-60 minutes
-    count_under_60 = (
-        bucketed_dwell_times.get('<5', 0) +
-        bucketed_dwell_times.get('5-10', 0) +
-        bucketed_dwell_times.get('11-20', 0) +
-        bucketed_dwell_times.get('21-60', 0)
-    )
-    
-    # Combine counts for 121-240 minutes
-    count_121_240 = bucketed_dwell_times.get('121-240', 0)
-    # If there were separate counts for 120-180 and 180-240, sum them up
-    # Since in your data it's '121-240', we use that directly
+    lat1, lon1 = map(math.radians, a)
+    lat2, lon2 = map(math.radians, b)
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(h))
 
-    # Build the adjusted bucketed dwell times
-    adjusted_bucketed_dwell_times = {
-        '<60': count_under_60,
-        '61-120': bucketed_dwell_times.get('61-120', 0),
-        '121-240': count_121_240,
-        '>240': bucketed_dwell_times.get('>240', 0)
-    }
-    
-    # Total count of visits
-    total_visits = sum(adjusted_bucketed_dwell_times.values())
-    
-    # Compute probabilities
-    dwell_times = []
-    probabilities = []
-    for bucket in ['<60', '61-120', '121-240', '>240']:
-        count = adjusted_bucketed_dwell_times.get(bucket, 0)
-        probability = count / total_visits if total_visits > 0 else 0
-        dwell_time = dwell_time_buckets.get(bucket, 5)  # Default to 5 hours if not specified
-        dwell_times.append(dwell_time)
-        probabilities.append(probability)
-    
-    # Compute CDF
-    cdf = []
-    cumulative_prob = 0
-    for prob in probabilities:
-        cumulative_prob += prob
-        cdf.append(cumulative_prob)
-    
-    return dwell_times, cdf
 
-def preprocess_csv(papdata, file_path):
-    pois_dict = {}
- 
-    placekeys = [ pap['placekey'] for pap in list(papdata['places'].values()) ]
-    
-    with pd.read_csv(file_path, chunksize=10000, usecols=['placekey', 'popularity_by_hour', 'bucketed_dwell_times', 'related_same_month_brand', 'location_name', 'raw_visit_counts', 'raw_visitor_counts', 'visits_by_day', 'related_same_day_brand']) as reader:
-        for chunk in reader:
-            for _, row in chunk[chunk['placekey'].isin(placekeys)].iterrows():
-                poi_id = None
+def _sample_truncated_normal_float(mean: float,
+                                   std: float,
+                                   lower: float,
+                                   upper: float,
+                                   rng: np.random.Generator) -> float:
+    """
+    Sample a float from a normal distribution and clamp to [lower, upper].
+    """
+    raw = rng.normal(loc=mean, scale=max(0.001, std))
+    return float(max(lower, min(upper, raw)))
 
-                for id, desc in papdata['places'].items():
-                    if desc['placekey'] == row['placekey']:
-                        poi_id = id
-                        break
-                
-                if poi_id is None:
+
+def _sample_truncated_normal(mean: float,
+                             std: float,
+                             lower: int,
+                             upper: int,
+                             rng: np.random.Generator) -> int:
+    """
+    Draw a single integer sample from a normal distribution but clamp to [lower, upper].
+    This keeps times realistic (e.g., within a 0-23 hour window).
+    """
+    raw = rng.normal(loc=mean, scale=max(0.1, std))
+    return int(max(lower, min(upper, round(raw))))
+
+
+def _resolve_cbg_info_path() -> Optional[str]:
+    """
+    Locate the cbg_info.yaml file. We check a few likely locations so running
+    from different working directories still succeeds.
+    """
+    import os
+
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "../data/cbg_info.yaml"),
+        os.path.join(here, "data/cbg_info.yaml"),
+        os.path.join(here, "../output/cbg_info.yaml"),
+        os.path.join(here, "output/cbg_info.yaml"),
+        os.path.join(os.getcwd(), "data/cbg_info.yaml"),
+        os.path.join(os.getcwd(), "output/cbg_info.yaml"),
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return os.path.abspath(cand)
+    return None
+
+
+def _load_cbg_centroids() -> Dict[str, Tuple[float, float]]:
+    """
+    Load CBG centroid locations from YAML once and cache them.
+    Expected formats (any of these will be handled):
+      - dict: {cbg: {"lat": .., "lon": ..}}
+      - list of dicts: each with GEOID10/cbg and lat/lon style fields
+    """
+    global _CBG_CENTROIDS
+    if _CBG_CENTROIDS is not None:
+        return _CBG_CENTROIDS
+
+    path = _resolve_cbg_info_path()
+    centroids: Dict[str, Tuple[float, float]] = {}
+    if path is None:
+        _CBG_CENTROIDS = centroids
+        return centroids
+
+    try:
+        with open(path, "r") as f:
+            raw = yaml.safe_load(f)
+    except Exception:
+        _CBG_CENTROIDS = centroids
+        return centroids
+
+    def _extract_entry(entry: Any):
+        cbg = entry.get("GEOID10") or entry.get("cbg") or entry.get("cbg_id")
+        lat = entry.get("lat") or entry.get("latitude") or entry.get("centroid_lat")
+        lon = entry.get("lon") or entry.get("lng") or entry.get("longitude") or entry.get("centroid_lon")
+        if cbg is None or lat is None or lon is None:
+            return
+        try:
+            centroids[str(cbg)] = (float(lat), float(lon))
+        except Exception:
+            return
+
+    if isinstance(raw, dict):
+        for cbg, entry in raw.items():
+            if isinstance(entry, dict):
+                lat = entry.get("lat") or entry.get("latitude") or entry.get("centroid_lat")
+                lon = entry.get("lon") or entry.get("lng") or entry.get("longitude") or entry.get("centroid_lon")
+                if lat is None or lon is None:
                     continue
+                try:
+                    centroids[str(cbg)] = (float(lat), float(lon))
+                except Exception:
+                    continue
+    elif isinstance(raw, list):
+        for entry in raw:
+            if isinstance(entry, dict):
+                _extract_entry(entry)
 
-                '''''
-				# 解析 popularity_by_day
-				popularity_by_day = parse_json_field(row.get('popularity_by_day', '{}'))
+    _CBG_CENTROIDS = centroids
+    return centroids
 
-				'''''
 
-				# 其他现有逻辑保持不变
-                sum_popularity = sum(parse_json_field(row['popularity_by_hour'])) 
-                probability_by_hour = [p / sum_popularity for p in parse_json_field(row['popularity_by_hour'])] if sum_popularity > 0 else []
+def _bucket_places_by_category(places: Dict[str, Any],
+                               stats: Dict[str, Dict[str, Any]]) -> Dict[str, List[str]]:
+    """
+    Group places (only ones that have patterns stats) into rough activity buckets.
+    We use lightweight string checks on top_category to keep the logic data-driven.
+    """
+    buckets = {"school": [], "college": [], "work": []}
+    for pid, meta in places.items():
+        # Only keep places that actually have usage stats loaded
+        if pid not in stats:
+            continue
+        cat = (meta.get("top_category") or "").lower()
+        if "college" in cat or "university" in cat:
+            buckets["college"].append(pid)
+            continue
+        if "school" in cat:
+            buckets["school"].append(pid)
+            continue
+        if "day care" in cat or "child care" in cat:
+            buckets["school"].append(pid)
+            continue
+        # Everything else is a potential workplace
+        buckets["work"].append(pid)
 
-                bucketed_dwell_times = parse_json_field(row['bucketed_dwell_times'])
-                dwell_times, dwell_time_cdf = compute_dwell_time_cdf(bucketed_dwell_times)
+    # Provide broad fallbacks so we always have something to choose from
+    if not buckets["work"]:
+        buckets["work"] = list(stats.keys())
+    if not buckets["school"]:
+        buckets["school"] = buckets["work"][:]
+    if not buckets["college"]:
+        buckets["college"] = buckets["school"][:]
+    return buckets
 
-                related_same_month_brand = parse_json_field(row['related_same_month_brand'])
-                sum_tendency = sum(related_same_month_brand.values())
-                after_tendency = {poi_id : related_same_month_brand.get(pois_dict.get(poi_id, {}).get('location_name', ''), 0) / sum_tendency  if sum_tendency > 0 else 0 for poi_id in pois_dict.keys()}
 
-				# 更新 pois_dict，添加 popularity_by_day
-                pois_dict[poi_id] = {
-                    'location_name': row['location_name'],
-                    'raw_visit_counts': int(row['raw_visit_counts']),
-                    'raw_visitor_counts': int(row['raw_visitor_counts']),
-                    'visits_by_day': parse_json_field(row['visits_by_day']),
-                    'probability_by_hour': probability_by_hour,
-                    'dwell_times': dwell_times,
-                    'dwell_time_cdf': dwell_time_cdf,
-                    'related_same_day_brand': parse_json_field(row['related_same_day_brand']),
-                    'after_tendency': after_tendency,
-                    #'popularity_by_day': popularity_by_day
-                } 
+def _choose_anchor_place_random(preferred: str,
+                                buckets: Dict[str, List[str]],
+                                stats: Dict[str, Dict[str, Any]],
+                                rng: np.random.Generator) -> Optional[str]:
+    """
+    Legacy random selection within preferred bucket; falls back to other buckets or all stats.
+    """
+    options = buckets.get(preferred, [])
+    if not options:
+        if preferred == "college":
+            options = buckets.get("school", []) or buckets.get("work", [])
+        elif preferred == "school":
+            options = buckets.get("work", [])
+    if not options:
+        options = list(stats.keys())
+    if not options:
+        return None
+    return str(rng.choice(options))
 
-    return pois_dict
 
-def gen_patterns(papdata, start_time: datetime, duration=168):
-    # Constants
-    alpha = 0.16557695315916893
-    occupancy_weight = 1.5711109677337263
-    tendency_decay = 0.3460627088857086
-    home_cbgs = {home_id: home_info.get("cbg") for home_id, home_info in papdata.get("homes", {}).items()}
+def _choose_anchor_place(age: int,
+                         home_cbg: Optional[str],
+                         buckets: Dict[str, List[str]],
+                         stats: Dict[str, Dict[str, Any]],
+                         places: Dict[str, Any],
+                         cbg_centroids: Dict[str, Tuple[float, float]],
+                         rng: np.random.Generator) -> Optional[str]:
+    """
+    Pick a "primary" place for the person using age (which bucket) and home location:
+      - 5-17  -> school
+      - 18-22 -> college (falls back to school/work)
+      - 23-65 -> work
+      - others stay home (no anchor)
+    If we know the home CBG centroid, we sample a target commute distance (normal, truncated)
+    and choose the place whose distance to home is closest to that target. If we cannot compute
+    distance, we fall back to the legacy random bucket choice.
+    """
+    if age is None:
+        return None
+    if age < 5:
+        return None  # too young; keep them home
+    if age < 18:
+        preferred = "school"
+        dist_params = (2.0, 1.0, 0.2, 10.0)
+    elif age < 23:
+        preferred = "college"
+        dist_params = (5.0, 3.0, 0.5, 30.0)
+    elif age <= 65:
+        preferred = "work"
+        dist_params = (15.0, 8.0, 0.5, 60.0)
+    else:
+        return None  # retirement age; leave flexible
 
-    people = {}
-    for person_id, person_info in papdata["people"].items():
-        person = Person()
-        person.id = int(person_id)  # 设置 ID
-        person.sex = person_info.get("sex")
-        person.age = person_info.get("age")
-        person.home = person_info.get("home")
-        person.home_cbg = home_cbgs.get(str(person.home))
-        assign_primary_activity(person)
-        people[int(person_id)] = person
-        
-    print('processing csv...')
-    pois_dict = preprocess_csv(papdata, './data/patterns.csv')
-    
-    print('processing pois...')
-    pois = POIs(pois_dict, alpha=alpha, occupancy_weight=occupancy_weight, tendency_decay=tendency_decay)
-    
-    print('processing sg to place data...')
-    safegraph_to_place_id = {}
-    place_id_to_safegraph = {}
-    place_ids = sorted(papdata["places"].keys(), key=int)
-    safegraph_ids = sorted(pois_dict.keys())
-    if len(place_ids) != len(safegraph_ids):
-        print("Warning: Number of places in papdata does not match number of POIs in pois_dict")
-    for place_id, sg_id in zip(place_ids, safegraph_ids):
-        safegraph_to_place_id[sg_id] = place_id
-        place_id_to_safegraph[place_id] = sg_id
-        
-    output = {}
-        
-    for hour in range(duration):
-        current_time = start_time + timedelta(hours=hour)
-        current_weekday = current_time.weekday()
-        print(f"Simulating hour {hour + 1}/{duration} at {current_time}...")
-        leave_poi(people, current_time, pois, place_id_to_safegraph)
-        apply_primary_activities(people, current_time)
-        enter_poi(people, pois, current_time, len(people),safegraph_to_place_id, place_id_to_safegraph)
+    # Fallback if we cannot locate the home centroid
+    if not cbg_centroids or not home_cbg or home_cbg not in cbg_centroids:
+        return _choose_anchor_place_random(preferred, buckets, stats, rng)
 
-        # 记录当前时间点的状态（以分钟为键）
-        current_minutes = (hour + 1) * 60  # hour=0 → 60 分钟, hour=1 → 120 分钟, ...
-        updated_homes = {}
-        updated_places = {}
-        for person in people.values():
-            if person.at_home():
-                home_id = str(person.home)
-                if home_id not in updated_homes:
-                    updated_homes[home_id] = []
-                updated_homes[home_id].append(str(person.id))
-            else:
-                poi_id = person.curr_poi
-                if poi_id:
-                    poi_id = str(poi_id)
-                    if poi_id not in updated_places:
-                        updated_places[poi_id] = []
-                    updated_places[poi_id].append(str(person.id))
+    home_coord = cbg_centroids.get(home_cbg)
+    if home_coord is None:
+        return _choose_anchor_place_random(preferred, buckets, stats, rng)
 
-        output[str(current_minutes)] = {
-            "homes": updated_homes,
-            "places": updated_places
+    # Choose the applicable bucket (with the same fallbacks as the legacy logic)
+    candidate_ids = buckets.get(preferred, [])
+    if not candidate_ids:
+        if preferred == "college":
+            candidate_ids = buckets.get("school", []) or buckets.get("work", [])
+        elif preferred == "school":
+            candidate_ids = buckets.get("work", [])
+    if not candidate_ids:
+        return _choose_anchor_place_random(preferred, buckets, stats, rng)
+
+    candidates: List[Tuple[str, float]] = []
+    for pid in candidate_ids:
+        meta = places.get(pid, {})
+        lat = meta.get("latitude")
+        lon = meta.get("longitude")
+        try:
+            lat_f = float(lat)
+            lon_f = float(lon)
+        except Exception:
+            continue
+        dist_km = _haversine_km(home_coord, (lat_f, lon_f))
+        candidates.append((pid, dist_km))
+
+    if not candidates:
+        return _choose_anchor_place_random(preferred, buckets, stats, rng)
+
+    # Sample a target commute distance and pick the closest candidate
+    mean, std, dmin, dmax = dist_params
+    target = _sample_truncated_normal_float(mean, std, dmin, dmax, rng)
+    # Find candidates closest to target; break ties randomly
+    min_diff = None
+    closest: List[str] = []
+    for pid, dist in candidates:
+        diff = abs(dist - target)
+        if min_diff is None or diff < min_diff - 1e-6:
+            min_diff = diff
+            closest = [pid]
+        elif min_diff is not None and abs(diff - min_diff) <= 1e-6:
+            closest.append(pid)
+
+    if closest:
+        return str(rng.choice(closest))
+    return _choose_anchor_place_random(preferred, buckets, stats, rng)
+
+
+def _build_anchor_schedule(people: Dict[str, Any],
+                           homes: Dict[str, Any],
+                           places: Dict[str, Any],
+                           stats: Dict[str, Dict[str, Any]],
+                           cbg_centroids: Dict[str, Tuple[float, float]],
+                           rng: np.random.Generator) -> Dict[int, Dict[str, Any]]:
+    """
+    Build a weekly "anchor" schedule for people:
+      - assigns each person a primary place (school/college/work) based on age
+        and home CBG location (commute distance model)
+      - generates weekday blocks with normal-distributed start/duration
+      - weekends are intentionally skipped to avoid school/work on Sat/Sun
+    Returned structure:
+      anchor[person_id] = {
+        "place_id": str,
+        "by_weekday": {weekday_index: {"start_hour": int, "duration": int}}
+      }
+    """
+    buckets = _bucket_places_by_category(places, stats)
+    anchor: Dict[int, Dict[str, Any]] = {}
+    weekday_indices = list(range(5))  # Monday-Friday only
+
+    for sid, info in people.items():
+        pid = int(sid)
+        age = _safe_int(info.get("age"), default=0)
+        home_id = info.get("home")
+        home_desc = homes.get(str(home_id)) if home_id is not None else None
+        home_cbg = None
+        if home_desc:
+            cbg_val = home_desc.get("cbg")
+            if cbg_val is not None:
+                home_cbg = str(cbg_val)
+
+        place_id = _choose_anchor_place(
+            age,
+            home_cbg,
+            buckets,
+            stats,
+            places,
+            cbg_centroids,
+            rng,
+        )
+        if place_id is None:
+            continue
+
+        # Age-tailored timing parameters
+        if age < 18:
+            start_mean, start_std = 8.0, 0.8     # kids start ~8am
+            dur_mean, dur_std = 6.5, 1.0         # school day ~6-7h
+        elif age < 23:
+            start_mean, start_std = 9.5, 1.2     # college mornings start later
+            dur_mean, dur_std = 5.0, 1.5         # shorter, more varied days
+        else:
+            start_mean, start_std = 8.5, 1.0     # workday starts around 8:30
+            dur_mean, dur_std = 8.5, 1.5         # 8-9h workdays
+
+        by_weekday: Dict[int, Dict[str, int]] = {}
+        # Optionally make college schedules a little sparser (e.g., 4 days / week)
+        active_days = weekday_indices[:]
+        if 18 <= age < 23:
+            # randomly drop one weekday to mimic no-class day
+            drop_one = rng.choice(active_days)
+            active_days = [d for d in active_days if d != drop_one]
+
+        for wd in active_days:
+            start_hour = _sample_truncated_normal(start_mean, start_std, 6, 20, rng)
+            duration = _sample_truncated_normal(dur_mean, dur_std, 3, 12, rng)
+            by_weekday[wd] = {"start_hour": start_hour, "duration": duration}
+
+        anchor[pid] = {"place_id": place_id, "by_weekday": by_weekday}
+    return anchor
+
+
+def _sample_dwell_hours(median_hours: int, rng: np.random.Generator) -> int:
+    """
+    Sample a dwell time using a normal distribution centered on the median.
+    The std dev scales with the median to add realistic spread but is clamped
+    so we stay in [1, 12] hours.
+    """
+    std = max(0.5, median_hours * 0.35)
+    sampled = _sample_truncated_normal(median_hours, std, 1, 12, rng)
+    return int(max(1, sampled))
+
+
+def _resolve_patterns_csv_path() -> str:
+    """
+    Locate the patterns.csv file. We try a few common project-relative paths so
+    running this module directly (python server/patterns.py) does not fail.
+    """
+    import os
+
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "../data/patterns.csv"),  # project-root data folder
+        os.path.join(here, "data/patterns.csv"),     # sibling data folder
+        os.path.join(os.getcwd(), "data/patterns.csv"),  # cwd-based
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            return os.path.abspath(cand)
+    raise FileNotFoundError("Could not find data/patterns.csv; checked: {}".format(candidates))
+
+
+def load_patterns_csv(patterns_csv_path: str,
+                      placekey_to_place_id: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+    """
+    Load only rows whose placekey exists in papdata['places'], and build:
+      stats[place_id] = {
+        'median_dwell_hours': int,
+        'hour_weights': [24 floats sum=1.0],
+        'day_weights':  {weekday: float, ...} normalized to sum=1.0 across 7 days
+      }
+    Uses chunked pandas to handle full files.
+    """
+    stats: Dict[str, Dict[str, Any]] = {}
+    if not placekey_to_place_id:
+        return stats
+
+    needed = set(placekey_to_place_id.keys())
+
+    usecols = [
+        "placekey",
+        "median_dwell",
+        "popularity_by_hour",
+        "popularity_by_day",
+    ]
+
+    for chunk in pd.read_csv(patterns_csv_path, usecols=usecols, chunksize=20000):
+        # Filter to places we actually have in papdata
+        subset = chunk[chunk["placekey"].isin(needed)]
+        for _, row in subset.iterrows():
+            placekey = row["placekey"]
+            place_id = placekey_to_place_id.get(placekey)
+            if place_id is None:
+                continue
+
+            median_dwell_minutes = row.get("median_dwell", None)
+            # sometimes is NaN; replace with 60 minutes
+            if pd.isna(median_dwell_minutes):
+                median_dwell_minutes = 60
+
+            hour_list = _parse_hour_list(row.get("popularity_by_hour", "[]"))
+            day_map = _parse_day_map(row.get("popularity_by_day", "{}"))
+
+            hour_weights = _normalize([float(x) for x in hour_list])
+            day_counts = [float(day_map.get(k, 0)) for k in WEEKDAYS]
+            day_weights_list = _normalize(day_counts)
+            day_weights = {k: day_weights_list[i] for i, k in enumerate(WEEKDAYS)}
+
+            stats[place_id] = {
+                "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
+                "hour_weights": hour_weights,
+                "day_weights": day_weights,
+            }
+    return stats
+
+
+def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int) -> Tuple[List[str], List[float]]:
+    """
+    Build a global "intensity" distribution across places for a given weekday+hour.
+    Returns (place_ids, weights) where weights are unnormalized intensities.
+    """
+    ids: List[str] = []
+    wts: List[float] = []
+    for pid, s in stats.items():
+        hw = s["hour_weights"]
+        dw = s["day_weights"].get(weekday, 0.0)
+        hour_w = hw[hour] if 0 <= hour < 24 else 0.0
+        weight = hour_w * dw
+        if weight > 0:
+            ids.append(pid)
+            wts.append(weight)
+    return ids, wts
+
+
+def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168) -> Dict[str, Any]:
+    """
+    Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
+      - popularity_by_hour (time-of-day)
+      - popularity_by_day (day-of-week)
+      - median_dwell (stay length in hours = ceil(median_dwell/60))
+    Added behavior:
+      - age-based "anchor" schedules that send kids to school, young adults to college,
+        and adults to work on weekdays with normal-distributed start/duration windows.
+      - weekends skip these anchors to keep people home or on leisure trips instead.
+    Inputs:
+      papdata: dict with keys 'people', 'homes', 'places' (already loaded)
+      start_time: simulation start timestamp (datetime)
+      duration: hours to simulate
+    Output format matches the original: a dict keyed by cumulative minutes,
+    each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
+    """
+    # Map placekey -> pap place_id
+    placekey_to_place_id: Dict[str, str] = {}
+    for pid, desc in papdata.get("places", {}).items():
+        pk = desc.get("placekey")
+        if pk:
+            placekey_to_place_id[pk] = pid
+
+    # Load CSV stats only for the known places
+    csv_path = _resolve_patterns_csv_path()
+    stats = load_patterns_csv(csv_path, placekey_to_place_id)
+
+    rng = np.random.default_rng(seed=42)  # deterministic but easy to change/remove
+
+    # Build age-aware anchor schedules (school/college/work) so people have
+    # predictable daytime locations on weekdays. This is computed once so the
+    # simulation uses the same "primary" place throughout a run.
+    anchor_schedule = _build_anchor_schedule(
+        papdata.get("people", {}),
+        papdata.get("homes", {}),
+        papdata.get("places", {}),
+        stats,
+        _load_cbg_centroids(),
+        rng,
+    )
+
+    # People state
+    # At any time, a person is either at home or at a place with a 'leave_time' scheduled.
+    # (We don't model inter-POI hopping here; that could be added by sampling again after leaving.)
+    people_state: Dict[int, Dict[str, Any]] = {}
+    for sid, info in papdata.get("people", {}).items():
+        pid = int(sid)
+        people_state[pid] = {
+            "home": str(info.get("home")),
+            "at_place": False,
+            "place_id": None,
+            "leave_time_idx": None,  # hour index when they will leave the place
         }
-        
+
+    output: Dict[str, Any] = {}
+
+    for hour_idx in range(duration):
+        current_time = start_time + timedelta(hours=hour_idx)
+        weekday = WEEKDAYS[current_time.weekday()]
+        hour_of_day = current_time.hour
+        day_offset = hour_idx - hour_of_day  # start index of the current calendar day
+
+        # People who need to leave now
+        for pid, st in people_state.items():
+            if st["at_place"] and st["leave_time_idx"] == hour_idx:
+                # send home
+                st["at_place"] = False
+                st["place_id"] = None
+                st["leave_time_idx"] = None
+
+        # Build intensity distribution for this hour
+        place_ids, raw_weights = _overall_busy_factor(stats, weekday, hour_of_day)
+        if raw_weights:
+            place_probs = np.array(raw_weights, dtype=float)
+            place_probs = place_probs / place_probs.sum()
+            overall_busy = float(place_probs.max())  # quick proxy for busyness
+        else:
+            place_probs = np.array([])
+            overall_busy = 0.0
+
+        # Move-from-home probability scales with overall busyness (capped)
+        # You can tune the multiplier for more/less mobility.
+        base_move_prob = min(0.35, 0.15 + 0.85 * overall_busy)
+
+        # Decide moves for each person at home
+        for pid, st in people_state.items():
+            if st["at_place"]:
+                continue  # already out
+
+            # Check if this hour sits inside the person's weekday anchor window
+            in_anchor_window = False
+            anchor_info = anchor_schedule.get(pid)
+            if anchor_info:
+                plan = anchor_info["by_weekday"].get(current_time.weekday())
+                if plan:
+                    start_hour = plan["start_hour"]
+                    end_hour = min(24, start_hour + plan["duration"])
+                    planned_start_idx = day_offset + start_hour
+                    planned_end_idx = min(duration, day_offset + end_hour)
+                    if planned_start_idx <= hour_idx < planned_end_idx:
+                        in_anchor_window = True
+                        # Force them to their primary place and set the leave time
+                        st["at_place"] = True
+                        st["place_id"] = anchor_info["place_id"]
+                        st["leave_time_idx"] = planned_end_idx
+                    elif st["place_id"] == anchor_info["place_id"] and hour_idx >= planned_end_idx:
+                        # If somehow lingering past schedule, mark for immediate return
+                        st["leave_time_idx"] = hour_idx
+
+            if st["at_place"]:
+                continue  # anchored for this block
+
+            if in_anchor_window:
+                continue  # should already be moved above
+
+            if len(place_ids) == 0:
+                continue  # nothing open/busy for this hour
+
+            if rng.random() < base_move_prob:
+                # pick a destination from the busy distribution
+                choice_idx = int(rng.choice(len(place_ids), p=place_probs))
+                dest_place_id = place_ids[choice_idx]
+
+                # dwell time from median_dwell using a normal distribution
+                median_hours = stats[dest_place_id]["median_dwell_hours"]
+                dwell_hours = _sample_dwell_hours(median_hours, rng)
+
+                st["at_place"] = True
+                st["place_id"] = dest_place_id
+                st["leave_time_idx"] = min(duration, hour_idx + dwell_hours)
+
+        # Snapshot at the end of this hour
+        homes_map: Dict[str, List[str]] = {}
+        places_map: Dict[str, List[str]] = {}
+        for pid, st in people_state.items():
+            if st["at_place"] and st["place_id"] is not None:
+                places_map.setdefault(str(st["place_id"]), []).append(str(pid))
+            else:
+                homes_map.setdefault(str(st["home"]), []).append(str(pid))
+
+        current_minutes = (hour_idx + 1) * 60
+        output[str(current_minutes)] = {"homes": homes_map, "places": places_map}
+
     return output
+
+
+if __name__ == "__main__":
+    # Example manual run when used as a script
+    with open("./output/papdata.json", "r") as f:
+        pap = json.load(f)
+        
+    patterns = gen_patterns(pap, datetime.now(), 168)
     
-if __name__ == '__main__':
-    try:
-        papdata = {}
-        with open('output/papdata.json', 'r') as f:
-            papdata = json.load(f)
-        
-        patterns = gen_patterns(papdata, datetime.now(), 168)
-        with open('output/patterns.json', 'w') as f:
-            json.dump(patterns, f, indent=4)
-    except:
-        print('ERROR: Could not read papdata.json or generated patterns')
-        
+    with open("patterns_out.json", "w") as f:
+        json.dump(patterns, f, indent=2)
+    
+    print("Exported patterns_out.json")
