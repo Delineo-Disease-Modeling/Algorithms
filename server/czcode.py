@@ -33,7 +33,16 @@ class Config:
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
-        patterns_csv = os.environ.get("PATTERNS_CSV", r"./data/patterns.csv")
+        patterns_csv = os.environ.get("PATTERNS_CSV")
+        if not patterns_csv:
+            dew_path = os.path.join(os.getcwd(), "data/dew")
+            dew_path_upper = os.path.join(os.getcwd(), "data/DEW")
+            if os.path.exists(dew_path):
+                patterns_csv = dew_path
+            elif os.path.exists(dew_path_upper):
+                patterns_csv = dew_path_upper
+            else:
+                patterns_csv = r"./data/patterns.csv"
         poi_csv = os.environ.get("POI_CSV", r"./data/2021_05_05_03_core_poi.csv")
         self.paths = {
             "shapefiles_dir": r"./data/shapefiles/",

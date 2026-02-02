@@ -20,10 +20,20 @@ def _parse_hour_list(val) -> List[int]:
     if isinstance(val, list):
         arr = val
     else:
-        try:
-            arr = ast.literal_eval(val)
-        except Exception:
-            arr = []
+        arr = val
+        # Handle nested-encoded strings like "\"[1,2,...]\""
+        for _ in range(2):
+            if isinstance(arr, str):
+                try:
+                    arr = ast.literal_eval(arr)
+                except Exception:
+                    try:
+                        arr = json.loads(arr)
+                    except Exception:
+                        arr = []
+                        break
+            else:
+                break
     if not isinstance(arr, list) or len(arr) != 24:
         return [0] * 24
     # ensure ints
@@ -37,13 +47,22 @@ def _parse_day_map(val) -> Dict[str, int]:
     if isinstance(val, dict):
         d = val
     else:
-        try:
-            d = json.loads(val)
-        except Exception:
-            try:
-                d = ast.literal_eval(val)
-            except Exception:
-                d = {}
+        d = val
+        # Handle nested-encoded strings like "\"{...}\""
+        for _ in range(2):
+            if isinstance(d, str):
+                try:
+                    d = json.loads(d)
+                except Exception:
+                    try:
+                        d = ast.literal_eval(d)
+                    except Exception:
+                        d = {}
+                        break
+            else:
+                break
+        if not isinstance(d, dict):
+            d = {}
     out = {k: int(v) for k, v in d.items() if k in WEEKDAYS}
     # ensure all keys exist
     for k in WEEKDAYS:
@@ -438,6 +457,62 @@ def _resolve_patterns_csv_path() -> str:
     raise FileNotFoundError("Could not find data/patterns.csv; checked: {}".format(candidates))
 
 
+def _iter_patterns_paths(path: str) -> List[str]:
+    import os
+    import glob
+
+    if os.path.isdir(path):
+        candidates: List[str] = []
+        for ext in ("*.csv", "*.csv.gz", "*.gz"):
+            candidates.extend(glob.glob(os.path.join(path, ext)))
+        return sorted(set(candidates))
+    if any(ch in path for ch in ("*", "?", "[")):
+        matches = glob.glob(path)
+        if matches:
+            return sorted(set(matches))
+    return [path]
+
+
+def _resolve_patterns_csv_paths() -> List[str]:
+    """
+    Locate patterns data. Supports a single file, directory, or glob.
+    Priority:
+      1) PATTERNS_CSV env var (file/dir/glob)
+      2) data/dew (if present)
+      3) data/patterns.csv (legacy)
+    """
+    import os
+
+    env_path = os.environ.get("PATTERNS_CSV")
+    if env_path:
+        if os.path.exists(env_path) or any(ch in env_path for ch in ("*", "?", "[")):
+            paths = _iter_patterns_paths(env_path)
+            if paths:
+                return paths
+        raise FileNotFoundError(f"PATTERNS_CSV was set but not found: {env_path}")
+
+    here = os.path.dirname(__file__)
+    candidates = [
+        os.path.join(here, "../data/dew"),
+        os.path.join(here, "data/dew"),
+        os.path.join(os.getcwd(), "data/dew"),
+        os.path.join(here, "../data/DEW"),
+        os.path.join(here, "data/DEW"),
+        os.path.join(os.getcwd(), "data/DEW"),
+        os.path.join(here, "../data/patterns.csv"),
+        os.path.join(here, "data/patterns.csv"),
+        os.path.join(os.getcwd(), "data/patterns.csv"),
+    ]
+    for cand in candidates:
+        if os.path.exists(cand):
+            paths = _iter_patterns_paths(cand)
+            if paths:
+                return paths
+    raise FileNotFoundError(
+        "Could not find patterns data; checked: {}".format(candidates)
+    )
+
+
 def _resolve_csv_usecols(csv_path: str,
                          desired: List[str]) -> Tuple[List[str], Dict[str, str]]:
     """
@@ -454,7 +529,7 @@ def _resolve_csv_usecols(csv_path: str,
     return usecols, rename_map
 
 
-def load_patterns_csv(patterns_csv_path: str,
+def load_patterns_csv(patterns_csv_path: Any,
                       placekey_to_place_id: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
     """
     Load only rows whose placekey exists in papdata['places'], and build:
@@ -471,42 +546,51 @@ def load_patterns_csv(patterns_csv_path: str,
 
     needed = set(placekey_to_place_id.keys())
 
+    paths = (
+        list(patterns_csv_path)
+        if isinstance(patterns_csv_path, (list, tuple))
+        else _iter_patterns_paths(patterns_csv_path)
+    )
+    if not paths:
+        return stats
+
     desired_cols = [
         "placekey",
         "median_dwell",
         "popularity_by_hour",
         "popularity_by_day",
     ]
-    usecols, rename_map = _resolve_csv_usecols(patterns_csv_path, desired_cols)
 
-    for chunk in pd.read_csv(patterns_csv_path, usecols=usecols, chunksize=20000):
-        chunk = chunk.rename(columns=rename_map)
-        # Filter to places we actually have in papdata
-        subset = chunk[chunk["placekey"].isin(needed)]
-        for _, row in subset.iterrows():
-            placekey = row["placekey"]
-            place_id = placekey_to_place_id.get(placekey)
-            if place_id is None:
-                continue
+    for path in paths:
+        usecols, rename_map = _resolve_csv_usecols(path, desired_cols)
+        for chunk in pd.read_csv(path, usecols=usecols, chunksize=20000):
+            chunk = chunk.rename(columns=rename_map)
+            # Filter to places we actually have in papdata
+            subset = chunk[chunk["placekey"].isin(needed)]
+            for _, row in subset.iterrows():
+                placekey = row["placekey"]
+                place_id = placekey_to_place_id.get(placekey)
+                if place_id is None:
+                    continue
 
-            median_dwell_minutes = row.get("median_dwell", None)
-            # sometimes is NaN; replace with 60 minutes
-            if pd.isna(median_dwell_minutes):
-                median_dwell_minutes = 60
+                median_dwell_minutes = row.get("median_dwell", None)
+                # sometimes is NaN; replace with 60 minutes
+                if pd.isna(median_dwell_minutes):
+                    median_dwell_minutes = 60
 
-            hour_list = _parse_hour_list(row.get("popularity_by_hour", "[]"))
-            day_map = _parse_day_map(row.get("popularity_by_day", "{}"))
+                hour_list = _parse_hour_list(row.get("popularity_by_hour", "[]"))
+                day_map = _parse_day_map(row.get("popularity_by_day", "{}"))
 
-            hour_weights = _normalize([float(x) for x in hour_list])
-            day_counts = [float(day_map.get(k, 0)) for k in WEEKDAYS]
-            day_weights_list = _normalize(day_counts)
-            day_weights = {k: day_weights_list[i] for i, k in enumerate(WEEKDAYS)}
+                hour_weights = _normalize([float(x) for x in hour_list])
+                day_counts = [float(day_map.get(k, 0)) for k in WEEKDAYS]
+                day_weights_list = _normalize(day_counts)
+                day_weights = {k: day_weights_list[i] for i, k in enumerate(WEEKDAYS)}
 
-            stats[place_id] = {
-                "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
-                "hour_weights": hour_weights,
-                "day_weights": day_weights,
-            }
+                stats[place_id] = {
+                    "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
+                    "hour_weights": hour_weights,
+                    "day_weights": day_weights,
+                }
     return stats
 
 
@@ -553,8 +637,8 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             placekey_to_place_id[pk] = pid
 
     # Load CSV stats only for the known places
-    csv_path = _resolve_patterns_csv_path()
-    stats = load_patterns_csv(csv_path, placekey_to_place_id)
+    csv_paths = _resolve_patterns_csv_paths()
+    stats = load_patterns_csv(csv_paths, placekey_to_place_id)
 
     rng = np.random.default_rng(seed=42)  # deterministic but easy to change/remove
 

@@ -621,16 +621,30 @@ def convert_data(df, cz_data):
     cbgs = list(cz_data.keys())
     cbg_set = set(cbgs)
     placekeys = []
-    patterns_csv = os.environ.get("PATTERNS_CSV", r'./data/patterns.csv')
-    patterns_usecols, patterns_rename = _resolve_csv_usecols(patterns_csv, ['poi_cbg', 'placekey'])
-    with pd.read_csv(patterns_csv, chunksize=10000, usecols=patterns_usecols) as reader:
-        for chunk in reader:
-            chunk = chunk.rename(columns=patterns_rename)
-            chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
-            chunk = chunk.dropna(subset=['poi_cbg'])
-            chunk['poi_cbg'] = chunk['poi_cbg'].astype('int64').astype('string')
-            matched = chunk[chunk['poi_cbg'].isin(cbg_set)]
-            placekeys.extend(matched['placekey'].dropna().astype(str).tolist())
+    patterns_csv = os.environ.get("PATTERNS_CSV")
+    if not patterns_csv:
+        dew_path = os.path.join(os.getcwd(), "data/dew")
+        dew_path_upper = os.path.join(os.getcwd(), "data/DEW")
+        if os.path.exists(dew_path):
+            patterns_csv = dew_path
+        elif os.path.exists(dew_path_upper):
+            patterns_csv = dew_path_upper
+        else:
+            patterns_csv = r'./data/patterns.csv'
+    patterns_paths = _iter_patterns_paths(patterns_csv)
+    if not patterns_paths:
+        raise FileNotFoundError(f"No patterns files found at {patterns_csv}")
+    for patterns_path in patterns_paths:
+        patterns_usecols, patterns_rename = _resolve_csv_usecols(patterns_path, ['poi_cbg', 'placekey'])
+        with pd.read_csv(patterns_path, chunksize=10000, usecols=patterns_usecols) as reader:
+            for chunk in reader:
+                chunk = chunk.rename(columns=patterns_rename)
+                chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
+                chunk = chunk.dropna(subset=['poi_cbg'])
+                chunk['poi_cbg'] = chunk['poi_cbg'].astype('int64').astype('string')
+                matched = chunk[chunk['poi_cbg'].isin(cbg_set)]
+                if not matched.empty:
+                    placekeys.extend(matched['placekey'].dropna().astype(str).tolist())
 
     placekeys = sorted(set(placekeys))
 
@@ -664,6 +678,19 @@ def _resolve_csv_usecols(csv_path: str, desired: List[str]):
     usecols = [lower_map[name.lower()] for name in desired]
     rename_map = {lower_map[name.lower()]: name for name in desired}
     return usecols, rename_map
+
+def _iter_patterns_paths(path: str):
+    import glob
+    if os.path.isdir(path):
+        candidates = []
+        for ext in ("*.csv", "*.csv.gz", "*.gz"):
+            candidates.extend(glob.glob(os.path.join(path, ext)))
+        return sorted(set(candidates))
+    if any(ch in path for ch in ("*", "?", "[")):
+        matches = glob.glob(path)
+        if matches:
+            return sorted(set(matches))
+    return [path]
 
 def gen_pop(cz_data):
     # Create data puller
