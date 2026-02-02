@@ -420,6 +420,12 @@ def _resolve_patterns_csv_path() -> str:
     """
     import os
 
+    env_path = os.environ.get("PATTERNS_CSV")
+    if env_path:
+        if os.path.exists(env_path):
+            return os.path.abspath(env_path)
+        raise FileNotFoundError(f"PATTERNS_CSV was set but not found: {env_path}")
+
     here = os.path.dirname(__file__)
     candidates = [
         os.path.join(here, "../data/patterns.csv"),  # project-root data folder
@@ -430,6 +436,22 @@ def _resolve_patterns_csv_path() -> str:
         if os.path.exists(cand):
             return os.path.abspath(cand)
     raise FileNotFoundError("Could not find data/patterns.csv; checked: {}".format(candidates))
+
+
+def _resolve_csv_usecols(csv_path: str,
+                         desired: List[str]) -> Tuple[List[str], Dict[str, str]]:
+    """
+    Resolve desired column names against the CSV header, case-insensitively.
+    Returns (usecols, rename_map) for pandas read_csv.
+    """
+    header = pd.read_csv(csv_path, nrows=0)
+    lower_map = {c.lower(): c for c in header.columns}
+    missing = [name for name in desired if name.lower() not in lower_map]
+    if missing:
+        raise ValueError(f"Missing required columns in {csv_path}: {missing}")
+    usecols = [lower_map[name.lower()] for name in desired]
+    rename_map = {lower_map[name.lower()]: name for name in desired}
+    return usecols, rename_map
 
 
 def load_patterns_csv(patterns_csv_path: str,
@@ -449,14 +471,16 @@ def load_patterns_csv(patterns_csv_path: str,
 
     needed = set(placekey_to_place_id.keys())
 
-    usecols = [
+    desired_cols = [
         "placekey",
         "median_dwell",
         "popularity_by_hour",
         "popularity_by_day",
     ]
+    usecols, rename_map = _resolve_csv_usecols(patterns_csv_path, desired_cols)
 
     for chunk in pd.read_csv(patterns_csv_path, usecols=usecols, chunksize=20000):
+        chunk = chunk.rename(columns=rename_map)
         # Filter to places we actually have in papdata
         subset = chunk[chunk["placekey"].isin(needed)]
         for _, row in subset.iterrows():

@@ -1,5 +1,6 @@
 import json
 import random
+import os
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Optional, Union
@@ -618,19 +619,28 @@ def convert_data(df, cz_data):
     
     # Get places from CG dataset
     cbgs = list(cz_data.keys())
+    cbg_set = set(cbgs)
     placekeys = []
-    with pd.read_csv(r'./data/patterns.csv', chunksize=10000, usecols=['poi_cbg', 'placekey']) as reader:
+    patterns_csv = os.environ.get("PATTERNS_CSV", r'./data/patterns.csv')
+    patterns_usecols, patterns_rename = _resolve_csv_usecols(patterns_csv, ['poi_cbg', 'placekey'])
+    with pd.read_csv(patterns_csv, chunksize=10000, usecols=patterns_usecols) as reader:
         for chunk in reader:
-            for i, row in chunk.iterrows():
-                try:
-                    cbg = str(int(float(row['poi_cbg'])))
-                    if cbg in cbgs:
-                        placekeys.append(row['placekey'])
-                except:
-                    continue
+            chunk = chunk.rename(columns=patterns_rename)
+            chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
+            chunk = chunk.dropna(subset=['poi_cbg'])
+            chunk['poi_cbg'] = chunk['poi_cbg'].astype('int64').astype('string')
+            matched = chunk[chunk['poi_cbg'].isin(cbg_set)]
+            placekeys.extend(matched['placekey'].dropna().astype(str).tolist())
 
-    places = pd.read_csv(r'./data/2021_05_05_03_core_poi.csv', usecols=['placekey', 'location_name', 'top_category', 'latitude', 'longitude', 'postal_code'])
-    places = places[places['placekey'].isin(placekeys)].reset_index()
+    placekeys = sorted(set(placekeys))
+
+    poi_csv = os.environ.get("POI_CSV", r'./data/2021_05_05_03_core_poi.csv')
+    poi_usecols, poi_rename = _resolve_csv_usecols(
+        poi_csv,
+        ['placekey', 'location_name', 'top_category', 'latitude', 'longitude', 'postal_code'],
+    )
+    places = pd.read_csv(poi_csv, usecols=poi_usecols).rename(columns=poi_rename)
+    places = places[places['placekey'].isin(placekeys)].drop_duplicates(subset=['placekey']).reset_index(drop=True)
 
     for i, row in places.iterrows():
         output['places'][str(i)] = {
@@ -644,6 +654,16 @@ def convert_data(df, cz_data):
         }
     
     return output
+
+def _resolve_csv_usecols(csv_path: str, desired: List[str]):
+    header = pd.read_csv(csv_path, nrows=0)
+    lower_map = {c.lower(): c for c in header.columns}
+    missing = [name for name in desired if name.lower() not in lower_map]
+    if missing:
+        raise ValueError(f"Missing required columns in {csv_path}: {missing}")
+    usecols = [lower_map[name.lower()] for name in desired]
+    rename_map = {lower_map[name.lower()]: name for name in desired}
+    return usecols, rename_map
 
 def gen_pop(cz_data):
     # Create data puller

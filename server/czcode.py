@@ -1,4 +1,5 @@
 import os
+import glob
 import json
 import logging
 import folium
@@ -32,10 +33,12 @@ class Config:
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
+        patterns_csv = os.environ.get("PATTERNS_CSV", r"./data/patterns.csv")
+        poi_csv = os.environ.get("POI_CSV", r"./data/2021_05_05_03_core_poi.csv")
         self.paths = {
             "shapefiles_dir": r"./data/shapefiles/",
-            "patterns_csv": r"./data/patterns.csv",
-            "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
+            "patterns_csv": patterns_csv,
+            "poi_csv": poi_csv,
             # "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
             "population_csv": r"./data/cbg_b01.csv",
             "output_yaml": "cbg_info.yaml",
@@ -79,6 +82,19 @@ class DataLoader:
         self.config = config
         self.logger = logger
 
+    def _iter_patterns_paths(self):
+        patterns_path = self.config.paths["patterns_csv"]
+        if os.path.isdir(patterns_path):
+            candidates = []
+            for ext in ("*.csv", "*.csv.gz", "*.gz"):
+                candidates.extend(glob.glob(os.path.join(patterns_path, ext)))
+            return sorted(set(candidates))
+        if any(ch in patterns_path for ch in ("*", "?", "[")):
+            matches = glob.glob(patterns_path)
+            if matches:
+                return sorted(matches)
+        return [patterns_path]
+
     def get_zip_codes(self):
         """
         Retrieve zip codes for specified states.
@@ -101,23 +117,39 @@ class DataLoader:
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
             df = pd.read_csv(full_filename)
+            df.columns = [c.lower() for c in df.columns]
             # Ensure that CBGs are read as strings
             df['poi_cbg'] = df['poi_cbg'].astype('string')
         except (FileNotFoundError, pd.errors.EmptyDataError):
             self.logger.info(f"File {full_filename} not found. Processing raw data.")
             datalist = []
-            with pd.read_csv(self.config.paths["patterns_csv"], chunksize=10000) as reader:
-                for chunk in reader:
-                    datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
+            patterns_paths = self._iter_patterns_paths()
+            if not patterns_paths:
+                raise FileNotFoundError(f"No patterns files found at {self.config.paths['patterns_csv']}")
+            for patterns_path in patterns_paths:
+                self.logger.info(f"Scanning {patterns_path}")
+                with pd.read_csv(patterns_path, chunksize=10000) as reader:
+                    for chunk in reader:
+                        chunk.columns = [c.lower() for c in chunk.columns]
+                        if 'postal_code' not in chunk.columns:
+                            self.logger.warning(f"Missing postal_code in {patterns_path}; skipping chunk")
+                            continue
+                        zip_series = pd.to_numeric(chunk['postal_code'], errors='coerce')
+                        filtered = chunk[zip_series.isin(zip_codes)]
+                        if not filtered.empty:
+                            datalist.append(filtered)
+            if not datalist:
+                self.logger.warning("No rows matched the provided zip codes")
+                return pd.DataFrame()
             df = pd.concat(datalist, axis=0)
             
             # Convert poi_cbg to proper strings
-            pd.to_numeric(df['poi_cbg'], errors='coerce')
+            df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
             df.dropna(subset=['poi_cbg'], inplace=True)
             # Now force truncation
             df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
             
-            df.to_csv(full_filename)
+            df.to_csv(full_filename, index=False)
             self.logger.info(f"Saved processed data to {full_filename}")
         return df
 
@@ -244,7 +276,14 @@ class GraphBuilder:
             
             dst_cbg = row['poi_cbg']
             
-            visitor_dict = json.loads(row['visitor_daytime_cbgs'])
+            try:
+                visitor_dict = json.loads(row['visitor_daytime_cbgs'])
+                if isinstance(visitor_dict, str):
+                    visitor_dict = json.loads(visitor_dict)
+            except Exception:
+                continue
+            if not isinstance(visitor_dict, dict):
+                continue
             for visitor_cbg, count in visitor_dict.items():
                 try:
                     src_cbg = str(int(float(visitor_cbg)))
