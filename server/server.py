@@ -1,4 +1,5 @@
-from flask import Flask, request, jsonify, make_response, after_this_request
+from flask import Flask, request, jsonify, make_response
+import threading
 from flask_cors import CORS, cross_origin
 from czcode import generate_cz
 from popgen import gen_pop
@@ -69,12 +70,11 @@ def create_cz(data):
   
   czone_id = resp.json()['data']['id']
   
-  @after_this_request
-  def call_after_request(response):
-    start_date = data['start_date'].replace("Z", "+00:00")
-    start_date = datetime.fromisoformat(start_date)
-    gen_and_upload_data(geoids, czone_id, start_date, data.get('length', 168))
-    return response
+  start_date = data['start_date'].replace("Z", "+00:00")
+  start_date = datetime.fromisoformat(start_date)
+  
+  thread = threading.Thread(target=gen_and_upload_data, args=(geoids, czone_id, start_date, data.get('length', 168)))
+  thread.start()
     
   return json.dumps({
     'id': czone_id,

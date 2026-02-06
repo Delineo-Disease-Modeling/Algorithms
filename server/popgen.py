@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import requests
 from czcode import generate_cz
 
-
 class CensusDataPuller:
     def __init__(self, api_key: str = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"):
         """
