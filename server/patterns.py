@@ -145,7 +145,8 @@ def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: i
     return ids, wts
 
 
-def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168) -> Dict[str, Any]:
+def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168, 
+                 patterns_file: str = None, patterns_folder: str = None) -> Dict[str, Any]:
     """
     Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
       - popularity_by_hour (time-of-day)
@@ -155,6 +156,8 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
       papdata: dict with keys 'people', 'homes', 'places' (already loaded)
       start_time: simulation start timestamp (datetime)
       duration: hours to simulate
+      patterns_file: Optional specific patterns CSV file to use
+      patterns_folder: Optional folder containing monthly pattern files (will auto-select based on start_time)
     Output format matches the original: a dict keyed by cumulative minutes,
     each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
     """
@@ -165,9 +168,22 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         if pk:
             placekey_to_place_id[pk] = pid
 
-    # Load CSV stats only for the known places
+    # Determine which patterns CSV to use
     import os
-    csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    if patterns_file:
+        csv_path = patterns_file
+    elif patterns_folder:
+        # Auto-select based on start_time month
+        from monthly_patterns import get_file_for_month
+        month_key = start_time.strftime('%Y-%m')
+        csv_path = get_file_for_month(patterns_folder, month_key)
+        if not csv_path:
+            # Fallback to default
+            csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    else:
+        csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    
+    # Load CSV stats only for the known places
     stats = load_patterns_csv(csv_path, placekey_to_place_id)
 
     # People state

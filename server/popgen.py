@@ -629,7 +629,8 @@ def convert_data(df, cz_data):
                 except:
                     continue
 
-    places = pd.read_csv(r'./data/2021_05_05_03_core_poi.csv', usecols=['placekey', 'location_name', 'top_category', 'latitude', 'longitude', 'postal_code'])
+    # Read POI data directly from patterns.csv (contains all needed fields)
+    places = pd.read_csv(r'./data/patterns.csv', usecols=['placekey', 'location_name', 'top_category', 'latitude', 'longitude', 'postal_code'])
     places = places[places['placekey'].isin(placekeys)].reset_index()
 
     for i, row in places.iterrows():
