@@ -696,7 +696,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         month: Optional month key (YYYY-MM) when using patterns_folder
     
     Returns:
-        Tuple of (geoids dict, map object)
+        Tuple of (geoids dict, map object, gdf GeoDataFrame)
     """
     config = Config(cbg, min_pop, patterns_file=patterns_file, 
                     patterns_folder=patterns_folder, month=month)
@@ -732,7 +732,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
 
     logger.info("Processing complete")
         
-    return geoids, visualizer.map_obj
+    return geoids, visualizer.map_obj, gdf
 
 if __name__ == "__main__":
     try:

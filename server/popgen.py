@@ -2,10 +2,17 @@ import json
 import random
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Optional, Union
+from typing import List, Dict, Any, Optional, Union, Tuple
 from dataclasses import dataclass
 import requests
 from czcode import generate_cz
+
+try:
+    from residential import ResidentialCache
+    RESIDENTIAL_AVAILABLE = True
+except ImportError:
+    RESIDENTIAL_AVAILABLE = False
+    ResidentialCache = None
 
 
 class CensusDataPuller:
@@ -285,15 +292,32 @@ class Person:
     gender: str  # 'M' or 'F'
     age: int
     relate_head: int  # 1: head, 2: partner, 3: child, 4: relative, 5: non-relative
+    household_lat: Optional[float] = None  # Latitude of household
+    household_lon: Optional[float] = None  # Longitude of household
 
 class SyntheticPopulationGenerator:
-    def __init__(self, census_data: dict, cz_data: dict ):
-        """Initialize with input census data."""
+    def __init__(self, census_data: dict, cz_data: dict, gdf=None):
+        """Initialize with input census data.
+        
+        Args:
+            census_data: Census demographic data by county
+            cz_data: Convenience zone data (CBG -> population mapping)
+            gdf: Optional GeoDataFrame with CBG geometries for residential sampling
+        """
         self.census_data = census_data
         self.cz_data = cz_data
+        self.gdf = gdf
         # Set up counters for IDs
         self.next_person_id = 1
         self.next_household_id = 1
+        
+        # Initialize residential cache for sampling home locations
+        self.residential_cache = None
+        if RESIDENTIAL_AVAILABLE and gdf is not None:
+            self.residential_cache = ResidentialCache(gdf, use_buildings=True)
+            print("Residential cache initialized - homes will be placed in residential areas")
+        else:
+            print("Residential sampling unavailable - homes will not have coordinates")
         
         # Age distributions (simplified)
         # TODO: Create a function to derive age distributions from additional census data
@@ -399,6 +423,11 @@ class SyntheticPopulationGenerator:
         household_composition = self.determine_household_composition(county_code)
         household_members = []
         
+        # Sample household location from residential areas
+        household_lat, household_lon = None, None
+        if self.residential_cache is not None:
+            household_lat, household_lon = self.residential_cache.sample_home_location(cbg)
+        
         # Create household head
         head_gender = household_composition['head_gender']
         head = Person(
@@ -408,7 +437,9 @@ class SyntheticPopulationGenerator:
             cbg=cbg,
             gender=head_gender,
             age=self.generate_age('householder'),
-            relate_head=1  # 1: head
+            relate_head=1,  # 1: head
+            household_lat=household_lat,
+            household_lon=household_lon
         )
         self.next_person_id += 1
         household_members.append(head)
@@ -428,7 +459,9 @@ class SyntheticPopulationGenerator:
                 cbg=cbg,
                 gender=partner_gender,
                 age=self.generate_age('spouse_partner'),
-                relate_head=2  # 2: partner
+                relate_head=2,  # 2: partner
+                household_lat=household_lat,
+                household_lon=household_lon
             )
             self.next_person_id += 1
             household_members.append(partner)
@@ -444,7 +477,9 @@ class SyntheticPopulationGenerator:
                 cbg=cbg,
                 gender=child_gender,
                 age=self.generate_age('child'),
-                relate_head=3  # 3: child
+                relate_head=3,  # 3: child
+                household_lat=household_lat,
+                household_lon=household_lon
             )
             self.next_person_id += 1
             household_members.append(child)
@@ -472,7 +507,9 @@ class SyntheticPopulationGenerator:
                 cbg=cbg,
                 gender=relative_gender,
                 age=self.generate_age(relative_type),
-                relate_head=4  # 4: relative
+                relate_head=4,  # 4: relative
+                household_lat=household_lat,
+                household_lon=household_lon
             )
             self.next_person_id += 1
             household_members.append(relative)
@@ -489,7 +526,9 @@ class SyntheticPopulationGenerator:
                 cbg=cbg,
                 gender=nonrel_gender,
                 age=self.generate_age(nonrel_type),
-                relate_head=5  # 5: non-relative
+                relate_head=5,  # 5: non-relative
+                household_lat=household_lat,
+                household_lon=household_lon
             )
             self.next_person_id += 1
             household_members.append(nonrel)
@@ -609,10 +648,15 @@ def convert_data(df, cz_data):
         
         # Add or update household in homes dictionary
         if household_id not in output["homes"]:
-            output["homes"][household_id] = {
+            home_data = {
                 "cbg": row['cbg'],
                 "members": 1
             }
+            # Add coordinates if available
+            if pd.notna(row.get('household_lat')) and pd.notna(row.get('household_lon')):
+                home_data["latitude"] = row['household_lat']
+                home_data["longitude"] = row['household_lon']
+            output["homes"][household_id] = home_data
         else:
             output["homes"][household_id]["members"] += 1
     
@@ -646,7 +690,17 @@ def convert_data(df, cz_data):
     
     return output
 
-def gen_pop(cz_data):
+def gen_pop(cz_data, gdf=None):
+    """
+    Generate synthetic population for a convenience zone.
+    
+    Args:
+        cz_data: Dictionary mapping CBG IDs to population counts
+        gdf: Optional GeoDataFrame with CBG geometries for residential area sampling
+    
+    Returns:
+        Dictionary with people, homes, and places data (papdata format)
+    """
     # Create data puller
     datapuller = CensusDataPuller()
         
@@ -662,8 +716,8 @@ def gen_pop(cz_data):
 
     census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS, None)
     
-    # Create population generator
-    generator = SyntheticPopulationGenerator(census_data, cz_data)
+    # Create population generator with optional gdf for residential sampling
+    generator = SyntheticPopulationGenerator(census_data, cz_data, gdf=gdf)
     
     # Generate population for all counties (with a small sample factor)
     population = generator.generate_full_population(sample_factor=0.01)

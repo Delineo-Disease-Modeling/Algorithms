@@ -22,16 +22,32 @@ CORS(app,
   supports_credentials=True
 )
 
-def gen_and_upload_data(geoids, czone_id, start_date, length, report):
-  """Generate papdata and patterns, upload to DB API."""
+def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None):
+  """Generate papdata and patterns, upload to DB API.
+  
+  Args:
+    geoids: Dictionary of CBG -> population
+    czone_id: Convenience zone ID
+    start_date: Start datetime for patterns
+    length: Length in hours
+    report: RunReport for logging
+    gdf: Optional GeoDataFrame with CBG geometries for residential sampling
+  """
   try:
     # Generate People, Households, Places data
     report.info('Generating synthetic population (papdata)...')
-    papdata = gen_pop(geoids)
+    papdata = gen_pop(geoids, gdf=gdf)
     people_count = len(papdata.get('people', {}))
     homes_count = len(papdata.get('homes', {}))
     places_count = len(papdata.get('places', {}))
-    report.info(f'Generated papdata: {people_count} people, {homes_count} homes, {places_count} places')
+    
+    # Check if homes have coordinates
+    homes_with_coords = sum(1 for h in papdata.get('homes', {}).values() 
+                           if h.get('latitude') is not None)
+    if homes_with_coords > 0:
+      report.info(f'Generated papdata: {people_count} people, {homes_count} homes ({homes_with_coords} with coordinates), {places_count} places')
+    else:
+      report.info(f'Generated papdata: {people_count} people, {homes_count} homes, {places_count} places')
     
     # Generate movement patterns
     report.info('Generating movement patterns...')
@@ -65,7 +81,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report):
 def cluster_cbgs(cbg, min_pop):
   """Just cluster CBGs without generating patterns. Returns geoids dict and map center."""
   from czcode import generate_cz
-  geoids, map_obj = generate_cz(cbg, min_pop)
+  geoids, map_obj, _gdf = generate_cz(cbg, min_pop)
   return geoids, [map_obj.location[0], map_obj.location[1]]
 
 
@@ -75,7 +91,7 @@ def create_cz(data, report):
   report.info(f"Generating CZ from CBG: {data['cbg']}")
   report.info(f"Target minimum population: {data['min_pop']}")
   
-  geoids, map = generate_cz(data['cbg'], data['min_pop'])
+  geoids, map, gdf = generate_cz(data['cbg'], data['min_pop'])
 
   cluster = list(geoids.keys())
   size = sum(list(geoids.values()))
@@ -106,7 +122,7 @@ def create_cz(data, report):
   def call_after_request(response):
     start_date = data['start_date'].replace("Z", "+00:00")
     start_date = datetime.fromisoformat(start_date)
-    gen_and_upload_data(geoids, czone_id, start_date, data.get('length', 168), report)
+    gen_and_upload_data(geoids, czone_id, start_date, data.get('length', 168), report, gdf=gdf)
     return response
     
   return json.dumps({
