@@ -9,6 +9,7 @@ import json
 import geopandas as gpd
 import pandas as pd
 from functools import lru_cache
+from shapely.geometry import Point
 
 
 # State FIPS code to abbreviation mapping
@@ -189,6 +190,70 @@ def get_cbg_geojson(cbg_list, include_neighbors=False):
         'type': 'FeatureCollection',
         'features': features
     }
+
+
+def get_cbg_at_point(latitude, longitude, state_fips=None):
+    """
+    Resolve a latitude/longitude to a containing CBG GEOID.
+
+    Args:
+        latitude: point latitude
+        longitude: point longitude
+        state_fips: optional two-digit state FIPS hint to limit search
+
+    Returns:
+        Dict with GEOID and population, or None if no containing CBG is found.
+    """
+    try:
+        lat = float(latitude)
+        lng = float(longitude)
+    except (TypeError, ValueError):
+        return None
+
+    if state_fips is not None:
+        candidate_states = [str(state_fips).zfill(2)]
+    else:
+        candidate_states = list(STATE_FIPS_TO_ABBR.keys())
+
+    point = Point(lng, lat)
+    pop_data = load_population_data()
+
+    for cur_state in candidate_states:
+        gdf = load_state_shapefile(cur_state)
+        if gdf is None:
+            continue
+
+        if 'GEOID' not in gdf.columns:
+            if 'CensusBlockGroup' in gdf.columns:
+                gdf = gdf.copy()
+                gdf['GEOID'] = gdf['CensusBlockGroup']
+            else:
+                continue
+
+        if gdf.crs and gdf.crs != "EPSG:4326":
+            gdf = gdf.to_crs("EPSG:4326")
+
+        # Use spatial index when available so we only test nearby polygons.
+        try:
+            candidate_idx = list(gdf.sindex.intersection((lng, lat, lng, lat)))
+            if not candidate_idx:
+                continue
+            candidates = gdf.iloc[candidate_idx]
+        except Exception:
+            candidates = gdf
+
+        matches = candidates[candidates.geometry.intersects(point)]
+        if matches.empty:
+            continue
+
+        match = matches.iloc[0]
+        geoid = str(match['GEOID']).zfill(12)
+        return {
+            'GEOID': geoid,
+            'population': int(pop_data.get(geoid, 0)),
+        }
+
+    return None
 
 
 # Original script for generating individual state shapefiles
