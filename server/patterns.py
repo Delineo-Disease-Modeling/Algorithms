@@ -131,7 +131,17 @@ def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: i
     """
     Build a global "intensity" distribution across places for a given weekday+hour.
     Returns (place_ids, weights) where weights are unnormalized intensities.
+    
+    Note: We zero out weights for late night hours (10pm-6am) to prevent unrealistic
+    movement to places that should be closed, even if SafeGraph shows small non-zero
+    values (which can happen from ATM visits, parking lot lingering, etc.)
     """
+    # Suppress movement to places during night hours (10pm-6am)
+    # This ensures no new trips start after 10pm, combined with the closing time
+    # logic that sends everyone home at 10pm.
+    if hour >= 22 or hour < 6:
+        return [], []
+    
     ids: List[str] = []
     wts: List[float] = []
     for pid, s in stats.items():
@@ -145,7 +155,8 @@ def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: i
     return ids, wts
 
 
-def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168) -> Dict[str, Any]:
+def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168, 
+                 patterns_file: str = None, patterns_folder: str = None) -> Dict[str, Any]:
     """
     Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
       - popularity_by_hour (time-of-day)
@@ -155,6 +166,8 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
       papdata: dict with keys 'people', 'homes', 'places' (already loaded)
       start_time: simulation start timestamp (datetime)
       duration: hours to simulate
+      patterns_file: Optional specific patterns CSV file to use
+      patterns_folder: Optional folder containing monthly pattern files (will auto-select based on start_time)
     Output format matches the original: a dict keyed by cumulative minutes,
     each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
     """
@@ -165,9 +178,22 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         if pk:
             placekey_to_place_id[pk] = pid
 
-    # Load CSV stats only for the known places
+    # Determine which patterns CSV to use
     import os
-    csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    if patterns_file:
+        csv_path = patterns_file
+    elif patterns_folder:
+        # Auto-select based on start_time month
+        from monthly_patterns import get_file_for_month
+        month_key = start_time.strftime('%Y-%m')
+        csv_path = get_file_for_month(patterns_folder, month_key)
+        if not csv_path:
+            # Fallback to default
+            csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    else:
+        csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+    
+    # Load CSV stats only for the known places
     stats = load_patterns_csv(csv_path, placekey_to_place_id)
 
     # People state
@@ -192,7 +218,16 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         weekday = WEEKDAYS[current_time.weekday()]
         hour_of_day = current_time.hour
 
-        # People who need to leave now
+        # "Closing time" - send everyone home at 10pm (hour 22)
+        # This handles cases where dwell time would keep someone past closing
+        if hour_of_day == 22:
+            for pid, st in people_state.items():
+                if st["at_place"]:
+                    st["at_place"] = False
+                    st["place_id"] = None
+                    st["leave_time_idx"] = None
+
+        # People who need to leave now (normal dwell time expiry)
         for pid, st in people_state.items():
             if st["at_place"] and st["leave_time_idx"] == hour_idx:
                 # send home
@@ -212,7 +247,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
 
         # Move-from-home probability scales with overall busyness (capped)
         # You can tune the multiplier for more/less mobility.
-        base_move_prob = min(0.35, 0.15 + 0.85 * overall_busy)
+        base_move_prob = min(0.35, 0.85 * overall_busy)
 
         # Decide moves for each person at home
         for pid, st in people_state.items():
@@ -247,6 +282,9 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             else:
                 homes_map.setdefault(str(st["home"]), []).append(str(pid))
 
+        # Key is minutes from start_time. hour_idx=0 processes the first hour (0:00-1:00),
+        # so we store at minute 60 to represent the state AT hour 1.
+        # Frontend interprets key "60" as "1 hour from start" which is correct.
         current_minutes = (hour_idx + 1) * 60
         output[str(current_minutes)] = {"homes": homes_map, "places": places_map}
 

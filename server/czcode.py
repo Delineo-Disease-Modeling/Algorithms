@@ -16,7 +16,17 @@ from math import sin, cos, atan2, pi, sqrt
 # Configuration Module
 # ----------------------------
 class Config:
-    def __init__(self, cbg, min_pop):
+    def __init__(self, cbg, min_pop, patterns_file=None, patterns_folder=None, month=None):
+        """
+        Initialize configuration for CZ generation.
+        
+        Args:
+            cbg: Census Block Group GEOID
+            min_pop: Minimum population for the cluster
+            patterns_file: Optional specific patterns CSV file path
+            patterns_folder: Optional folder containing monthly pattern files (e.g., 2019-01-OK.csv)
+            month: Optional month key (YYYY-MM) when using patterns_folder
+        """
         zip_codes = []
         with open(r'./data/zip_to_cbg.json', 'r') as f:
             zip_to_cbg = json.load(f)
@@ -32,10 +42,15 @@ class Config:
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
+        
+        # Determine which patterns file to use
+        self.patterns_folder = patterns_folder
+        self.month = month
+        resolved_patterns_csv = self._resolve_patterns_file(patterns_file, patterns_folder, month)
+        
         self.paths = {
             "shapefiles_dir": r"./data/shapefiles/",
-            "patterns_csv": r"./data/patterns.csv",
-            "poi_csv": r"./data/2021_05_05_03_core_poi.csv",
+            "patterns_csv": resolved_patterns_csv,
             # "population_csv": r"./data/safegraph_cbg_population_estimate.csv",
             "population_csv": r"./data/cbg_b01.csv",
             "output_yaml": "cbg_info.yaml",
@@ -54,6 +69,38 @@ class Config:
         }
         self.black_cbgs = [ ]
         os.makedirs(self.output_dir, exist_ok=True)
+    
+    def _resolve_patterns_file(self, patterns_file, patterns_folder, month):
+        """
+        Resolve which patterns CSV file to use.
+        
+        Priority:
+        1. Explicit patterns_file if provided
+        2. Monthly file from patterns_folder if folder and month provided
+        3. Default ./data/patterns.csv
+        """
+        # Priority 1: Explicit file
+        if patterns_file:
+            if os.path.exists(patterns_file):
+                return patterns_file
+            raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
+        
+        # Priority 2: Monthly file from folder
+        if patterns_folder and month:
+            from monthly_patterns import get_file_for_month
+            # Extract state from the first state in our states list
+            state = self.states[0] if self.states else None
+            monthly_file = get_file_for_month(patterns_folder, month, state)
+            if monthly_file:
+                return monthly_file
+            # Try without state filter
+            monthly_file = get_file_for_month(patterns_folder, month)
+            if monthly_file:
+                return monthly_file
+            raise FileNotFoundError(f"No patterns file found for month {month} in {patterns_folder}")
+        
+        # Priority 3: Default
+        return r"./data/patterns.csv"
 
 # ----------------------------
 # Logging Setup
@@ -95,20 +142,35 @@ class DataLoader:
     def load_safegraph_data(self, zip_codes):
         """
         Load SafeGraph patterns data, filtering by zip codes.
+        Uses month-aware caching when monthly patterns are configured.
         """
-        filename = f"{self.config.location_name}.csv"
+        # Include month in cache filename if using monthly patterns
+        if self.config.month:
+            filename = f"{self.config.location_name}_{self.config.month}.csv"
+        else:
+            filename = f"{self.config.location_name}.csv"
+        
         full_filename = os.path.join(self.config.output_dir, filename)
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
             df = pd.read_csv(full_filename)
+            required_cols = {'poi_cbg', 'visitor_daytime_cbgs'}
+            if not required_cols.issubset(df.columns):
+                missing = sorted(required_cols - set(df.columns))
+                raise ValueError(f"Cached file missing required columns: {missing}")
             # Ensure that CBGs are read as strings
             df['poi_cbg'] = df['poi_cbg'].astype('string')
-        except (FileNotFoundError, pd.errors.EmptyDataError):
-            self.logger.info(f"File {full_filename} not found. Processing raw data.")
+        except (FileNotFoundError, pd.errors.EmptyDataError, ValueError):
+            patterns_csv = self.config.paths["patterns_csv"]
+            self.logger.info(f"File {full_filename} not found. Processing raw data from {patterns_csv}")
             datalist = []
-            with pd.read_csv(self.config.paths["patterns_csv"], chunksize=10000) as reader:
+            with pd.read_csv(patterns_csv, chunksize=10000) as reader:
                 for chunk in reader:
-                    datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
+                    # Test fixtures may omit postal_code; in that case include all rows.
+                    if 'postal_code' in chunk.columns and zip_codes:
+                        datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
+                    else:
+                        datalist.append(chunk)
             df = pd.concat(datalist, axis=0)
             
             # Convert poi_cbg to proper strings
@@ -117,7 +179,7 @@ class DataLoader:
             # Now force truncation
             df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
             
-            df.to_csv(full_filename)
+            df.to_csv(full_filename, index=False)
             self.logger.info(f"Saved processed data to {full_filename}")
         return df
 
@@ -630,11 +692,27 @@ def main():
     logger.info("Processing complete")
     
 
-def generate_cz(cbg, min_pop):
-    config = Config(cbg, min_pop)
+def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None):
+    """
+    Generate a convenience zone cluster starting from a seed CBG.
+    
+    Args:
+        cbg: Seed Census Block Group GEOID
+        min_pop: Minimum population for the cluster
+        patterns_file: Optional specific patterns CSV file path
+        patterns_folder: Optional folder containing monthly pattern files
+        month: Optional month key (YYYY-MM) when using patterns_folder
+    
+    Returns:
+        Tuple of (geoids dict, map object, gdf GeoDataFrame)
+    """
+    config = Config(cbg, min_pop, patterns_file=patterns_file, 
+                    patterns_folder=patterns_folder, month=month)
 
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
+    if month:
+        logger.info(f"Using monthly patterns: {month} from {patterns_folder or 'default'}")
 
     # Data loading
     data_loader = DataLoader(config, logger)
@@ -662,7 +740,7 @@ def generate_cz(cbg, min_pop):
 
     logger.info("Processing complete")
         
-    return geoids, visualizer.map_obj
+    return geoids, visualizer.map_obj, gdf
 
 if __name__ == "__main__":
     try:
