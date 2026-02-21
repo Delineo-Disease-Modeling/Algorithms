@@ -18,7 +18,7 @@ from run_report import RunReport
 
 app = Flask(__name__)
 CORS(app,
-  origins=['http://localhost:5173', 'https://coviddev.isi.jhu.edu', 'http://coviddev.isi.jhu.edu', 'https://covidweb.isi.jhu.edu', 'http://covidweb.isi.jhu.edu'],
+  origins=['http://localhost:3000', 'http://localhost:5173', 'https://coviddev.isi.jhu.edu', 'http://coviddev.isi.jhu.edu', 'https://covidweb.isi.jhu.edu', 'http://covidweb.isi.jhu.edu', 'https://covidmod.isi.jhu.edu', 'http://covidweb.isi.jhu.edu'],
   methods=['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE'],
   allow_headers=['Content-Type', 'Authorization'],
   expose_headers=['Set-Cookie'],
@@ -105,7 +105,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     report.info(f'Generated {patterns_count} timestep patterns')
         
     report.info('Uploading data to DB API...')
-    resp = requests.post('http://localhost:1890/patterns', data={
+    resp = requests.post('http://localhost:3000/api/patterns', data={
       'czone_id': int(czone_id),
     }, files={
       'papdata': ('papdata.json', BytesIO(json.dumps(papdata).encode()), 'text/plain'),
@@ -175,7 +175,7 @@ def create_cz(data, report):
   report.info(f'Clustered {len(cluster)} CBGs with total population {size}')
   report.debug(f'Cluster CBGs: {cluster}')
     
-  resp = requests.post('http://localhost:1890/convenience-zones', json={
+  resp = requests.post('http://localhost:3000/api/convenience-zones', json={
     'name': data['name'],
     'description': data['description'],
     'latitude': map.location[0],
@@ -421,7 +421,7 @@ def route_finalize_cz():
     longitude = data.get('longitude', 0)
     
     # Create DB record
-    resp = requests.post('http://localhost:1890/convenience-zones', json={
+    resp = requests.post('http://localhost:3000/api/convenience-zones', json={
       'name': data.get('name', ''),
       'description': data.get('description', ''),
       'latitude': latitude,
