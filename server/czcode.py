@@ -1225,10 +1225,12 @@ class Clustering:
         Greedy clustering with CZI-aware utility.
 
         Utility per candidate:
-          alpha * CZI_after
-          + (1 - alpha) * progress_to_target
-          - overshoot_penalty * overshoot_penalty_term
+          CZI_after
           - distance_penalty_weight * normalized_seed_distance
+
+        Notes:
+          `alpha` and `overshoot_penalty` are retained in the signature for backward
+          compatibility, but no longer affect ranking.
         """
         self.logger.info(f"Starting greedy_czi_balanced algorithm with seed CBG {u0}")
         population = cbg_population(u0, self.config, self.logger)
@@ -1254,7 +1256,6 @@ class Clustering:
                 )
                 break
 
-            gap = max(1, min_pop - population)
             best = None
             candidate_details = []
 
@@ -1285,8 +1286,6 @@ class Clustering:
                 total_after = inside_after + boundary_after
                 czi_after = (inside_after / total_after) if total_after > 0 else 0.0
 
-                progress = min(cand_pop, gap) / gap
-                overshoot = max(0, cand_pop - gap) / gap
                 distance_penalty = 0.0
                 if seed_center and distance_scale_km > 0:
                     cand_center = cbg_centers.get(candidate)
@@ -1298,16 +1297,13 @@ class Clustering:
                         distance_penalty = dist_km / (dist_km + distance_scale_km)
 
                 score = (
-                    alpha * czi_after
-                    + (1 - alpha) * progress
-                    - overshoot_penalty * overshoot
+                    czi_after
                     - distance_penalty_weight * distance_penalty
                 )
 
                 candidate_tuple = (
                     score,
                     czi_after,
-                    progress,
                     -distance_penalty,
                     in_to_cluster,
                     candidate,
@@ -1322,13 +1318,11 @@ class Clustering:
                     'movement_to_cluster': float(in_to_cluster),
                     'movement_to_outside': float(out_to_outside),
                     'czi_after': float(czi_after),
-                    'progress': float(progress),
-                    'overshoot': float(overshoot),
                     'distance_penalty': float(distance_penalty),
                     'movement_inside_after': float(inside_after),
                     'movement_boundary_after': float(boundary_after),
                 })
-                if best is None or candidate_tuple[:5] > best[:5]:
+                if best is None or candidate_tuple[:4] > best[:4]:
                     best = candidate_tuple
 
             if best is None:
@@ -1337,7 +1331,7 @@ class Clustering:
                 )
                 break
 
-            _, czi_after, _, _, _, best_cbg, best_pop, inside_after, boundary_after = best
+            _, czi_after, _, _, best_cbg, best_pop, inside_after, boundary_after = best
             prev_cluster = list(cluster)
             prev_population = population
             cluster.append(best_cbg)

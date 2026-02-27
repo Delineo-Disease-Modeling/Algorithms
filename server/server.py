@@ -701,9 +701,7 @@ def _rank_frontier_candidates_for_cluster(
       if czi_params.get('distance_scale_km') is not None
       else DEFAULT_DISTANCE_SCALE_KM
     )
-    alpha = 0.75
-    overshoot_penalty = 0.25
-    gap = max(1, int(_safe_float(min_pop, current_population)) - int(current_population))
+    _ = min_pop  # Balanced CZI frontier scoring no longer uses target progress/overshoot terms.
 
     movement_stats = Helpers.calculate_movement_stats(graph, cluster_graph_ids)
     movement_in = float(movement_stats.get('in', 0))
@@ -739,8 +737,6 @@ def _rank_frontier_candidates_for_cluster(
       total_after = inside_after + boundary_after
       czi_after = (inside_after / total_after) if total_after > 0 else 0.0
 
-      progress = min(cand_pop, gap) / gap
-      overshoot = max(0, cand_pop - gap) / gap
       distance_penalty = 0.0
       if seed_center and distance_scale_km and distance_scale_km > 0:
         cand_center = cbg_centers.get(candidate) or cbg_centers.get(normalize_output_cbg(candidate))
@@ -752,9 +748,7 @@ def _rank_frontier_candidates_for_cluster(
           distance_penalty = dist_km / (dist_km + distance_scale_km)
 
       score = (
-        alpha * czi_after
-        + (1 - alpha) * progress
-        - overshoot_penalty * overshoot
+        czi_after
         - distance_penalty_weight * distance_penalty
       )
 
@@ -765,8 +759,6 @@ def _rank_frontier_candidates_for_cluster(
         'movement_to_cluster': float(in_to_cluster),
         'movement_to_outside': float(out_to_outside),
         'czi_after': float(czi_after),
-        'progress': float(progress),
-        'overshoot': float(overshoot),
         'distance_penalty': float(distance_penalty),
         'movement_inside_after': float(inside_after),
         'movement_boundary_after': float(boundary_after),
@@ -1345,6 +1337,7 @@ def route_cz_metrics():
   use_test_data = bool(request.json.get('use_test_data'))
   seed_cbg = request.json.get('seed_cbg')
   cbg_list = request.json.get('cbg_list', [])
+  start_date = request.json.get('start_date')
 
   if seed_cbg is None:
     return make_response(jsonify({'message': "Missing required field: 'seed_cbg'"}), 400)
@@ -1356,16 +1349,14 @@ def route_cz_metrics():
   if not seed_cbg:
     return make_response(jsonify({'message': "Invalid 'seed_cbg': expected exactly 12 digits"}), 400)
 
-  patterns_file = None
-  if use_test_data:
-    ok, missing, _headers = _validate_csv_columns(TEST_PATTERNS_FILE, TEST_CLUSTER_COLUMNS)
-    if not ok:
-      return make_response(jsonify({
-        'message': f"TEST data is missing required columns for clustering metrics: {', '.join(missing)}",
-        'required_columns': TEST_CLUSTER_COLUMNS,
-        'test_file': TEST_PATTERNS_FILE
-      }), 400)
-    patterns_file = TEST_PATTERNS_FILE
+  try:
+    patterns_file, patterns_source, patterns_month = _resolve_patterns_file_for_request(
+      seed_cbg,
+      start_date_raw=start_date,
+      use_test_data=use_test_data
+    )
+  except ValueError as e:
+    return make_response(jsonify({'message': str(e)}), 400)
 
   normalized_cbgs = []
   seen = set()
@@ -1407,6 +1398,10 @@ def route_cz_metrics():
       # Backward-compatible alias of CZI.
       'containment_ratio': float(movement_stats.get('ratio', 0)),
       'cbg_count': len(normalized_cbgs),
+      'patterns_file_used': patterns_file,
+      'patterns_source': patterns_source,
+      'patterns_month': patterns_month,
+      'use_test_data': use_test_data,
     })
   except ValueError as e:
     return make_response(jsonify({'message': str(e)}), 400)
