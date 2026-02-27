@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response, after_this_request
+from flask import Flask, request, jsonify, make_response
 from flask_cors import CORS, cross_origin
 from czcode import (
   generate_cz,
@@ -19,6 +19,7 @@ from datetime import datetime
 import os
 import csv
 import glob
+import threading
 import requests
 import json
 import pandas as pd
@@ -501,7 +502,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
   try:
     # Generate People, Households, Places data
     report.info('Generating synthetic population (papdata)...')
-    papdata = gen_pop(geoids, gdf=gdf)
+    papdata = gen_pop(geoids, gdf=gdf, poi_source_file=patterns_file)
     people_count = len(papdata.get('people', {}))
     homes_count = len(papdata.get('homes', {}))
     places_count = len(papdata.get('places', {}))
@@ -843,9 +844,32 @@ def create_cz(data, report):
     if err:
       raise ValueError(err)
 
+  seed_cbg = _normalize_cbg(data.get('cbg'))
+  if not seed_cbg:
+    raise ValueError("Invalid 'cbg': expected exactly 12 digits")
+
+  use_test_data = bool(data.get('use_test_data'))
+  patterns_file, patterns_source, patterns_month = _resolve_patterns_file_for_request(
+    seed_cbg,
+    start_date_raw=data.get('start_date'),
+    use_test_data=use_test_data
+  )
+  if use_test_data:
+    ok, missing, _headers = _validate_csv_columns(patterns_file, TEST_SIM_COLUMNS)
+    if not ok:
+      raise ValueError(
+        f"TEST data is missing required columns for simulation patterns: {', '.join(missing)}"
+      )
+
+  report.info(
+    f"Using patterns source: {patterns_source}"
+    + (f" ({patterns_month})" if patterns_month else "")
+  )
+
   geoids, map, gdf = generate_cz(
-    data['cbg'],
+    seed_cbg,
     data['min_pop'],
+    patterns_file=patterns_file,
     algorithm=algorithm,
     distance_penalty_weight=czi_params.get('distance_penalty_weight'),
     distance_scale_km=czi_params.get('distance_scale_km'),
@@ -893,7 +917,15 @@ def create_cz(data, report):
   def call_after_request(response):
     start_date = data['start_date'].replace("Z", "+00:00")
     start_date = datetime.fromisoformat(start_date)
-    gen_and_upload_data(geoids, czone_id, start_date, data.get('length', 168), report, gdf=gdf)
+    gen_and_upload_data(
+      geoids,
+      czone_id,
+      start_date,
+      data.get('length', 168),
+      report,
+      gdf=gdf,
+      patterns_file=patterns_file
+    )
     return response
     
   return json.dumps({
@@ -1223,16 +1255,27 @@ def route_finalize_cz():
   if not cbg_list or not isinstance(cbg_list, list):
     return make_response(jsonify({'message': "Missing or invalid 'cbg_list'"}), 400)
 
-  patterns_file = None
+  seed_cbg = _normalize_cbg(cbg_list[0]) if cbg_list else None
+  if not seed_cbg:
+    return make_response(jsonify({'message': "Invalid first CBG in 'cbg_list': expected 12 digits"}), 400)
+
+  try:
+    patterns_file, patterns_source, patterns_month = _resolve_patterns_file_for_request(
+      seed_cbg,
+      start_date_raw=data.get('start_date'),
+      use_test_data=use_test_data
+    )
+  except ValueError as e:
+    return make_response(jsonify({'message': str(e)}), 400)
+
   if use_test_data:
-    ok, missing, _headers = _validate_csv_columns(TEST_PATTERNS_FILE, TEST_SIM_COLUMNS)
+    ok, missing, _headers = _validate_csv_columns(patterns_file, TEST_SIM_COLUMNS)
     if not ok:
       return make_response(jsonify({
         'message': f"TEST data is missing required columns for simulation patterns: {', '.join(missing)}",
         'required_columns': TEST_SIM_COLUMNS,
-        'test_file': TEST_PATTERNS_FILE
+        'test_file': patterns_file
       }), 400)
-    patterns_file = TEST_PATTERNS_FILE
   
   # Create run report
   report = RunReport(
@@ -1259,6 +1302,10 @@ def route_finalize_cz():
     size = sum(list(geoids.values()))
     
     report.info(f'Finalizing CZ with {len(cluster)} CBGs, total population {size}')
+    report.info(
+      f"Using patterns source: {patterns_source}"
+      + (f" ({patterns_month})" if patterns_month else "")
+    )
     
     # Get center from first CBG's location (approximate)
     latitude = data.get('latitude', 0)
@@ -1292,11 +1339,17 @@ def route_finalize_cz():
     czone_id = resp.json()['data']['id']
     report.info(f'Created CZ record with ID: {czone_id}')
     
-    # Schedule pattern generation
-    @after_this_request
-    def call_after_request(response):
-      start_date = data['start_date'].replace("Z", "+00:00")
-      start_date = datetime.fromisoformat(start_date)
+    # Start pattern generation in a background thread so the request can return immediately.
+    try:
+      start_date_raw = data.get('start_date')
+      if not start_date_raw:
+        raise ValueError("Missing required field: start_date")
+      start_date = datetime.fromisoformat(start_date_raw.replace("Z", "+00:00"))
+    except Exception as e:
+      report.fail(f"Invalid start_date for CZ finalize: {e}")
+      return make_response(jsonify({'message': f'Invalid start_date: {e}'}), 400)
+
+    def _background_generate():
       gen_and_upload_data(
         geoids,
         czone_id,
@@ -1305,7 +1358,8 @@ def route_finalize_cz():
         report,
         patterns_file=patterns_file
       )
-      return response
+
+    threading.Thread(target=_background_generate, daemon=True).start()
     
     return jsonify({
       'id': czone_id,

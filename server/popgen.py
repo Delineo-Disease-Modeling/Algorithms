@@ -1,5 +1,7 @@
 import json
 import random
+import os
+import csv
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Optional, Union, Tuple
@@ -13,6 +15,58 @@ try:
 except ImportError:
     RESIDENTIAL_AVAILABLE = False
     ResidentialCache = None
+
+
+POI_SOURCE_REQUIRED_COLUMNS = [
+    'poi_cbg',
+    'placekey',
+]
+
+
+def _read_csv_headers(csv_path: str) -> List[str]:
+    with open(csv_path, 'r', encoding='utf-8', newline='') as f:
+        reader = csv.reader(f)
+        headers = next(reader, [])
+    return [h.strip() for h in headers if h is not None]
+
+
+def _resolve_poi_source_file(poi_source_file: Optional[str] = None) -> str:
+    """
+    Resolve the source CSV used to map CBGs to POIs for papdata generation.
+    """
+    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    candidates = [
+        poi_source_file,
+        os.getenv('DELINEO_POI_SOURCE_FILE'),
+        os.path.join(data_dir, 'patterns.csv'),
+        os.path.join(data_dir, 'patterns_o.csv'),
+    ]
+
+    checked: List[str] = []
+    seen = set()
+    for candidate in candidates:
+        if not candidate:
+            continue
+        path = os.path.abspath(candidate)
+        if path in seen:
+            continue
+        seen.add(path)
+        checked.append(path)
+        if not os.path.exists(path):
+            continue
+        try:
+            headers = set(_read_csv_headers(path))
+        except Exception:
+            continue
+        missing = [c for c in POI_SOURCE_REQUIRED_COLUMNS if c not in headers]
+        if not missing:
+            return path
+
+    raise FileNotFoundError(
+        "No valid POI source CSV found. Checked: "
+        + ", ".join(checked)
+        + f". Required columns: {POI_SOURCE_REQUIRED_COLUMNS}"
+    )
 
 
 class CensusDataPuller:
@@ -614,7 +668,7 @@ class SyntheticPopulationGenerator:
         return population_df
 
 
-def convert_data(df, cz_data):
+def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
     """
     Convert data frame with person and household information into a specific dictionary format
     
@@ -660,10 +714,11 @@ def convert_data(df, cz_data):
         else:
             output["homes"][household_id]["members"] += 1
     
-    # Get places from CG dataset
+    # Get places from the configured patterns dataset.
     cbgs = list(cz_data.keys())
     placekeys = []
-    with pd.read_csv(r'./data/patterns.csv', chunksize=10000, usecols=['poi_cbg', 'placekey']) as reader:
+    source_csv = _resolve_poi_source_file(poi_source_file)
+    with pd.read_csv(source_csv, chunksize=10000, usecols=['poi_cbg', 'placekey']) as reader:
         for chunk in reader:
             for i, row in chunk.iterrows():
                 try:
@@ -673,9 +728,15 @@ def convert_data(df, cz_data):
                 except:
                     continue
 
-    # Read POI data directly from patterns.csv (contains all needed fields)
-    places = pd.read_csv(r'./data/patterns.csv', usecols=['placekey', 'location_name', 'top_category', 'latitude', 'longitude', 'postal_code'])
+    source_headers = set(_read_csv_headers(source_csv))
+    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code']
+    available_metadata_cols = [col for col in metadata_cols if col in source_headers]
+    places = pd.read_csv(source_csv, usecols=['placekey'] + available_metadata_cols)
     places = places[places['placekey'].isin(placekeys)].reset_index()
+
+    for col in metadata_cols:
+        if col not in places.columns:
+            places[col] = None
 
     for i, row in places.iterrows():
         output['places'][str(i)] = {
@@ -690,7 +751,7 @@ def convert_data(df, cz_data):
     
     return output
 
-def gen_pop(cz_data, gdf=None):
+def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None):
     """
     Generate synthetic population for a convenience zone.
     
@@ -734,7 +795,7 @@ def gen_pop(cz_data, gdf=None):
     # Save the population to CSV
     population = generator.save_population(population)
 
-    return convert_data(population, cz_data)
+    return convert_data(population, cz_data, poi_source_file=poi_source_file)
 
 if __name__ == '__main__':
     try:

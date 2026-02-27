@@ -5,10 +5,26 @@ import json
 import math
 import numpy as np
 import pandas as pd
+import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple, Optional
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+
+def _resolve_default_patterns_csv() -> str:
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    candidates = [
+        os.path.join(data_dir, "patterns.csv"),
+        os.path.join(data_dir, "patterns_o.csv"),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            return path
+    raise FileNotFoundError(
+        "No default patterns CSV found. Expected one of: "
+        + ", ".join(candidates)
+    )
 
 def _parse_hour_list(val) -> List[int]:
     """
@@ -178,8 +194,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         if pk:
             placekey_to_place_id[pk] = pid
 
-    # Determine which patterns CSV to use
-    import os
+    # Determine which patterns CSV to use.
     if patterns_file:
         csv_path = patterns_file
     elif patterns_folder:
@@ -189,9 +204,9 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         csv_path = get_file_for_month(patterns_folder, month_key)
         if not csv_path:
             # Fallback to default
-            csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+            csv_path = _resolve_default_patterns_csv()
     else:
-        csv_path = os.path.join(os.path.dirname(__file__), "./data/patterns.csv")
+        csv_path = _resolve_default_patterns_csv()
     
     # Load CSV stats only for the known places
     stats = load_patterns_csv(csv_path, placekey_to_place_id)

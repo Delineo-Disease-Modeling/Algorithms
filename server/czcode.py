@@ -124,8 +124,17 @@ class Config:
                 return monthly_file
             raise FileNotFoundError(f"No patterns file found for month {month} in {patterns_folder}")
         
-        # Priority 3: Default
-        return r"./data/patterns.csv"
+        # Priority 3: Default fallback order.
+        default_candidates = [
+            r"./data/patterns.csv",
+            r"./data/patterns_o.csv",
+        ]
+        for path in default_candidates:
+            if os.path.exists(path):
+                return path
+        raise FileNotFoundError(
+            f"No default patterns file found. Checked: {default_candidates}"
+        )
 
 # ----------------------------
 # Logging Setup
