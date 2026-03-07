@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify, make_response, send_file
 from flask_cors import CORS, cross_origin
 from czcode import (
   generate_cz,
@@ -23,6 +23,7 @@ import threading
 import requests
 import json
 import pandas as pd
+import folium
 from jsonschema import validate
 from schema import gen_cz_schema
 from io import BytesIO
@@ -48,10 +49,12 @@ VALID_CLUSTER_ALGORITHMS = {
   'czi_optimal_cap',
   'greedy_fast',
   'greedy_weight',
+  'greedy_weight_seed_guard',
   'greedy_ratio'
 }
 DEFAULT_DISTANCE_PENALTY_WEIGHT = 0.02
 DEFAULT_DISTANCE_SCALE_KM = 20.0
+DEFAULT_SEED_GUARD_DISTANCE_KM = 20.0
 DEFAULT_OPTIMAL_CANDIDATE_LIMIT = 120
 DEFAULT_OPTIMAL_POP_FLOOR_RATIO = 0.9
 DEFAULT_OPTIMAL_MIP_REL_GAP = 0.02
@@ -130,18 +133,6 @@ def _extract_month_key(start_date_raw):
     return None
 
 
-def _default_patterns_file():
-  # Legacy defaults used by clustering if month/state-specific files are unavailable.
-  candidates = [
-    os.path.join(DATA_DIR, 'patterns.csv'),
-    os.path.join(DATA_DIR, 'patterns_o.csv'),
-  ]
-  for path in candidates:
-    if os.path.exists(path):
-      return path
-  return None
-
-
 def _resolve_monthly_patterns_file(cbg_str, month_key):
   """
   Resolve month-specific pattern CSV for preview clustering.
@@ -155,6 +146,15 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
 
   candidates = []
   if state_abbr:
+    # Prefer converted monthly files first (normalized lowercase schema).
+    candidates.extend([
+      os.path.join(DATA_DIR, state_abbr, f'{month_key}-{state_abbr}.converted.csv'),
+      os.path.join(DATA_DIR, f'{month_key}-{state_abbr}.converted.csv'),
+    ])
+    candidates.extend(sorted(glob.glob(
+      os.path.join(DATA_DIR, '**', f'{month_key}-{state_abbr}.converted.csv'),
+      recursive=True
+    )))
     candidates.extend([
       os.path.join(DATA_DIR, state_abbr, f'{month_key}-{state_abbr}.csv'),
       os.path.join(DATA_DIR, f'{month_key}-{state_abbr}.csv'),
@@ -168,23 +168,33 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
     if path and os.path.exists(path):
       return path
 
-  # Do not cross state boundaries when the seed state is known.
-  if state_abbr:
-    return None
-
-  # Fallback only when state cannot be inferred: if exactly one monthly file exists, use it.
-  generic = sorted(glob.glob(
-    os.path.join(DATA_DIR, '**', f'{month_key}-*.csv'),
-    recursive=True
-  ))
-  if len(generic) == 1 and os.path.exists(generic[0]):
-    return generic[0]
+  # Month-specific requests are strict: do not silently substitute another month.
   return None
+
+
+def _list_available_months_for_state(cbg_str):
+  state_fips = str(cbg_str)[:2] if cbg_str else ''
+  state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
+  if not state_abbr:
+    return []
+
+  patterns = [
+    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.converted.csv'),
+    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.csv'),
+  ]
+  months = set()
+  for pattern in patterns:
+    for path in glob.glob(pattern, recursive=True):
+      base = os.path.basename(path)
+      month = _extract_month_key(base)
+      if month:
+        months.add(month)
+  return sorted(months)
 
 
 def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_data=False):
   patterns_file = None
-  patterns_source = 'default'
+  patterns_source = 'monthly'
   patterns_month = None
 
   if use_test_data:
@@ -195,18 +205,54 @@ def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_d
       )
     return TEST_PATTERNS_FILE, 'test', None
 
-  patterns_month = _extract_month_key(start_date_raw)
-  if patterns_month:
-    monthly_file = _resolve_monthly_patterns_file(seed_cbg, patterns_month)
+  requested_month = _extract_month_key(start_date_raw)
+  patterns_month = requested_month
+  if requested_month:
+    monthly_file = _resolve_monthly_patterns_file(seed_cbg, requested_month)
     if monthly_file:
       patterns_file = monthly_file
       patterns_source = 'monthly'
+      resolved_month = _extract_month_key(os.path.basename(monthly_file))
+      if resolved_month:
+        patterns_month = resolved_month
+    else:
+      state_fips = str(seed_cbg)[:2]
+      state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
+      available = _list_available_months_for_state(seed_cbg)
+      if state_abbr and available:
+        raise ValueError(
+          f"No monthly patterns file found for month '{requested_month}' in state {state_abbr}. "
+          f"Available months: {', '.join(available)}."
+        )
+      if state_abbr:
+        raise ValueError(
+          f"No monthly patterns files found for state {state_abbr} (requested month '{requested_month}')."
+        )
+      raise ValueError(
+        f"No monthly patterns file found for requested month '{requested_month}'."
+      )
 
-  if not patterns_file:
-    default_file = _default_patterns_file()
-    if default_file:
-      patterns_file = default_file
-      patterns_source = 'default'
+  if not patterns_file and not requested_month:
+    state_fips = str(seed_cbg)[:2]
+    state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
+    available = _list_available_months_for_state(seed_cbg)
+    if available:
+      latest_month = available[-1]
+      monthly_file = _resolve_monthly_patterns_file(seed_cbg, latest_month)
+      if monthly_file:
+        patterns_file = monthly_file
+        patterns_month = latest_month
+        patterns_source = 'monthly'
+    if not patterns_file and state_abbr:
+      raise ValueError(
+        f"Missing start_date for patterns resolution, and no monthly patterns files were found for state {state_abbr}. "
+        f"Expected files like '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.converted.csv' "
+        f"or '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.csv'."
+      )
+    if not patterns_file:
+      raise ValueError(
+        "Missing start_date for patterns resolution, and no state-specific monthly patterns files are available."
+      )
 
   if not patterns_file:
     raise ValueError(
@@ -214,6 +260,66 @@ def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_d
     )
 
   return patterns_file, patterns_source, patterns_month
+
+
+def _resolve_localized_patterns_extract(seed_cbg, patterns_file, month=None, cache_tag='v3'):
+  """
+  Prefer the state-filtered patterns extract generated by DataLoader so
+  candidate-poi analysis does not repeatedly scan raw multi-GB source CSVs.
+  """
+  if not seed_cbg or not patterns_file:
+    return patterns_file, 'raw'
+
+  source_csv = str(patterns_file)
+  source_stem = os.path.splitext(os.path.basename(source_csv))[0]
+  source_mtime = int(os.path.getmtime(source_csv)) if os.path.exists(source_csv) else 0
+  month_part = str(month).strip() if month else 'nomonth'
+  output_dir = os.path.join(os.path.dirname(__file__), 'output')
+  filename = f"{seed_cbg}_{month_part}_{source_stem}_{source_mtime}_{cache_tag}.csv"
+  localized_path = os.path.join(output_dir, filename)
+  if os.path.exists(localized_path):
+    return localized_path, 'localized_cache'
+
+  return patterns_file, 'raw'
+
+
+def _iter_geometry_lng_lat_pairs(coords):
+  if isinstance(coords, (list, tuple)):
+    if len(coords) == 2 and all(isinstance(v, (int, float)) for v in coords):
+      yield float(coords[0]), float(coords[1])
+      return
+    for item in coords:
+      yield from _iter_geometry_lng_lat_pairs(item)
+
+
+def _compute_geojson_bounds(feature_collection):
+  min_lng = float('inf')
+  min_lat = float('inf')
+  max_lng = float('-inf')
+  max_lat = float('-inf')
+  found = False
+
+  for feature in (feature_collection.get('features') or []):
+    geom = feature.get('geometry') if isinstance(feature, dict) else None
+    coords = geom.get('coordinates') if isinstance(geom, dict) else None
+    for lng, lat in _iter_geometry_lng_lat_pairs(coords):
+      found = True
+      min_lng = min(min_lng, lng)
+      min_lat = min(min_lat, lat)
+      max_lng = max(max_lng, lng)
+      max_lat = max(max_lat, lat)
+
+  if not found:
+    return None
+
+  return {
+    'min_lng': min_lng,
+    'min_lat': min_lat,
+    'max_lng': max_lng,
+    'max_lat': max_lat,
+    'center_lat': (min_lat + max_lat) / 2.0,
+    'center_lng': (min_lng + max_lng) / 2.0,
+  }
 
 
 def _safe_float(raw, default=0.0):
@@ -276,13 +382,20 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
     'raw_visit_counts', 'raw_visitor_counts'
   ]
   usecols = required_cols + metadata_cols
+  usecols_lower = {str(c).strip().lower() for c in usecols}
 
-  with pd.read_csv(patterns_file, chunksize=10000, dtype=str, usecols=lambda c: c in usecols) as reader:
+  with pd.read_csv(
+    patterns_file,
+    chunksize=10000,
+    dtype=str,
+    usecols=lambda c: str(c).strip().lower() in usecols_lower
+  ) as reader:
     for chunk in reader:
+      chunk = chunk.copy()
+      chunk.columns = [str(c).strip().lower() for c in chunk.columns]
       if 'poi_cbg' not in chunk.columns or 'visitor_daytime_cbgs' not in chunk.columns:
         continue
 
-      chunk = chunk.copy()
       chunk['poi_cbg_norm'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
       chunk = chunk[chunk['poi_cbg_norm'].notna()]
       if chunk.empty:
@@ -372,6 +485,8 @@ def _normalize_cluster_algorithm(algorithm):
     'milp': 'czi_optimal_cap',
     'fast': 'greedy_fast',
     'weight': 'greedy_weight',
+    'seed_guard': 'greedy_weight_seed_guard',
+    'weight_guard': 'greedy_weight_seed_guard',
     'ratio': 'greedy_ratio',
   }
   alg = aliases.get(alg, alg)
@@ -412,6 +527,25 @@ def _parse_czi_balanced_params(payload):
     'distance_penalty_weight': distance_penalty_weight,
     'distance_scale_km': distance_scale_km,
   }, None
+
+
+def _parse_seed_guard_params(payload):
+  payload = payload or {}
+  raw = payload.get('seed_guard_distance_km')
+  if raw is None or raw == '':
+    return {'seed_guard_distance_km': None}, None
+
+  try:
+    value = float(raw)
+  except (TypeError, ValueError):
+    return None, "Invalid 'seed_guard_distance_km': expected a number"
+
+  if value < 0:
+    return None, "Invalid 'seed_guard_distance_km': must be >= 0"
+  if value > 500:
+    return None, "Invalid 'seed_guard_distance_km': must be <= 500"
+
+  return {'seed_guard_distance_km': value}, None
 
 
 def _parse_czi_optimal_params(payload):
@@ -552,10 +686,12 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
 
 def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
                  algorithm='czi_balanced', czi_params=None, optimal_params=None,
+                 seed_guard_params=None,
                  include_trace=False):
   """Just cluster CBGs without generating patterns. Returns geoids dict and map center."""
   czi_params = czi_params or {}
   optimal_params = optimal_params or {}
+  seed_guard_params = seed_guard_params or {}
   result = generate_cz(
     cbg,
     min_pop,
@@ -570,6 +706,7 @@ def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=N
     optimal_mip_rel_gap=optimal_params.get('optimal_mip_rel_gap'),
     optimal_time_limit_sec=optimal_params.get('optimal_time_limit_sec'),
     optimal_max_iters=optimal_params.get('optimal_max_iters'),
+    seed_guard_distance_km=seed_guard_params.get('seed_guard_distance_km'),
     include_trace=include_trace
   )
   if include_trace:
@@ -630,6 +767,7 @@ def _rank_frontier_candidates_for_cluster(
   algorithm,
   min_pop=0,
   czi_params=None,
+  seed_guard_params=None,
   patterns_file=None,
   month=None,
   limit=None,
@@ -639,6 +777,7 @@ def _rank_frontier_candidates_for_cluster(
   clustering algorithm's scoring heuristic. Returns (candidates, missing_cluster_cbgs).
   """
   czi_params = czi_params or {}
+  seed_guard_params = seed_guard_params or {}
 
   config = Config(seed_cbg, 0, patterns_file=patterns_file, month=month)
   logger = setup_logging(config)
@@ -654,6 +793,8 @@ def _rank_frontier_candidates_for_cluster(
 
   def normalize_output_cbg(cbg):
     return _normalize_cbg(cbg) or str(cbg)
+
+  seed_graph_cbg = graph_key(seed_cbg)
 
   cluster_graph_ids = []
   seen_graph_ids = set()
@@ -765,6 +906,60 @@ def _rank_frontier_candidates_for_cluster(
         'movement_boundary_after': float(boundary_after),
       })
 
+  elif algorithm == 'greedy_weight_seed_guard':
+    seed_guard_distance_km = (
+      seed_guard_params.get('seed_guard_distance_km')
+      if seed_guard_params.get('seed_guard_distance_km') is not None
+      else DEFAULT_SEED_GUARD_DISTANCE_KM
+    )
+    cbg_centers = get_cached_cbg_centers(
+      seed_cbg,
+      patterns_file=patterns_file,
+      month=month,
+      cache_tag='v1',
+    )
+    contributor_set, _excluded_set = clustering._seed_guard_contributor_sets(
+      seed_graph_cbg,
+      cluster_graph_ids,
+      cbg_centers,
+      seed_guard_distance_km,
+    )
+
+    for candidate in frontier:
+      if candidate in cluster_set or candidate not in graph:
+        continue
+
+      cand_pop = int(cbg_population(candidate, config, logger) or 0)
+      movement_to_cluster = 0.0
+      movement_to_full_cluster = 0.0
+      movement_to_outside = 0.0
+
+      for neighbor in graph.adj[candidate]:
+        weight = float(graph.adj[candidate][neighbor].get('weight', 0))
+        if neighbor in cluster_set:
+          movement_to_full_cluster += weight
+          if neighbor in contributor_set:
+            movement_to_cluster += weight
+        else:
+          movement_to_outside += weight
+
+      contributes_after, seed_distance = clustering._seed_guard_membership(
+        seed_graph_cbg,
+        candidate,
+        cbg_centers,
+        seed_guard_distance_km,
+      )
+      candidate_details.append({
+        'cbg': normalize_output_cbg(candidate),
+        'population': int(cand_pop),
+        'score': float(movement_to_cluster),
+        'movement_to_cluster': float(movement_to_cluster),
+        'movement_to_full_cluster': float(movement_to_full_cluster),
+        'movement_to_outside': float(movement_to_outside),
+        'seed_distance_km': float(seed_distance) if seed_distance is not None else None,
+        'movement_contributes_after_selection': bool(contributes_after),
+      })
+
   else:
     # For czi_optimal_cap (MILP) there is no single-step greedy frontier score. We expose a
     # consistent heuristic ranking by movement-to-cluster so the edit UI remains usable.
@@ -835,12 +1030,17 @@ def create_cz(data, report):
 
   czi_params = {}
   optimal_params = {}
+  seed_guard_params = {}
   if algorithm == 'czi_balanced':
     czi_params, err = _parse_czi_balanced_params(data)
     if err:
       raise ValueError(err)
   elif algorithm == 'czi_optimal_cap':
     optimal_params, err = _parse_czi_optimal_params(data)
+    if err:
+      raise ValueError(err)
+  elif algorithm == 'greedy_weight_seed_guard':
+    seed_guard_params, err = _parse_seed_guard_params(data)
     if err:
       raise ValueError(err)
 
@@ -877,7 +1077,8 @@ def create_cz(data, report):
     optimal_population_floor_ratio=optimal_params.get('optimal_population_floor_ratio'),
     optimal_mip_rel_gap=optimal_params.get('optimal_mip_rel_gap'),
     optimal_time_limit_sec=optimal_params.get('optimal_time_limit_sec'),
-    optimal_max_iters=optimal_params.get('optimal_max_iters')
+    optimal_max_iters=optimal_params.get('optimal_max_iters'),
+    seed_guard_distance_km=seed_guard_params.get('seed_guard_distance_km')
   )
 
   cluster = list(geoids.keys())
@@ -993,6 +1194,11 @@ def route_generate_cz():
     if err:
       return make_response(jsonify({'message': err}), 400)
     request.json.update({k: v for k, v in optimal_params.items() if v is not None})
+  elif algorithm == 'greedy_weight_seed_guard':
+    seed_guard_params, err = _parse_seed_guard_params(request.json)
+    if err:
+      return make_response(jsonify({'message': err}), 400)
+    request.json.update({k: v for k, v in seed_guard_params.items() if v is not None})
   
   try:
     validate(instance=request.json, schema=gen_cz_schema)
@@ -1020,6 +1226,7 @@ def route_generate_cz():
       'algorithm': _normalize_cluster_algorithm(data.get('algorithm')) or data.get('algorithm'),
       'distance_penalty_weight': data.get('distance_penalty_weight'),
       'distance_scale_km': data.get('distance_scale_km'),
+      'seed_guard_distance_km': data.get('seed_guard_distance_km'),
       'optimal_candidate_limit': data.get('optimal_candidate_limit'),
       'optimal_population_floor_ratio': data.get('optimal_population_floor_ratio'),
       'optimal_mip_rel_gap': data.get('optimal_mip_rel_gap'),
@@ -1065,6 +1272,7 @@ def route_cluster_cbgs():
 
   czi_params = {}
   optimal_params = {}
+  seed_guard_params = {}
   if algorithm == 'czi_balanced':
     czi_params, err = _parse_czi_balanced_params(request.json)
     if err:
@@ -1073,9 +1281,14 @@ def route_cluster_cbgs():
     optimal_params, err = _parse_czi_optimal_params(request.json)
     if err:
       return make_response(jsonify({'message': err}), 400)
+  elif algorithm == 'greedy_weight_seed_guard':
+    seed_guard_params, err = _parse_seed_guard_params(request.json)
+    if err:
+      return make_response(jsonify({'message': err}), 400)
 
   effective_czi_params = {}
   effective_optimal_params = {}
+  effective_seed_guard_params = {}
   if algorithm == 'czi_balanced':
     effective_czi_params = {
       'distance_penalty_weight': (
@@ -1117,6 +1330,14 @@ def route_cluster_cbgs():
         else DEFAULT_OPTIMAL_MAX_ITERS
       ),
     }
+  elif algorithm == 'greedy_weight_seed_guard':
+    effective_seed_guard_params = {
+      'seed_guard_distance_km': (
+        seed_guard_params.get('seed_guard_distance_km')
+        if seed_guard_params.get('seed_guard_distance_km') is not None
+        else DEFAULT_SEED_GUARD_DISTANCE_KM
+      ),
+    }
 
   patterns_file = None
   patterns_source = 'default'
@@ -1145,35 +1366,14 @@ def route_cluster_cbgs():
   if not cbg_str:
     return make_response(jsonify({'message': "Invalid 'cbg': expected exactly 12 digits"}), 400)
 
-  if not use_test_data:
-    patterns_month = _extract_month_key(request.json.get('start_date'))
-    if patterns_month:
-      monthly_file = _resolve_monthly_patterns_file(cbg_str, patterns_month)
-      if monthly_file:
-        patterns_file = monthly_file
-        patterns_source = 'monthly'
-    if not patterns_file:
-      default_file = _default_patterns_file()
-      if default_file:
-        patterns_file = default_file
-        patterns_source = 'default'
-      else:
-        if patterns_month:
-          return make_response(jsonify({
-            'message': (
-              f"No monthly patterns file found for month '{patterns_month}' and no default "
-              f"patterns file is available. Expected something like "
-              f"'{DATA_DIR}/<STATE>/{patterns_month}-<STATE>.csv'."
-            ),
-            'month': patterns_month,
-            'cbg': cbg_str
-          }), 400)
-        return make_response(jsonify({
-          'message': (
-            "No default patterns file found. Provide a start date with available monthly files "
-            f"or add '{DATA_DIR}/patterns_o.csv'."
-          )
-        }), 400)
+  try:
+    patterns_file, patterns_source, patterns_month = _resolve_patterns_file_for_request(
+      cbg_str,
+      start_date_raw=request.json.get('start_date'),
+      use_test_data=use_test_data
+    )
+  except ValueError as e:
+    return make_response(jsonify({'message': str(e)}), 400)
   
   try:
     geoids, center, trace_payload = cluster_cbgs(
@@ -1184,6 +1384,7 @@ def route_cluster_cbgs():
       algorithm=algorithm,
       czi_params=effective_czi_params,
       optimal_params=effective_optimal_params,
+      seed_guard_params=effective_seed_guard_params,
       include_trace=True
     )
     cluster = list(geoids.keys())
@@ -1215,7 +1416,9 @@ def route_cluster_cbgs():
       'clustering_params': (
         effective_czi_params
         if algorithm == 'czi_balanced'
-        else effective_optimal_params if algorithm == 'czi_optimal_cap' else {}
+        else effective_optimal_params if algorithm == 'czi_optimal_cap'
+        else effective_seed_guard_params if algorithm == 'greedy_weight_seed_guard'
+        else {}
       ),
       'patterns_file_used': patterns_file,
       'patterns_source': patterns_source,
@@ -1294,7 +1497,7 @@ def route_finalize_cz():
     # Get population for each CBG
     from czcode import Config, cbg_population, setup_logging
     # Use first CBG to initialize config (just for population lookup)
-    config = Config(cbg_list[0], 0)
+    config = Config(cbg_list[0], 0, patterns_file=patterns_file, month=patterns_month)
     logger = setup_logging(config)
     geoids = { cbg: cbg_population(cbg, config, logger) for cbg in cbg_list }
     
@@ -1513,8 +1716,13 @@ def route_frontier_candidates():
       parsed_limit = None
 
   czi_params = {}
+  seed_guard_params = {}
   if algorithm == 'czi_balanced':
     czi_params, err = _parse_czi_balanced_params(request.json)
+    if err:
+      return make_response(jsonify({'message': err}), 400)
+  elif algorithm == 'greedy_weight_seed_guard':
+    seed_guard_params, err = _parse_seed_guard_params(request.json)
     if err:
       return make_response(jsonify({'message': err}), 400)
 
@@ -1536,6 +1744,7 @@ def route_frontier_candidates():
       algorithm=algorithm,
       min_pop=_safe_float(min_pop, 0),
       czi_params=czi_params,
+      seed_guard_params=seed_guard_params,
       patterns_file=patterns_file,
       month=patterns_month,
       limit=parsed_limit,
@@ -1609,8 +1818,14 @@ def route_candidate_pois():
     return make_response(jsonify({'message': str(e)}), 400)
 
   try:
-    pois = _compute_top_candidate_pois(
+    analysis_patterns_file, analysis_patterns_mode = _resolve_localized_patterns_extract(
+      seed_cbg,
       patterns_file,
+      month=patterns_month,
+      cache_tag='v3'
+    )
+    pois = _compute_top_candidate_pois(
+      analysis_patterns_file,
       candidate_cbg=candidate_cbg,
       cluster_cbgs=normalized_cluster,
       limit=limit
@@ -1619,14 +1834,99 @@ def route_candidate_pois():
       'candidate_cbg': candidate_cbg,
       'cluster_size': len(normalized_cluster),
       'pois': pois,
-      'patterns_file_used': patterns_file,
+      'patterns_file_used': analysis_patterns_file,
       'patterns_source': patterns_source,
+      'patterns_analysis_mode': analysis_patterns_mode,
       'patterns_month': patterns_month,
       'use_test_data': use_test_data,
     })
   except Exception as e:
     print(f'Error computing candidate POIs: {e}')
     return make_response(jsonify({'message': f'Error computing candidate POIs: {str(e)}'}), 500)
+
+
+@app.route('/export-cz-map-html', methods=['POST'])
+@cross_origin()
+def route_export_cz_map_html():
+  """
+  Export a static HTML map of the selected CZ CBGs (solid blue polygons).
+  """
+  try:
+    request.get_json(force=True)
+  except:
+    return make_response(jsonify({'message': 'Bad Request'}), 400)
+
+  if not request.json:
+    return make_response(jsonify({'message': 'Please supply adequate JSON data'}), 400)
+
+  cbg_list = request.json.get('cbg_list', [])
+  zone_name = str(request.json.get('name') or 'cz-map').strip()
+
+  if not isinstance(cbg_list, list) or len(cbg_list) == 0:
+    return make_response(jsonify({'message': "Missing or invalid 'cbg_list'"}), 400)
+
+  normalized_cbgs = []
+  seen = set()
+  for cbg in cbg_list:
+    cbg_norm = _normalize_cbg(cbg)
+    if not cbg_norm or cbg_norm in seen:
+      continue
+    seen.add(cbg_norm)
+    normalized_cbgs.append(cbg_norm)
+
+  if not normalized_cbgs:
+    return make_response(jsonify({'message': "No valid CBGs in 'cbg_list'"}), 400)
+
+  try:
+    geojson = get_cbg_geojson(normalized_cbgs, include_neighbors=False)
+  except Exception as e:
+    return make_response(jsonify({'message': f'Error generating CBG geometry: {str(e)}'}), 500)
+
+  if not isinstance(geojson, dict) or not geojson.get('features'):
+    return make_response(jsonify({'message': 'No map geometry found for the selected CBGs'}), 400)
+
+  bounds = _compute_geojson_bounds(geojson)
+  if bounds:
+    center = [bounds['center_lat'], bounds['center_lng']]
+  else:
+    center = [39.3290708, -76.6219753]
+
+  map_obj = folium.Map(location=center, zoom_start=11, tiles='OpenStreetMap')
+  folium.GeoJson(
+    geojson,
+    style_function=lambda _: {
+      'fillColor': '#2563eb',
+      'color': '#1d4ed8',
+      'weight': 1.5,
+      'fillOpacity': 0.45,
+    },
+    highlight_function=lambda _: {
+      'fillColor': '#1d4ed8',
+      'color': '#1e3a8a',
+      'weight': 2,
+      'fillOpacity': 0.55,
+    }
+  ).add_to(map_obj)
+
+  if bounds and bounds['min_lat'] != bounds['max_lat'] and bounds['min_lng'] != bounds['max_lng']:
+    map_obj.fit_bounds([
+      [bounds['min_lat'], bounds['min_lng']],
+      [bounds['max_lat'], bounds['max_lng']]
+    ])
+
+  safe_name = re.sub(r'[^A-Za-z0-9._-]+', '-', zone_name).strip('-') or 'cz-map'
+  timestamp = datetime.utcnow().strftime('%Y%m%d-%H%M%S')
+  download_name = f'{safe_name}-{timestamp}.html'
+  html_content = map_obj.get_root().render().encode('utf-8')
+  html_buffer = BytesIO(html_content)
+  html_buffer.seek(0)
+
+  return send_file(
+    html_buffer,
+    mimetype='text/html',
+    as_attachment=True,
+    download_name=download_name
+  )
 
 
 @app.route('/cbg-geojson', methods=['GET'])

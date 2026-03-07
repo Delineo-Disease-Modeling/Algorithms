@@ -36,6 +36,7 @@ STATE_ABBR_TO_FIPS = {
     'WY': '56', 'PR': '72', 'VI': '78', 'GU': '66', 'MP': '69',
     'AS': '60',
 }
+STATE_FIPS_TO_ABBR = {fips: abbr for abbr, fips in STATE_ABBR_TO_FIPS.items()}
 
 # ----------------------------
 # Configuration Module
@@ -101,8 +102,7 @@ class Config:
         
         Priority:
         1. Explicit patterns_file if provided
-        2. Monthly file from patterns_folder if folder and month provided
-        3. Default ./data/patterns.csv
+        2. State-scoped monthly file (converted preferred) when month is provided
         """
         # Priority 1: Explicit file
         if patterns_file:
@@ -110,30 +110,66 @@ class Config:
                 return patterns_file
             raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
         
-        # Priority 2: Monthly file from folder
-        if patterns_folder and month:
-            from monthly_patterns import get_file_for_month
-            # Extract state from the first state in our states list
-            state = self.states[0] if self.states else None
-            monthly_file = get_file_for_month(patterns_folder, month, state)
-            if monthly_file:
-                return monthly_file
-            # Try without state filter
-            monthly_file = get_file_for_month(patterns_folder, month)
-            if monthly_file:
-                return monthly_file
-            raise FileNotFoundError(f"No patterns file found for month {month} in {patterns_folder}")
-        
-        # Priority 3: Default fallback order.
-        default_candidates = [
-            r"./data/patterns.csv",
-            r"./data/patterns_o.csv",
-        ]
-        for path in default_candidates:
-            if os.path.exists(path):
-                return path
+        search_root = patterns_folder or os.path.join(os.path.dirname(__file__), "data")
+        month_key = str(month or "").strip()
+
+        if month_key:
+            state_candidates = []
+            core = str(self.core_cbg or "").strip()
+            if len(core) >= 2:
+                state_hint = STATE_FIPS_TO_ABBR.get(core[:2])
+                if state_hint:
+                    state_candidates.append(state_hint)
+
+            for state in self.states:
+                state_code = str(state or "").strip().upper()
+                if state_code and state_code not in state_candidates:
+                    state_candidates.append(state_code)
+
+            candidate_paths = []
+            for state in state_candidates:
+                candidate_paths.extend([
+                    os.path.join(search_root, state, f"{month_key}-{state}.converted.csv"),
+                    os.path.join(search_root, state, f"{month_key}-{state}.csv"),
+                    os.path.join(search_root, f"{month_key}-{state}.converted.csv"),
+                    os.path.join(search_root, f"{month_key}-{state}.csv"),
+                ])
+
+            import glob
+            for state in state_candidates:
+                candidate_paths.extend(sorted(glob.glob(
+                    os.path.join(search_root, "**", f"{month_key}-{state}.converted.csv"),
+                    recursive=True
+                )))
+                candidate_paths.extend(sorted(glob.glob(
+                    os.path.join(search_root, "**", f"{month_key}-{state}.csv"),
+                    recursive=True
+                )))
+
+            seen = set()
+            ordered_paths = []
+            for path in candidate_paths:
+                norm = os.path.abspath(path)
+                if norm in seen:
+                    continue
+                seen.add(norm)
+                ordered_paths.append(path)
+
+            for path in ordered_paths:
+                if os.path.exists(path):
+                    return path
+
+            states_msg = ", ".join(state_candidates) if state_candidates else "unknown state"
+            raise FileNotFoundError(
+                f"No state-scoped monthly patterns file found for month '{month_key}' "
+                f"under {search_root} for {states_msg}. "
+                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.converted.csv' "
+                "or '<DATA>/<STATE>/YYYY-MM-<STATE>.csv'."
+            )
+
         raise FileNotFoundError(
-            f"No default patterns file found. Checked: {default_candidates}"
+            "No patterns_file was provided and no month was specified. "
+            "Global default patterns fallback is disabled; provide a state-scoped monthly file."
         )
 
 # ----------------------------
@@ -190,6 +226,7 @@ class DataLoader:
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
             df = pd.read_csv(full_filename)
+            df.columns = [str(c).strip().lower() for c in df.columns]
             required_cols = {'poi_cbg', 'visitor_daytime_cbgs'}
             if not required_cols.issubset(df.columns):
                 missing = sorted(required_cols - set(df.columns))
@@ -198,7 +235,7 @@ class DataLoader:
             df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
             df.dropna(subset=['poi_cbg'], inplace=True)
             df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
-        except (FileNotFoundError, pd.errors.EmptyDataError, ValueError):
+        except (FileNotFoundError, pd.errors.EmptyDataError, ValueError, KeyError):
             self.logger.info(f"File {full_filename} not found. Processing raw data from {patterns_csv}")
             allowed_state_fips = {
                 STATE_ABBR_TO_FIPS[state]
@@ -208,6 +245,8 @@ class DataLoader:
             datalist = []
             with pd.read_csv(patterns_csv, chunksize=10000) as reader:
                 for chunk in reader:
+                    chunk = chunk.copy()
+                    chunk.columns = [str(c).strip().lower() for c in chunk.columns]
                     if 'poi_cbg' in chunk.columns:
                         chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
                         chunk.dropna(subset=['poi_cbg'], inplace=True)
@@ -218,11 +257,24 @@ class DataLoader:
                         chunk = chunk[chunk['poi_cbg'].str.slice(0, 2).isin(allowed_state_fips)]
                     # Fallback for fixtures/special files.
                     elif 'postal_code' in chunk.columns and zip_codes:
+                        chunk['postal_code'] = pd.to_numeric(chunk['postal_code'], errors='coerce')
                         datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
                         continue
 
                     datalist.append(chunk)
-            df = pd.concat(datalist, axis=0)
+            if not datalist:
+                raise ValueError(f"No data rows were loaded from {patterns_csv}")
+
+            df = pd.concat(datalist, axis=0, ignore_index=True)
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            required_cols = {'poi_cbg', 'visitor_daytime_cbgs'}
+            if not required_cols.issubset(df.columns):
+                missing = sorted(required_cols - set(df.columns))
+                available = ', '.join(sorted(df.columns))
+                raise ValueError(
+                    f"Patterns file is missing required columns: {missing}. "
+                    f"Available columns: {available}"
+                )
             
             # Convert poi_cbg to proper strings
             df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
@@ -244,36 +296,27 @@ class DataLoader:
         for state in self.config.states:
             state = str(state)
             state_fips = STATE_ABBR_TO_FIPS.get(state)
-            candidate_paths = []
-
-            if state_fips:
-                candidate_paths.append((
-                    f"./data/shapefiles_2016/tl_2016_{state_fips}_bg/tl_2016_{state_fips}_bg.shp",
-                    "2016 TIGER/Line shapefile"
-                ))
-                candidate_paths.append((
-                    f"{self.config.paths['shapefiles_dir']}tl_2020_{state_fips}_bg/tl_2020_{state_fips}_bg.shp",
-                    "2020 TIGER/Line shapefile"
-                ))
-
-            candidate_paths.append((
-                f"{self.config.paths['shapefiles_dir']}{state}.geojson",
-                "state GeoJSON"
-            ))
-
-            gdf_state = None
-            used_source = None
-            for path, source_label in candidate_paths:
-                if os.path.exists(path):
-                    gdf_state = gpd.read_file(path)
-                    used_source = source_label
-                    break
-
-            if gdf_state is None:
-                self.logger.warning(f"No shapefile found for state {state} (FIPS: {state_fips})")
+            if not state_fips:
+                self.logger.warning(f"Could not resolve state FIPS for {state}; skipping shapefile load.")
                 continue
 
-            # Normalize column names/types across 2016/2020/legacy GeoJSON sources.
+            shapefile_2016_path = (
+                f"./data/shapefiles_2016/tl_2016_{state_fips}_bg/"
+                f"tl_2016_{state_fips}_bg.shp"
+            )
+            if not os.path.exists(shapefile_2016_path):
+                self.logger.warning(
+                    "Missing 2016 TIGER/Line shapefile for state %s (FIPS: %s) at %s. "
+                    "Legacy fallback is disabled.",
+                    state,
+                    state_fips,
+                    shapefile_2016_path,
+                )
+                continue
+
+            gdf_state = gpd.read_file(shapefile_2016_path)
+
+            # Normalize column names/types from 2016 TIGER/Line shapefiles.
             if 'GEOID' not in gdf_state.columns and 'CensusBlockGroup' in gdf_state.columns:
                 gdf_state['GEOID'] = gdf_state['CensusBlockGroup']
             if 'CensusBlockGroup' not in gdf_state.columns and 'GEOID' in gdf_state.columns:
@@ -296,18 +339,20 @@ class DataLoader:
             if 'State' not in gdf_state.columns:
                 gdf_state['State'] = state
 
-            # Normalize CRS across mixed 2016 TIGER (often NAD83) and legacy GeoJSON (WGS84)
-            # sources so GeoPandas can concatenate them safely.
+            # Normalize CRS so GeoPandas can concatenate state geometries safely.
             if gdf_state.crs is None:
                 gdf_state = gdf_state.set_crs("EPSG:4326", allow_override=True)
             else:
                 gdf_state = gdf_state.to_crs("EPSG:4326")
 
-            self.logger.info(f"Loaded {state} geometry from {used_source}")
+            self.logger.info(f"Loaded {state} geometry from 2016 TIGER/Line shapefile")
             gds.append(gdf_state)
 
         if not gds:
-            raise FileNotFoundError("No state shapefiles could be loaded")
+            raise FileNotFoundError(
+                "No 2016 state shapefiles could be loaded. "
+                "Ensure files exist under ./data/shapefiles_2016/tl_2016_<FIPS>_bg/."
+            )
 
         gdf = gpd.GeoDataFrame(pd.concat(gds, ignore_index=True), crs="EPSG:4326")
         return gdf
@@ -555,6 +600,64 @@ class Clustering:
             movement_out += float(G.adj[candidate][neighbor].get('weight', 0))
         return movement_out
 
+    @staticmethod
+    def _seed_distance_km(seed_cbg, candidate_cbg, cbg_centers):
+        if not cbg_centers:
+            return None
+
+        seed_center = cbg_centers.get(seed_cbg)
+        cand_center = cbg_centers.get(candidate_cbg)
+        if seed_center is None or cand_center is None:
+            return None
+
+        try:
+            return float(distance(
+                seed_center[0],
+                seed_center[1],
+                cand_center[0],
+                cand_center[1],
+            ))
+        except Exception:
+            return None
+
+    @classmethod
+    def _seed_guard_membership(cls, seed_cbg, candidate_cbg, cbg_centers, seed_guard_distance_km):
+        if candidate_cbg == seed_cbg:
+            return True, 0.0
+
+        seed_distance = cls._seed_distance_km(seed_cbg, candidate_cbg, cbg_centers)
+        try:
+            threshold_km = float(seed_guard_distance_km)
+        except (TypeError, ValueError):
+            threshold_km = 0.0
+
+        if threshold_km <= 0 or seed_distance is None:
+            return True, seed_distance
+        return seed_distance <= threshold_km, seed_distance
+
+    @classmethod
+    def _seed_guard_contributor_sets(cls, seed_cbg, cluster_cbgs, cbg_centers, seed_guard_distance_km):
+        contributor_set = set()
+        excluded_set = set()
+
+        for cbg in cluster_cbgs:
+            contributes, _ = cls._seed_guard_membership(
+                seed_cbg,
+                cbg,
+                cbg_centers,
+                seed_guard_distance_km,
+            )
+            if contributes:
+                contributor_set.add(cbg)
+            else:
+                excluded_set.add(cbg)
+
+        if seed_cbg in cluster_cbgs:
+            contributor_set.add(seed_cbg)
+            excluded_set.discard(seed_cbg)
+
+        return contributor_set, excluded_set
+
     def greedy_fast(self, G: nx.Graph, u0: str, min_pop: int, trace_collector=None):
         self.logger.info(f"Starting greedy_fast algorithm with seed CBG {u0}")
         population = cbg_population(u0, self.config, self.logger)
@@ -707,6 +810,165 @@ class Clustering:
             )
 
             self.logger.info(f"Iteration {it}: Added CBG {cbg_to_add} with pop {cbg_pop}. New total: {population}")
+            it += 1
+            if it > 1000:
+                self.logger.warning("Reached maximum iterations (1000). Stopping algorithm.")
+                break
+        return cluster, population
+
+    def greedy_weight_seed_guard(
+        self,
+        G,
+        u0,
+        min_pop,
+        seed_guard_distance_km=20.0,
+        cbg_centers=None,
+        trace_collector=None,
+    ):
+        """
+        Greedy weight variant that excludes seed-distant CBGs from future movement scoring.
+
+        The frontier still includes neighbors of every selected CBG so the zone can continue
+        expanding, but movement scores only accumulate through the subset of cluster members
+        that remain within `seed_guard_distance_km` of the seed.
+        """
+        self.logger.info(
+            "Starting greedy_weight_seed_guard algorithm with seed CBG %s (distance %.2f km)",
+            u0,
+            float(seed_guard_distance_km),
+        )
+        cluster = [u0]
+        cluster_set = {u0}
+        contributor_set = {u0}
+        excluded_set = set()
+        population = cbg_population(u0, self.config, self.logger)
+        cbg_centers = cbg_centers or {}
+        it = 1
+
+        self.logger.info(f"Seed CBG population: {population}")
+        while population < min_pop:
+            all_adj_cbgs = []
+            for i in cluster:
+                try:
+                    for j in list(G.adj[i]):
+                        if j not in all_adj_cbgs and j not in cluster_set:
+                            all_adj_cbgs.append(j)
+                except KeyError:
+                    self.logger.warning(f"CBG {i} not found in graph")
+                    continue
+
+            if not all_adj_cbgs:
+                self.logger.warning(
+                    f"No adjacent CBGs found after {it} iterations. Cannot reach target population."
+                )
+                break
+
+            best_choice = None
+            candidate_details = []
+            for candidate in all_adj_cbgs:
+                movement_to_cluster = 0.0
+                movement_to_full_cluster = 0.0
+                for member in cluster:
+                    try:
+                        edge_weight = float(G.adj[candidate][member]['weight'])
+                    except (KeyError, ZeroDivisionError):
+                        continue
+                    movement_to_full_cluster += edge_weight
+                    if member in contributor_set:
+                        movement_to_cluster += edge_weight
+
+                movement_to_outside = self._movement_outside_cluster(G, candidate, cluster_set)
+                candidate_pop = int(cbg_population(candidate, self.config, self.logger))
+                contributes_after, seed_distance = self._seed_guard_membership(
+                    u0,
+                    candidate,
+                    cbg_centers,
+                    seed_guard_distance_km,
+                )
+                distance_tiebreak = 0.0 if seed_distance is None else -float(seed_distance)
+                candidate_tuple = (
+                    float(movement_to_cluster),
+                    int(contributes_after),
+                    distance_tiebreak,
+                    float(candidate_pop),
+                    str(candidate),
+                )
+                candidate_details.append({
+                    'cbg': candidate,
+                    'population': candidate_pop,
+                    'score': float(movement_to_cluster),
+                    'movement_to_cluster': float(movement_to_cluster),
+                    'movement_to_full_cluster': float(movement_to_full_cluster),
+                    'movement_to_outside': float(movement_to_outside),
+                    'seed_distance_km': (
+                        float(seed_distance) if seed_distance is not None else None
+                    ),
+                    'movement_contributes_after_selection': bool(contributes_after),
+                })
+                if best_choice is None or candidate_tuple > best_choice[0]:
+                    best_choice = (
+                        candidate_tuple,
+                        candidate,
+                        candidate_pop,
+                        contributes_after,
+                        seed_distance,
+                    )
+
+            if best_choice is None:
+                self.logger.warning(
+                    f"No valid candidate CBGs found after {it} iterations. Cannot reach target population."
+                )
+                break
+
+            _, cbg_to_add, cbg_pop, contributes_after, seed_distance = best_choice
+            prev_cluster = list(cluster)
+            prev_population = population
+            cluster.append(cbg_to_add)
+            cluster_set.add(cbg_to_add)
+            population += cbg_pop
+
+            if contributes_after:
+                contributor_set.add(cbg_to_add)
+            else:
+                excluded_set.add(cbg_to_add)
+
+            metrics_after = {
+                'seed_guard_distance_km': float(seed_guard_distance_km),
+                'movement_contributor_count': len(contributor_set),
+                'movement_excluded_count': len(excluded_set),
+            }
+            if excluded_set:
+                metrics_after['movement_excluded_cbgs'] = list(excluded_set)
+
+            self._record_trace_step(
+                trace_collector,
+                iteration=it - 1,
+                cluster_before=prev_cluster,
+                population_before=prev_population,
+                candidates=candidate_details,
+                selected_cbg=cbg_to_add,
+                selected_population=cbg_pop,
+                cluster_after=cluster,
+                population_after=population,
+                metrics_after=metrics_after,
+            )
+
+            movement_note = "counts toward future scoring"
+            if not contributes_after:
+                movement_note = "excluded from future scoring"
+            self.logger.info(
+                "Iteration %d: Added CBG %s with pop %d. New total: %d (%s, distance=%s km)",
+                it,
+                cbg_to_add,
+                cbg_pop,
+                population,
+                movement_note,
+                (
+                    f"{float(seed_distance):.2f}"
+                    if seed_distance is not None
+                    else "unknown"
+                ),
+            )
             it += 1
             if it > 1000:
                 self.logger.warning("Reached maximum iterations (1000). Stopping algorithm.")
@@ -1594,6 +1856,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 distance_scale_km=None, optimal_candidate_limit=None,
                 optimal_population_floor_ratio=None, optimal_mip_rel_gap=None,
                 optimal_time_limit_sec=None, optimal_max_iters=None,
+                seed_guard_distance_km=None,
                 include_trace=False):
     """
     Generate a convenience zone cluster starting from a seed CBG.
@@ -1649,12 +1912,14 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         'czi_optimal_cap': clustering_algo.czi_optimal_cap,
         'greedy_fast': clustering_algo.greedy_fast,
         'greedy_weight': clustering_algo.greedy_weight,
+        'greedy_weight_seed_guard': clustering_algo.greedy_weight_seed_guard,
         'greedy_ratio': clustering_algo.greedy_ratio,
     }
     if algorithm_key not in algorithm_map:
         raise ValueError(
             f"Invalid clustering algorithm '{algorithm}'. "
-            "Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_weight, greedy_ratio"
+            "Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_weight, "
+            "greedy_weight_seed_guard, greedy_ratio"
         )
 
     logger.info(f"Using clustering algorithm: {algorithm_key}")
@@ -1690,6 +1955,20 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
             config.core_cbg,
             config.min_cluster_pop,
             **optimal_kwargs
+        )
+    elif algorithm_key == 'greedy_weight_seed_guard':
+        seed_guard_kwargs = {
+            'cbg_centers': cbg_centers,
+        }
+        if seed_guard_distance_km is not None:
+            seed_guard_kwargs['seed_guard_distance_km'] = float(seed_guard_distance_km)
+        if trace_steps is not None:
+            seed_guard_kwargs['trace_collector'] = trace_steps
+        algorithm_result = clustering_algo.greedy_weight_seed_guard(
+            G,
+            config.core_cbg,
+            config.min_cluster_pop,
+            **seed_guard_kwargs
         )
     else:
         algorithm_result = algorithm_map[algorithm_key](

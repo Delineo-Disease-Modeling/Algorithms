@@ -13,17 +13,9 @@ WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 
 
 def _resolve_default_patterns_csv() -> str:
-    data_dir = os.path.join(os.path.dirname(__file__), "data")
-    candidates = [
-        os.path.join(data_dir, "patterns.csv"),
-        os.path.join(data_dir, "patterns_o.csv"),
-    ]
-    for path in candidates:
-        if os.path.exists(path):
-            return path
     raise FileNotFoundError(
-        "No default patterns CSV found. Expected one of: "
-        + ", ".join(candidates)
+        "Global default patterns CSV fallback is disabled. "
+        "Provide patterns_file explicitly or pass patterns_folder with a valid month."
     )
 
 def _parse_hour_list(val) -> List[int]:
@@ -95,8 +87,10 @@ def load_patterns_csv(patterns_csv_path: str,
     Load only rows whose placekey exists in papdata['places'], and build:
       stats[place_id] = {
         'median_dwell_hours': int,
-        'hour_weights': [24 floats sum=1.0],
-        'day_weights':  {weekday: float, ...} normalized to sum=1.0 across 7 days
+        'hour_weights': [24 floats sum=1.0],        (normalized, for destination selection)
+        'day_weights':  {weekday: float, ...}        (normalized, sum=1.0 across 7 days)
+        'raw_hour_counts': [24 ints],                (raw visitor counts, for busyness)
+        'raw_day_counts':  {weekday: int, ...}       (raw visitor counts, for busyness)
       }
     Uses chunked pandas to handle full files.
     """
@@ -139,6 +133,8 @@ def load_patterns_csv(patterns_csv_path: str,
                 "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
                 "hour_weights": hour_weights,
                 "day_weights": day_weights,
+                "raw_hour_counts": hour_list,
+                "raw_day_counts": day_map,
             }
     return stats
 
@@ -171,7 +167,45 @@ def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: i
     return ids, wts
 
 
-def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168, 
+def _compute_peak_busyness(stats: Dict[str, Dict[str, Any]]) -> float:
+    """
+    Pre-compute the maximum aggregate raw activity across all 7×24 timeslots.
+    For each (weekday, hour) pair, sum raw_hour_counts[hour] * raw_day_counts[weekday]
+    across all facilities. Return the maximum such sum.
+
+    This gives us a baseline to normalize against: the busiest hour of the busiest day.
+    """
+    peak = 0.0
+    for weekday in WEEKDAYS:
+        for hour in range(24):
+            if hour >= 22 or hour < 6:
+                continue
+            total = 0.0
+            for s in stats.values():
+                raw_h = s["raw_hour_counts"][hour]
+                raw_d = s["raw_day_counts"].get(weekday, 0)
+                total += raw_h * raw_d
+            if total > peak:
+                peak = total
+    return peak
+
+
+def _aggregate_busyness(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int) -> float:
+    """
+    Compute aggregate raw activity for a specific (weekday, hour) timeslot.
+    Sum raw_hour_counts[hour] * raw_day_counts[weekday] across all facilities.
+    """
+    if hour >= 22 or hour < 6:
+        return 0.0
+    total = 0.0
+    for s in stats.values():
+        raw_h = s["raw_hour_counts"][hour]
+        raw_d = s["raw_day_counts"].get(weekday, 0)
+        total += raw_h * raw_d
+    return total
+
+
+def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168,
                  patterns_file: str = None, patterns_folder: str = None) -> Dict[str, Any]:
     """
     Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
@@ -210,6 +244,10 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
     
     # Load CSV stats only for the known places
     stats = load_patterns_csv(csv_path, placekey_to_place_id)
+
+    # Pre-compute peak busyness across the entire week so we can derive a
+    # meaningful 0-1 movement probability from raw visitor counts.
+    peak_busyness = _compute_peak_busyness(stats)
 
     # People state
     # At any time, a person is either at home or at a place with a 'leave_time' scheduled.
@@ -250,18 +288,23 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 st["place_id"] = None
                 st["leave_time_idx"] = None
 
-        # Build intensity distribution for this hour
+        # Build intensity distribution for this hour (normalized — for destination selection)
         place_ids, raw_weights = _overall_busy_factor(stats, weekday, hour_of_day)
         if raw_weights:
             place_probs = np.array(raw_weights, dtype=float)
             place_probs = place_probs / place_probs.sum()
-            overall_busy = float(place_probs.max())  # quick proxy for busyness
         else:
             place_probs = np.array([])
+
+        # Compute movement probability from raw visitor counts.
+        # overall_busy is a 0-1 ratio: current aggregate activity / peak activity
+        # across the whole week. This properly captures "how busy is right now"
+        # using absolute magnitudes rather than the normalized distribution.
+        if peak_busyness > 0:
+            overall_busy = _aggregate_busyness(stats, weekday, hour_of_day) / peak_busyness
+        else:
             overall_busy = 0.0
 
-        # Move-from-home probability scales with overall busyness (capped)
-        # You can tune the multiplier for more/less mobility.
         base_move_prob = min(0.35, 0.85 * overall_busy)
 
         # Decide moves for each person at home

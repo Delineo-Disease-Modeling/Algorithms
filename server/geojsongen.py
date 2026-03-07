@@ -60,38 +60,23 @@ def _normalize_cbg_columns(gdf, state_abbr=None):
 @lru_cache(maxsize=10)
 def load_state_shapefile(state_fips):
     """Load shapefile for a specific state."""
-    shapefile_dir = r"./data/shapefiles/"
     shapefile_dir_2016 = r"./data/shapefiles_2016/"
+    state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
 
-    # Prefer 2016 TIGER/Line BG shapefiles to match SafeGraph/Open Census 2016 CBG IDs.
+    # Require 2016 TIGER/Line BG shapefiles to match SafeGraph/Open Census 2016 CBG IDs.
     shapefile_2016_path = os.path.join(
         shapefile_dir_2016,
         f"tl_2016_{state_fips}_bg",
         f"tl_2016_{state_fips}_bg.shp"
     )
     if os.path.exists(shapefile_2016_path):
-        state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
         return _normalize_cbg_columns(gpd.read_file(shapefile_2016_path), state_abbr=state_abbr)
 
-    # Next try 2020 TIGER/Line BG shapefiles.
-    shapefile_2020_path = os.path.join(shapefile_dir, f"tl_2020_{state_fips}_bg", f"tl_2020_{state_fips}_bg.shp")
-    if os.path.exists(shapefile_2020_path):
-        state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
-        return _normalize_cbg_columns(gpd.read_file(shapefile_2020_path), state_abbr=state_abbr)
-
-    # Try state abbreviation geojson format
-    state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
-    if state_abbr:
-        geojson_path = os.path.join(shapefile_dir, f"{state_abbr}.geojson")
-        if os.path.exists(geojson_path):
-            return _normalize_cbg_columns(gpd.read_file(geojson_path), state_abbr=state_abbr)
-    
-    # Try FIPS-named geojson as fallback
-    geojson_path = os.path.join(shapefile_dir, f"{state_fips}.geojson")
-    if os.path.exists(geojson_path):
-        return _normalize_cbg_columns(gpd.read_file(geojson_path), state_abbr=state_abbr)
-    
-    print(f"No shapefile found for state FIPS {state_fips} (abbr: {state_abbr})")
+    print(
+        "WARNING: Missing 2016 TIGER/Line shapefile for "
+        f"state FIPS {state_fips} (abbr: {state_abbr}) at {shapefile_2016_path}. "
+        "Legacy fallback is disabled."
+    )
     return None
 
 

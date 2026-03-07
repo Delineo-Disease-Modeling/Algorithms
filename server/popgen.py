@@ -34,12 +34,9 @@ def _resolve_poi_source_file(poi_source_file: Optional[str] = None) -> str:
     """
     Resolve the source CSV used to map CBGs to POIs for papdata generation.
     """
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
     candidates = [
         poi_source_file,
         os.getenv('DELINEO_POI_SOURCE_FILE'),
-        os.path.join(data_dir, 'patterns.csv'),
-        os.path.join(data_dir, 'patterns_o.csv'),
     ]
 
     checked: List[str] = []
@@ -65,7 +62,8 @@ def _resolve_poi_source_file(poi_source_file: Optional[str] = None) -> str:
     raise FileNotFoundError(
         "No valid POI source CSV found. Checked: "
         + ", ".join(checked)
-        + f". Required columns: {POI_SOURCE_REQUIRED_COLUMNS}"
+        + ". Global default fallback is disabled; provide a state-scoped source file. "
+        + f"Required columns: {POI_SOURCE_REQUIRED_COLUMNS}"
     )
 
 
