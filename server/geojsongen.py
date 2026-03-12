@@ -30,40 +30,53 @@ STATE_FIPS_TO_ABBR = {
 
 
 # Cache loaded shapefiles to avoid reloading
+def _normalize_cbg_columns(gdf, state_abbr=None):
+    """Normalize common CBG geometry column names/types across vintages."""
+    if gdf is None:
+        return gdf
+
+    gdf = gdf.copy()
+
+    if 'GEOID' not in gdf.columns and 'CensusBlockGroup' in gdf.columns:
+        gdf['GEOID'] = gdf['CensusBlockGroup']
+    if 'CensusBlockGroup' not in gdf.columns and 'GEOID' in gdf.columns:
+        gdf['CensusBlockGroup'] = gdf['GEOID']
+
+    for col in ('GEOID', 'CensusBlockGroup'):
+        if col in gdf.columns:
+            gdf[col] = (
+                gdf[col]
+                .astype(str)
+                .str.replace(r'\.0$', '', regex=True)
+                .str.zfill(12)
+            )
+
+    if state_abbr and 'State' not in gdf.columns:
+        gdf['State'] = state_abbr
+
+    return gdf
+
+
 @lru_cache(maxsize=10)
 def load_state_shapefile(state_fips):
     """Load shapefile for a specific state."""
-    shapefile_dir = r"./data/shapefiles/"
-    
-    # First try FIPS-named shapefile format (tl_2020_XX_bg)
-    shapefile_path = os.path.join(shapefile_dir, f"tl_2020_{state_fips}_bg", f"tl_2020_{state_fips}_bg.shp")
-    
-    if os.path.exists(shapefile_path):
-        gdf = gpd.read_file(shapefile_path)
-        if 'GEOID' not in gdf.columns and 'CensusBlockGroup' in gdf.columns:
-            gdf['GEOID'] = gdf['CensusBlockGroup']
-        return gdf
-    
-    # Try state abbreviation geojson format
+    shapefile_dir_2016 = r"./data/shapefiles_2016/"
     state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
-    if state_abbr:
-        geojson_path = os.path.join(shapefile_dir, f"{state_abbr}.geojson")
-        if os.path.exists(geojson_path):
-            gdf = gpd.read_file(geojson_path)
-            # Normalize column names
-            if 'GEOID' not in gdf.columns and 'CensusBlockGroup' in gdf.columns:
-                gdf['GEOID'] = gdf['CensusBlockGroup']
-            return gdf
-    
-    # Try FIPS-named geojson as fallback
-    geojson_path = os.path.join(shapefile_dir, f"{state_fips}.geojson")
-    if os.path.exists(geojson_path):
-        gdf = gpd.read_file(geojson_path)
-        if 'GEOID' not in gdf.columns and 'CensusBlockGroup' in gdf.columns:
-            gdf['GEOID'] = gdf['CensusBlockGroup']
-        return gdf
-    
-    print(f"No shapefile found for state FIPS {state_fips} (abbr: {state_abbr})")
+
+    # Require 2016 TIGER/Line BG shapefiles to match SafeGraph/Open Census 2016 CBG IDs.
+    shapefile_2016_path = os.path.join(
+        shapefile_dir_2016,
+        f"tl_2016_{state_fips}_bg",
+        f"tl_2016_{state_fips}_bg.shp"
+    )
+    if os.path.exists(shapefile_2016_path):
+        return _normalize_cbg_columns(gpd.read_file(shapefile_2016_path), state_abbr=state_abbr)
+
+    print(
+        "WARNING: Missing 2016 TIGER/Line shapefile for "
+        f"state FIPS {state_fips} (abbr: {state_abbr}) at {shapefile_2016_path}. "
+        "Legacy fallback is disabled."
+    )
     return None
 
 
