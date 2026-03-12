@@ -4,9 +4,10 @@ Shared Patterns Data Loader
 Resolves state-specific monthly pattern files and loads them once for
 shared use across all algorithm steps (CZ clustering, popgen, patterns gen).
 
-New file layout:
+New file layout (compressed, preferred):
+    data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv.gz
+Legacy/uncompressed fallback:
     data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv
-    e.g.  data/patterns/OK/2025-04-OK.csv
 
 Column names in new files are UPPERCASE; this module normalizes them to
 lowercase so downstream code works unchanged.
@@ -68,12 +69,46 @@ def states_from_cbgs(cbgs: List[str]) -> List[str]:
     return states
 
 
+def _available_months_for_state(state: str, base_dir: str) -> List[str]:
+    """List available month keys (YYYY-MM) for a state directory, sorted."""
+    import re
+    state_dir = os.path.join(base_dir, state.upper())
+    if not os.path.isdir(state_dir):
+        return []
+    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.csv(?:\.gz)?$', re.IGNORECASE)
+    months = set()
+    for f in os.listdir(state_dir):
+        m = pat.match(f)
+        if m:
+            months.add(m.group(1))
+    return sorted(months)
+
+
+def closest_month(requested: str, available: List[str]) -> Optional[str]:
+    """
+    Return the available month closest to the requested month.
+    If equidistant, prefers the earlier month.
+    """
+    if not available:
+        return None
+    if requested in available:
+        return requested
+    # Parse to comparable (year, month) tuples
+    def _ym(mk):
+        parts = mk.split('-')
+        return int(parts[0]) * 12 + int(parts[1])
+    req = _ym(requested)
+    best = min(available, key=lambda m: (abs(_ym(m) - req), _ym(m)))
+    return best
+
+
 def resolve_patterns_files(states: List[str], start_date: datetime,
                            base_dir: str = None) -> List[str]:
     """
-    Resolve patterns CSV file path(s) for given states and date.
+    Resolve patterns file path(s) for given states and date.
 
-    Looks for:  {base_dir}/{STATE}/{YYYY-MM}-{STATE}.csv
+    Prefers .csv.gz, falls back to .csv.
+    Looks in: {base_dir}/{STATE}/{YYYY-MM}-{STATE}.csv.gz  (then .csv)
 
     Args:
         states: State abbreviations (e.g. ['OK', 'TX'])
@@ -91,17 +126,33 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
 
     for state in states:
         state_upper = state.upper()
-        # Primary: {base_dir}/{STATE}/{YYYY-MM}-{STATE}.csv
-        path = os.path.join(base_dir, state_upper, f'{month_key}-{state_upper}.csv')
-        if os.path.exists(path):
-            files.append(path)
-            continue
-        # Fallback: flat layout {base_dir}/{YYYY-MM}-{STATE}.csv
-        alt = os.path.join(base_dir, f'{month_key}-{state_upper}.csv')
-        if os.path.exists(alt):
-            files.append(alt)
-            continue
-        logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
+        # Try exact month first, then fall back to closest available
+        months_to_try = [month_key]
+        available = _available_months_for_state(state_upper, base_dir)
+        nearest = closest_month(month_key, available)
+        if nearest and nearest != month_key:
+            months_to_try.append(nearest)
+            logger.info(f"No exact match for {state_upper}/{month_key}, "
+                        f"using closest available month: {nearest}")
+
+        found = False
+        for mk in months_to_try:
+            stem = f'{mk}-{state_upper}'
+            candidates = [
+                os.path.join(base_dir, state_upper, f'{stem}.csv.gz'),
+                os.path.join(base_dir, state_upper, f'{stem}.csv'),
+                os.path.join(base_dir, f'{stem}.csv.gz'),
+                os.path.join(base_dir, f'{stem}.csv'),
+            ]
+            for path in candidates:
+                if os.path.exists(path):
+                    files.append(path)
+                    found = True
+                    break
+            if found:
+                break
+        if not found:
+            logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
 
     return files
 

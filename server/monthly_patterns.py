@@ -3,8 +3,8 @@ Monthly Patterns Utility Module
 
 Manages monthly SafeGraph patterns files for multi-month simulations.
 
-Supported file layouts:
-    New (state-specific folders):  data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv
+Supported file layouts (prefers .csv.gz over .csv):
+    New (state-specific folders):  data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv.gz
     Legacy (flat folder):         {folder}/{YYYY-MM}-{STATE}.csv  or  {folder}/{YYYY-MM}.csv
 """
 
@@ -36,17 +36,17 @@ def discover_monthly_files(folder_path: str, state: Optional[str] = None) -> Dic
     if not os.path.isdir(folder_path):
         raise ValueError(f"Folder not found: {folder_path}")
 
-    # Patterns to match:
-    # 1. YYYY-MM-STATE.csv (e.g., 2019-01-OK.csv)
-    # 2. YYYY-MM.csv (e.g., 2019-01.csv)
-    pattern_with_state = re.compile(r'^(\d{4}-\d{2})-([A-Z]{2})\.csv$', re.IGNORECASE)
-    pattern_simple = re.compile(r'^(\d{4}-\d{2})\.csv$', re.IGNORECASE)
+    # Patterns to match (supports .csv.gz and .csv):
+    # 1. YYYY-MM-STATE.csv.gz or YYYY-MM-STATE.csv
+    # 2. YYYY-MM.csv.gz or YYYY-MM.csv
+    pattern_with_state = re.compile(r'^(\d{4}-\d{2})-([A-Z]{2})\.csv(?:\.gz)?$', re.IGNORECASE)
+    pattern_simple = re.compile(r'^(\d{4}-\d{2})\.csv(?:\.gz)?$', re.IGNORECASE)
 
     monthly_files = {}
 
     # Helper to scan a single directory for matching files
     def _scan_dir(scan_path):
-        for filename in os.listdir(scan_path):
+        for filename in sorted(os.listdir(scan_path)):
             month_key = None
             file_state = None
 
@@ -65,6 +65,9 @@ def discover_monthly_files(folder_path: str, state: Optional[str] = None) -> Dic
                     continue
 
                 full_path = os.path.join(scan_path, filename)
+                # Prefer .csv.gz over .csv — skip if we already have a .gz for this month
+                if month_key in monthly_files and monthly_files[month_key].endswith('.csv.gz'):
+                    continue
                 monthly_files[month_key] = full_path
                 print(f"[MONTHLY_PATTERNS]   Found: {month_key} -> {full_path}")
 

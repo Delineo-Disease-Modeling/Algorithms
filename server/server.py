@@ -157,21 +157,26 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
 
   candidates = []
   if state_abbr:
-    # Prefer converted monthly files first (normalized lowercase schema).
+    stem = f'{month_key}-{state_abbr}'
+    # Prefer .csv.gz, then converted, then plain .csv
     candidates.extend([
-      os.path.join(DATA_DIR, state_abbr, f'{month_key}-{state_abbr}.converted.csv'),
-      os.path.join(DATA_DIR, f'{month_key}-{state_abbr}.converted.csv'),
+      os.path.join(DATA_DIR, state_abbr, f'{stem}.csv.gz'),
+      os.path.join(DATA_DIR, state_abbr, f'{stem}.converted.csv'),
+      os.path.join(DATA_DIR, state_abbr, f'{stem}.csv'),
+      os.path.join(DATA_DIR, f'{stem}.csv.gz'),
+      os.path.join(DATA_DIR, f'{stem}.converted.csv'),
+      os.path.join(DATA_DIR, f'{stem}.csv'),
     ])
     candidates.extend(sorted(glob.glob(
-      os.path.join(DATA_DIR, '**', f'{month_key}-{state_abbr}.converted.csv'),
+      os.path.join(DATA_DIR, '**', f'{stem}.csv.gz'),
       recursive=True
     )))
-    candidates.extend([
-      os.path.join(DATA_DIR, state_abbr, f'{month_key}-{state_abbr}.csv'),
-      os.path.join(DATA_DIR, f'{month_key}-{state_abbr}.csv'),
-    ])
     candidates.extend(sorted(glob.glob(
-      os.path.join(DATA_DIR, '**', f'{month_key}-{state_abbr}.csv'),
+      os.path.join(DATA_DIR, '**', f'{stem}.converted.csv'),
+      recursive=True
+    )))
+    candidates.extend(sorted(glob.glob(
+      os.path.join(DATA_DIR, '**', f'{stem}.csv'),
       recursive=True
     )))
 
@@ -190,6 +195,7 @@ def _list_available_months_for_state(cbg_str):
     return []
 
   patterns = [
+    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.csv.gz'),
     os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.converted.csv'),
     os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.csv'),
   ]
@@ -227,21 +233,29 @@ def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_d
       if resolved_month:
         patterns_month = resolved_month
     else:
+      # Exact month not found — try closest available month
       state_fips = str(seed_cbg)[:2]
       state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
       available = _list_available_months_for_state(seed_cbg)
-      if state_abbr and available:
+      if available:
+        from patterns_loader import closest_month
+        nearest = closest_month(requested_month, available)
+        if nearest:
+          monthly_file = _resolve_monthly_patterns_file(seed_cbg, nearest)
+          if monthly_file:
+            patterns_file = monthly_file
+            patterns_source = 'monthly'
+            patterns_month = nearest
+            print(f"[PATTERNS] No data for {requested_month}, using closest month: {nearest}")
+      # If still nothing, raise
+      if not patterns_file:
+        if state_abbr:
+          raise ValueError(
+            f"No monthly patterns files found for state {state_abbr} (requested month '{requested_month}')."
+          )
         raise ValueError(
-          f"No monthly patterns file found for month '{requested_month}' in state {state_abbr}. "
-          f"Available months: {', '.join(available)}."
+          f"No monthly patterns file found for requested month '{requested_month}'."
         )
-      if state_abbr:
-        raise ValueError(
-          f"No monthly patterns files found for state {state_abbr} (requested month '{requested_month}')."
-        )
-      raise ValueError(
-        f"No monthly patterns file found for requested month '{requested_month}'."
-      )
 
   if not patterns_file and not requested_month:
     state_fips = str(seed_cbg)[:2]
@@ -257,7 +271,7 @@ def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_d
     if not patterns_file and state_abbr:
       raise ValueError(
         f"Missing start_date for patterns resolution, and no monthly patterns files were found for state {state_abbr}. "
-        f"Expected files like '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.converted.csv' "
+        f"Expected files like '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.csv.gz' "
         f"or '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.csv'."
       )
     if not patterns_file:

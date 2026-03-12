@@ -150,21 +150,29 @@ class Config:
 
             candidate_paths = []
             for state in state_candidates:
+                stem = f"{month_key}-{state}"
                 candidate_paths.extend([
-                    os.path.join(search_root, state, f"{month_key}-{state}.converted.csv"),
-                    os.path.join(search_root, state, f"{month_key}-{state}.csv"),
-                    os.path.join(search_root, f"{month_key}-{state}.converted.csv"),
-                    os.path.join(search_root, f"{month_key}-{state}.csv"),
+                    os.path.join(search_root, state, f"{stem}.csv.gz"),
+                    os.path.join(search_root, state, f"{stem}.converted.csv"),
+                    os.path.join(search_root, state, f"{stem}.csv"),
+                    os.path.join(search_root, f"{stem}.csv.gz"),
+                    os.path.join(search_root, f"{stem}.converted.csv"),
+                    os.path.join(search_root, f"{stem}.csv"),
                 ])
 
             import glob
             for state in state_candidates:
+                stem = f"{month_key}-{state}"
                 candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{month_key}-{state}.converted.csv"),
+                    os.path.join(search_root, "**", f"{stem}.csv.gz"),
                     recursive=True
                 )))
                 candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{month_key}-{state}.csv"),
+                    os.path.join(search_root, "**", f"{stem}.converted.csv"),
+                    recursive=True
+                )))
+                candidate_paths.extend(sorted(glob.glob(
+                    os.path.join(search_root, "**", f"{stem}.csv"),
                     recursive=True
                 )))
 
@@ -181,11 +189,31 @@ class Config:
                 if os.path.exists(path):
                     return path
 
+            # Exact month not found — try closest available month
+            from patterns_loader import closest_month, _available_months_for_state
+            for state in state_candidates:
+                available = _available_months_for_state(state, search_root)
+                nearest = closest_month(month_key, available)
+                if nearest and nearest != month_key:
+                    nearest_stem = f"{nearest}-{state}"
+                    fallback_candidates = [
+                        os.path.join(search_root, state, f"{nearest_stem}.csv.gz"),
+                        os.path.join(search_root, state, f"{nearest_stem}.converted.csv"),
+                        os.path.join(search_root, state, f"{nearest_stem}.csv"),
+                    ]
+                    for path in fallback_candidates:
+                        if os.path.exists(path):
+                            import logging
+                            logging.getLogger('cbg_clustering').info(
+                                f"No data for {month_key}, using closest month: {nearest}"
+                            )
+                            return path
+
             states_msg = ", ".join(state_candidates) if state_candidates else "unknown state"
             raise FileNotFoundError(
                 f"No state-scoped monthly patterns file found for month '{month_key}' "
                 f"under {search_root} for {states_msg}. "
-                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.converted.csv' "
+                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.csv.gz' "
                 "or '<DATA>/<STATE>/YYYY-MM-<STATE>.csv'."
             )
 
