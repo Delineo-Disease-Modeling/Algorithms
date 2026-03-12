@@ -15,6 +15,9 @@ from czcode import (
 from popgen import gen_pop
 from patterns import gen_patterns
 from geojsongen import get_cbg_geojson, get_cbg_at_point
+from patterns_loader import (
+    PatternsData, resolve_patterns_files, states_from_cbgs, PATTERNS_BASE_DIR
+)
 from datetime import datetime
 import os
 import csv
@@ -632,7 +635,10 @@ def _parse_czi_optimal_params(payload):
 def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
                         patterns_file=None, patterns_folder=None):
   """Generate papdata and patterns, upload to DB API.
-  
+
+  Loads the patterns CSV once and shares it across popgen and patterns gen
+  to minimize I/O and memory usage.
+
   Args:
     geoids: Dictionary of CBG -> population
     czone_id: Convenience zone ID
@@ -640,35 +646,74 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     length: Length in hours
     report: RunReport for logging
     gdf: Optional GeoDataFrame with CBG geometries for residential sampling
+    patterns_file: Optional explicit patterns CSV file path
+    patterns_folder: Optional folder containing monthly pattern files
   """
   try:
+    # --- Load patterns data once for both popgen and patterns gen ---
+    shared_data = None
+    resolved_csv = patterns_file  # track which CSV we resolved to
+
+    if not patterns_file:
+      # Auto-resolve from state + month using new folder structure
+      cbgs = list(geoids.keys())
+      states = states_from_cbgs(cbgs)
+      if states:
+        resolved_files = resolve_patterns_files(states, start_date)
+        if resolved_files:
+          report.info(f'Auto-resolved patterns files: {resolved_files}')
+          cbg_set = set(cbgs)
+          shared_data = PatternsData.load(resolved_files, cbg_set=cbg_set)
+          resolved_csv = resolved_files[0]
+
+    # If no state-specific files found, try legacy patterns.csv
+    if shared_data is None and not patterns_file:
+      legacy_csv = os.path.join(os.path.dirname(__file__), 'data', 'patterns.csv')
+      if os.path.exists(legacy_csv):
+        report.info(f'Using legacy patterns.csv')
+        cbg_set = set(geoids.keys())
+        shared_data = PatternsData.from_legacy_csv(legacy_csv, cbg_set=cbg_set)
+        resolved_csv = legacy_csv
+
+    if patterns_file and not shared_data:
+      # Explicit file provided but not yet loaded as shared data
+      cbg_set = set(geoids.keys())
+      shared_data = PatternsData.from_legacy_csv(patterns_file, cbg_set=cbg_set)
+
+    report.info(f'Patterns data loaded: {len(shared_data.df) if shared_data else 0} rows')
+
     # Generate People, Households, Places data
     report.info('Generating synthetic population (papdata)...')
-    papdata = gen_pop(geoids, gdf=gdf, poi_source_file=patterns_file)
+    papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data,
+                      patterns_csv=resolved_csv)
     people_count = len(papdata.get('people', {}))
     homes_count = len(papdata.get('homes', {}))
     places_count = len(papdata.get('places', {}))
-    
+
     # Check if homes have coordinates
-    homes_with_coords = sum(1 for h in papdata.get('homes', {}).values() 
+    homes_with_coords = sum(1 for h in papdata.get('homes', {}).values()
                            if h.get('latitude') is not None)
     if homes_with_coords > 0:
       report.info(f'Generated papdata: {people_count} people, {homes_count} homes ({homes_with_coords} with coordinates), {places_count} places')
     else:
       report.info(f'Generated papdata: {people_count} people, {homes_count} homes, {places_count} places')
-    
-    # Generate movement patterns
+
+    # Generate movement patterns (reusing shared_data)
     report.info('Generating movement patterns...')
     patterns = gen_patterns(
       papdata,
       start_date,
       length,
       patterns_file=patterns_file,
-      patterns_folder=patterns_folder
+      patterns_folder=patterns_folder,
+      shared_data=shared_data
     )
     patterns_count = len(patterns)
     report.info(f'Generated {patterns_count} timestep patterns')
-        
+
+    # Free shared data before upload to reduce peak memory
+    del shared_data
+
     report.info('Uploading data to DB API...')
     resp = requests.post('http://localhost:3000/api/patterns', data={
       'czone_id': int(czone_id),
@@ -676,7 +721,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
       'papdata': ('papdata.json', BytesIO(json.dumps(papdata).encode()), 'text/plain'),
       'patterns': ('patterns.json', BytesIO(json.dumps(patterns).encode()), 'text/plain')
     })
-    
+
     if resp.ok:
       report.info('Data uploaded successfully!')
       report.complete(summary={
@@ -1025,10 +1070,9 @@ def _rank_frontier_candidates_for_cluster(
 
 def create_cz(data, report):
   """Create convenience zone and schedule data generation."""
-  """Create convenience zone and schedule data generation."""
   report.info(f"Generating CZ from CBG: {data['cbg']}")
   report.info(f"Target minimum population: {data['min_pop']}")
-  
+
   algorithm = _normalize_cluster_algorithm(data.get('algorithm'))
   if not algorithm:
     raise ValueError(
@@ -1056,6 +1100,15 @@ def create_cz(data, report):
   if not seed_cbg:
     raise ValueError("Invalid 'cbg': expected exactly 12 digits")
 
+  # Parse start_date for auto-resolving monthly patterns
+  cz_start_date = None
+  if data.get('start_date'):
+    try:
+      sd = data['start_date'].replace("Z", "+00:00")
+      cz_start_date = datetime.fromisoformat(sd)
+    except Exception:
+      pass
+
   use_test_data = bool(data.get('use_test_data'))
   patterns_file, patterns_source, patterns_month = _resolve_patterns_file_for_request(
     seed_cbg,
@@ -1078,6 +1131,7 @@ def create_cz(data, report):
     seed_cbg,
     data['min_pop'],
     patterns_file=patterns_file,
+    start_date=cz_start_date,
     algorithm=algorithm,
     distance_penalty_weight=czi_params.get('distance_penalty_weight'),
     distance_scale_km=czi_params.get('distance_scale_km'),

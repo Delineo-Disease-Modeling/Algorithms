@@ -666,38 +666,43 @@ class SyntheticPopulationGenerator:
         return population_df
 
 
-def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
+def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
+                 shared_data=None, patterns_csv=None):
     """
-    Convert data frame with person and household information into a specific dictionary format
-    
+    Convert data frame with person and household information into a specific dictionary format.
+
     Args:
-        input_file (str): Path to input CSV file
-        output_file (str): Path to output JSON file
+        df: DataFrame with person/household data
+        cz_data: Dictionary mapping CBG IDs to population counts
+        poi_source_file: Optional path to a POI source CSV (used in fallback resolution)
+        shared_data: Optional pre-loaded PatternsData (avoids re-reading CSV)
+        patterns_csv: Optional path to patterns CSV (used if shared_data not provided)
     """
-    
+    from patterns_loader import PatternsData
+
     # Initialize output dictionary
     output = {
         "people": {},
         "homes": {},
         "places": {}
     }
-    
+
     # Create mappings
     # For sex: M -> 0, F -> 1
     sex_mapping = {"M": 0, "F": 1}
-    
+
     # Process each row in the dataframe
     for index, row in df.iterrows():
         person_id = str(row['person_id'])
         household_id = str(row['household_id'])
-        
+
         # Add person to people dictionary
         output["people"][person_id] = {
             "sex": sex_mapping.get(row['gender']),
             "age": row['age'],
             "home": household_id
         }
-        
+
         # Add or update household in homes dictionary
         if household_id not in output["homes"]:
             home_data = {
@@ -711,26 +716,47 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
             output["homes"][household_id] = home_data
         else:
             output["homes"][household_id]["members"] += 1
-    
-    # Get places from the configured patterns dataset.
+
+    # Get places from the patterns data
     cbgs = list(cz_data.keys())
-    placekeys = []
-    source_csv = _resolve_poi_source_file(poi_source_file)
-    with pd.read_csv(source_csv, chunksize=10000, usecols=['poi_cbg', 'placekey']) as reader:
-        for chunk in reader:
-            for i, row in chunk.iterrows():
+    cbg_set = set(cbgs)
+    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code']
+
+    if shared_data is not None and not shared_data.is_empty():
+        # Use pre-loaded shared data (no CSV re-read needed)
+        placekeys = shared_data.get_placekeys_for_cbgs(cbg_set)
+        places = shared_data.for_popgen_places(placekeys)
+    else:
+        # Fallback: resolve the source CSV via poi_source_file or patterns_csv
+        source_csv = None
+        if poi_source_file:
+            try:
+                source_csv = _resolve_poi_source_file(poi_source_file)
+            except FileNotFoundError:
+                source_csv = None
+        if source_csv is None:
+            source_csv = patterns_csv or r'./data/patterns.csv'
+
+        placekeys = []
+        # Read only the columns we need, in chunks, with case normalization
+        for chunk in pd.read_csv(source_csv, chunksize=10000,
+                                 usecols=lambda c: c.lower() in ('poi_cbg', 'placekey')):
+            chunk.columns = chunk.columns.str.lower()
+            for _, row in chunk.iterrows():
                 try:
                     cbg = str(int(float(row['poi_cbg'])))
-                    if cbg in cbgs:
+                    if cbg in cbg_set:
                         placekeys.append(row['placekey'])
-                except:
+                except Exception:
                     continue
 
-    source_headers = set(_read_csv_headers(source_csv))
-    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code']
-    available_metadata_cols = [col for col in metadata_cols if col in source_headers]
-    places = pd.read_csv(source_csv, usecols=['placekey'] + available_metadata_cols)
-    places = places[places['placekey'].isin(placekeys)].reset_index()
+        # Read place details with case-insensitive column selection
+        places = pd.read_csv(source_csv,
+                             usecols=lambda c: c.lower() in (
+                                 'placekey', 'location_name', 'top_category',
+                                 'latitude', 'longitude', 'postal_code'))
+        places.columns = places.columns.str.lower()
+        places = places[places['placekey'].isin(placekeys)].reset_index(drop=True)
 
     for col in metadata_cols:
         if col not in places.columns:
@@ -746,41 +772,45 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
             'postal_code': row['postal_code']
         }
-    
+
     return output
 
-def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None):
+def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None,
+            shared_data=None, patterns_csv=None):
     """
     Generate synthetic population for a convenience zone.
-    
+
     Args:
         cz_data: Dictionary mapping CBG IDs to population counts
         gdf: Optional GeoDataFrame with CBG geometries for residential area sampling
-    
+        poi_source_file: Optional path to a POI source CSV (passed to convert_data)
+        shared_data: Optional pre-loaded PatternsData to share with convert_data
+        patterns_csv: Optional patterns CSV path (used if shared_data not provided)
+
     Returns:
         Dictionary with people, homes, and places data (papdata format)
     """
     # Create data puller
     datapuller = CensusDataPuller()
-        
+
     # Call datapuller on specified state and counties
     cbgs = list(cz_data.keys())
     states = list(set([i[:2] for i in cbgs]))
     if len(states) > 1:
         print('Warning: Multiple states found in the provided CBGs.')
        #raise ValueError("Multiple states found in the provided CBGs.")
-    
+
     STATE_FIPS = states[0]
     COUNTIES_FIPS = list(set([i[2:5] for i in cbgs]))
 
     census_data = datapuller.pull_counties_census_data(STATE_FIPS, COUNTIES_FIPS, None)
-    
+
     # Create population generator with optional gdf for residential sampling
     generator = SyntheticPopulationGenerator(census_data, cz_data, gdf=gdf)
-    
+
     # Generate population for all counties (with a small sample factor)
     population = generator.generate_full_population(sample_factor=0.01)
-    
+
     # Validate the population
     try:
         validation_results = generator.validate_population(population)
@@ -789,11 +819,12 @@ def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None):
             print(f"{key}: {value}")
     except:
         print("\nERROR: COULD NOT VALIDATE POPULATION\n")
-    
+
     # Save the population to CSV
     population = generator.save_population(population)
 
-    return convert_data(population, cz_data, poi_source_file=poi_source_file)
+    return convert_data(population, cz_data, poi_source_file=poi_source_file,
+                        shared_data=shared_data, patterns_csv=patterns_csv)
 
 if __name__ == '__main__':
     try:
