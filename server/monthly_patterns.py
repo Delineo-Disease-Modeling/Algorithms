@@ -2,7 +2,10 @@
 Monthly Patterns Utility Module
 
 Manages monthly SafeGraph patterns files for multi-month simulations.
-Files should be named in the format: YYYY-MM-{STATE}.csv (e.g., 2019-01-OK.csv)
+
+Supported file layouts (prefers .csv.gz over .csv):
+    New (state-specific folders):  data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv.gz
+    Legacy (flat folder):         {folder}/{YYYY-MM}-{STATE}.csv  or  {folder}/{YYYY-MM}.csv
 """
 
 import os
@@ -15,15 +18,16 @@ from datetime import datetime
 def discover_monthly_files(folder_path: str, state: Optional[str] = None) -> Dict[str, str]:
     """
     Discover all monthly pattern files in a folder.
-    
-    Supports multiple naming conventions:
-        - YYYY-MM-STATE.csv (e.g., 2019-01-OK.csv)
-        - YYYY-MM.csv (e.g., 2019-01.csv) - for state-specific folders
-    
+
+    Supports multiple naming conventions and folder layouts:
+        - {folder}/{STATE}/{YYYY-MM}-{STATE}.csv  (new state-subfolder layout)
+        - {folder}/{YYYY-MM}-{STATE}.csv           (flat layout with state suffix)
+        - {folder}/{YYYY-MM}.csv                   (flat layout, state-specific folders)
+
     Args:
         folder_path: Path to the folder containing monthly CSV files
         state: Optional state code to filter by (e.g., 'OK', 'MD')
-    
+
     Returns:
         Dict mapping month keys (YYYY-MM) to file paths, sorted chronologically
         e.g., {'2019-01': '/path/2019-01-OK.csv', '2019-02': '/path/2019-02-OK.csv'}
@@ -31,40 +35,51 @@ def discover_monthly_files(folder_path: str, state: Optional[str] = None) -> Dic
     print(f"[MONTHLY_PATTERNS] Discovering files in: {folder_path} (state filter: {state})")
     if not os.path.isdir(folder_path):
         raise ValueError(f"Folder not found: {folder_path}")
-    
-    # Patterns to match:
-    # 1. YYYY-MM-STATE.csv (e.g., 2019-01-OK.csv)
-    # 2. YYYY-MM.csv (e.g., 2019-01.csv)
-    pattern_with_state = re.compile(r'^(\d{4}-\d{2})-([A-Z]{2})\.csv$', re.IGNORECASE)
-    pattern_simple = re.compile(r'^(\d{4}-\d{2})\.csv$', re.IGNORECASE)
-    
+
+    # Patterns to match (supports .csv.gz and .csv):
+    # 1. YYYY-MM-STATE.csv.gz or YYYY-MM-STATE.csv
+    # 2. YYYY-MM.csv.gz or YYYY-MM.csv
+    pattern_with_state = re.compile(r'^(\d{4}-\d{2})-([A-Z]{2})\.csv(?:\.gz)?$', re.IGNORECASE)
+    pattern_simple = re.compile(r'^(\d{4}-\d{2})\.csv(?:\.gz)?$', re.IGNORECASE)
+
     monthly_files = {}
-    for filename in os.listdir(folder_path):
-        month_key = None
-        file_state = None
-        
-        # Try pattern with state first
-        match = pattern_with_state.match(filename)
-        if match:
-            month_key = match.group(1)  # e.g., "2019-01"
-            file_state = match.group(2)  # e.g., "OK"
-        else:
-            # Try simple pattern
-            match = pattern_simple.match(filename)
+
+    # Helper to scan a single directory for matching files
+    def _scan_dir(scan_path):
+        for filename in sorted(os.listdir(scan_path)):
+            month_key = None
+            file_state = None
+
+            match = pattern_with_state.match(filename)
             if match:
                 month_key = match.group(1)
-                file_state = None
-        
-        if month_key:
-            # Filter by state if specified
-            if state and file_state and file_state.upper() != state.upper():
-                print(f"[MONTHLY_PATTERNS]   Skipping {filename} (state mismatch: {file_state} != {state})")
-                continue
-            
-            full_path = os.path.join(folder_path, filename)
-            monthly_files[month_key] = full_path
-            print(f"[MONTHLY_PATTERNS]   Found: {month_key} -> {full_path}")
-    
+                file_state = match.group(2)
+            else:
+                match = pattern_simple.match(filename)
+                if match:
+                    month_key = match.group(1)
+                    file_state = None
+
+            if month_key:
+                if state and file_state and file_state.upper() != state.upper():
+                    continue
+
+                full_path = os.path.join(scan_path, filename)
+                # Prefer .csv.gz over .csv — skip if we already have a .gz for this month
+                if month_key in monthly_files and monthly_files[month_key].endswith('.csv.gz'):
+                    continue
+                monthly_files[month_key] = full_path
+                print(f"[MONTHLY_PATTERNS]   Found: {month_key} -> {full_path}")
+
+    # Scan state subfolder first (new layout: data/patterns/{STATE}/)
+    if state:
+        state_dir = os.path.join(folder_path, state.upper())
+        if os.path.isdir(state_dir):
+            _scan_dir(state_dir)
+
+    # Also scan the folder itself (flat layout or generic files)
+    _scan_dir(folder_path)
+
     print(f"[MONTHLY_PATTERNS] Total files discovered: {len(monthly_files)}")
     # Sort by month chronologically
     return dict(sorted(monthly_files.items()))

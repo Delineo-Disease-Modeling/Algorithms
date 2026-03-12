@@ -20,6 +20,12 @@ except Exception:
 from folium import plugins
 from uszipcode import SearchEngine
 from math import sin, cos, atan2, pi, sqrt
+from datetime import datetime as _datetime
+from typing import Optional, List
+
+from patterns_loader import (
+    PatternsData, resolve_patterns_files, states_from_cbgs, PATTERNS_BASE_DIR
+)
 
 # USPS state abbreviation -> 2-digit state FIPS.
 STATE_ABBR_TO_FIPS = {
@@ -42,16 +48,18 @@ STATE_FIPS_TO_ABBR = {fips: abbr for abbr, fips in STATE_ABBR_TO_FIPS.items()}
 # Configuration Module
 # ----------------------------
 class Config:
-    def __init__(self, cbg, min_pop, patterns_file=None, patterns_folder=None, month=None):
+    def __init__(self, cbg, min_pop, patterns_file=None, patterns_folder=None,
+                 month=None, start_date: Optional[_datetime] = None):
         """
         Initialize configuration for CZ generation.
-        
+
         Args:
             cbg: Census Block Group GEOID
             min_pop: Minimum population for the cluster
             patterns_file: Optional specific patterns CSV file path
             patterns_folder: Optional folder containing monthly pattern files (e.g., 2019-01-OK.csv)
             month: Optional month key (YYYY-MM) when using patterns_folder
+            start_date: Optional simulation start date (used to auto-resolve monthly file)
         """
         zip_codes = []
         with open(r'./data/zip_to_cbg.json', 'r') as f:
@@ -59,21 +67,26 @@ class Config:
             for zip, cbgs in zip_to_cbg.items():
                 if cbg in cbgs:
                     zip_codes.append(zip)
-        
+
         search = SearchEngine()
         self.states = list(set([ search.by_zipcode(zip).state for zip in zip_codes ]))
-        self.states = list(set(self.states) | set(get_neighboring_states(self.states))) 
-        
+        self.states = list(set(self.states) | set(get_neighboring_states(self.states)))
+
         self.location_name = f'{cbg}'
         self.core_cbg = cbg
         self.min_cluster_pop = min_pop
         self.output_dir = r"./output"
-        
+        self.start_date = start_date
+
+        # Auto-derive month from start_date if not provided
+        if month is None and start_date is not None:
+            month = start_date.strftime('%Y-%m')
+
         # Determine which patterns file to use
         self.patterns_folder = patterns_folder
         self.month = month
         resolved_patterns_csv = self._resolve_patterns_file(patterns_file, patterns_folder, month)
-        
+
         self.paths = {
             "shapefiles_dir": r"./data/shapefiles/",
             "patterns_csv": resolved_patterns_csv,
@@ -95,21 +108,30 @@ class Config:
         }
         self.black_cbgs = [ ]
         os.makedirs(self.output_dir, exist_ok=True)
-    
+
     def _resolve_patterns_file(self, patterns_file, patterns_folder, month):
         """
         Resolve which patterns CSV file to use.
-        
+
         Priority:
         1. Explicit patterns_file if provided
-        2. State-scoped monthly file (converted preferred) when month is provided
+        2. Auto-resolve from state + month using patterns_loader (new folder structure)
+        3. State-scoped monthly file (converted preferred) when month is provided
         """
         # Priority 1: Explicit file
         if patterns_file:
             if os.path.exists(patterns_file):
                 return patterns_file
             raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
-        
+
+        # Priority 2: Auto-resolve from state + month using patterns_loader
+        if month and self.states:
+            resolved = resolve_patterns_files(self.states,
+                                              self.start_date or _datetime.now(),
+                                              PATTERNS_BASE_DIR)
+            if resolved:
+                return resolved[0]
+
         search_root = patterns_folder or os.path.join(os.path.dirname(__file__), "data")
         month_key = str(month or "").strip()
 
@@ -128,21 +150,29 @@ class Config:
 
             candidate_paths = []
             for state in state_candidates:
+                stem = f"{month_key}-{state}"
                 candidate_paths.extend([
-                    os.path.join(search_root, state, f"{month_key}-{state}.converted.csv"),
-                    os.path.join(search_root, state, f"{month_key}-{state}.csv"),
-                    os.path.join(search_root, f"{month_key}-{state}.converted.csv"),
-                    os.path.join(search_root, f"{month_key}-{state}.csv"),
+                    os.path.join(search_root, state, f"{stem}.csv.gz"),
+                    os.path.join(search_root, state, f"{stem}.converted.csv"),
+                    os.path.join(search_root, state, f"{stem}.csv"),
+                    os.path.join(search_root, f"{stem}.csv.gz"),
+                    os.path.join(search_root, f"{stem}.converted.csv"),
+                    os.path.join(search_root, f"{stem}.csv"),
                 ])
 
             import glob
             for state in state_candidates:
+                stem = f"{month_key}-{state}"
                 candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{month_key}-{state}.converted.csv"),
+                    os.path.join(search_root, "**", f"{stem}.csv.gz"),
                     recursive=True
                 )))
                 candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{month_key}-{state}.csv"),
+                    os.path.join(search_root, "**", f"{stem}.converted.csv"),
+                    recursive=True
+                )))
+                candidate_paths.extend(sorted(glob.glob(
+                    os.path.join(search_root, "**", f"{stem}.csv"),
                     recursive=True
                 )))
 
@@ -159,11 +189,31 @@ class Config:
                 if os.path.exists(path):
                     return path
 
+            # Exact month not found — try closest available month
+            from patterns_loader import closest_month, _available_months_for_state
+            for state in state_candidates:
+                available = _available_months_for_state(state, search_root)
+                nearest = closest_month(month_key, available)
+                if nearest and nearest != month_key:
+                    nearest_stem = f"{nearest}-{state}"
+                    fallback_candidates = [
+                        os.path.join(search_root, state, f"{nearest_stem}.csv.gz"),
+                        os.path.join(search_root, state, f"{nearest_stem}.converted.csv"),
+                        os.path.join(search_root, state, f"{nearest_stem}.csv"),
+                    ]
+                    for path in fallback_candidates:
+                        if os.path.exists(path):
+                            import logging
+                            logging.getLogger('cbg_clustering').info(
+                                f"No data for {month_key}, using closest month: {nearest}"
+                            )
+                            return path
+
             states_msg = ", ".join(state_candidates) if state_candidates else "unknown state"
             raise FileNotFoundError(
                 f"No state-scoped monthly patterns file found for month '{month_key}' "
                 f"under {search_root} for {states_msg}. "
-                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.converted.csv' "
+                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.csv.gz' "
                 "or '<DATA>/<STATE>/YYYY-MM-<STATE>.csv'."
             )
 
@@ -209,11 +259,27 @@ class DataLoader:
             zip_codes.extend(state_zips)
         return zip_codes
 
-    def load_safegraph_data(self, zip_codes):
+    def load_safegraph_data(self, zip_codes, shared_data: 'PatternsData' = None):
         """
         Load SafeGraph patterns data, filtering by zip codes.
         Uses month-aware caching when monthly patterns are configured.
+
+        Args:
+            zip_codes: List of zip codes to filter by
+            shared_data: Optional pre-loaded PatternsData to avoid re-reading CSV
         """
+        # If we have pre-loaded shared data, use it directly
+        if shared_data is not None and not shared_data.is_empty():
+            self.logger.info("Using pre-loaded shared patterns data for clustering")
+            df = shared_data.for_clustering()
+            # Normalize column names to lowercase
+            df.columns = [str(c).strip().lower() for c in df.columns]
+            if 'poi_cbg' in df.columns:
+                df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
+                df.dropna(subset=['poi_cbg'], inplace=True)
+                df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
+            return df
+
         patterns_csv = self.config.paths["patterns_csv"]
         source_stem = os.path.splitext(os.path.basename(patterns_csv))[0]
         source_mtime = int(os.path.getmtime(patterns_csv)) if os.path.exists(patterns_csv) else 0
@@ -221,7 +287,7 @@ class DataLoader:
         # Cache key includes source file + mtime so stale extracts are not reused.
         cache_version = "v3"
         filename = f"{self.config.location_name}_{month_part}_{source_stem}_{source_mtime}_{cache_version}.csv"
-        
+
         full_filename = os.path.join(self.config.output_dir, filename)
         try:
             self.logger.info(f"Loading SafeGraph data from {full_filename}")
@@ -275,13 +341,13 @@ class DataLoader:
                     f"Patterns file is missing required columns: {missing}. "
                     f"Available columns: {available}"
                 )
-            
+
             # Convert poi_cbg to proper strings
             df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
             df.dropna(subset=['poi_cbg'], inplace=True)
             # Now force truncation
             df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
-            
+
             df.to_csv(full_filename, index=False)
             self.logger.info(f"Saved processed data to {full_filename}")
         return df
@@ -292,7 +358,7 @@ class DataLoader:
         """
         self.logger.info("Loading shapefiles")
         gds = []
-        
+
         for state in self.config.states:
             state = str(state)
             state_fips = STATE_ABBR_TO_FIPS.get(state)
@@ -371,9 +437,9 @@ def get_neighboring_states(states):
     try:
         neighbors = []
         with open(r'data/neighbor-states.json', 'r') as f:
-            
+
             neighborlist = json.load(f)
-            
+
             for state in states:
                 for n in neighborlist:
                     if n['code'] == state:
@@ -507,16 +573,16 @@ class GraphBuilder:
         """
         self.logger.info("Generating graph from movement data")
         G = nx.Graph()
-        
+
         for _, row in df.iterrows():
             if not isinstance(row['visitor_daytime_cbgs'], str):
                 continue
-            
+
             try:
                 dst_cbg = str(int(float(row['poi_cbg'])))
             except (TypeError, ValueError):
                 continue
-            
+
             visitor_dict = json.loads(row['visitor_daytime_cbgs'])
             for visitor_cbg, count in visitor_dict.items():
                 try:
@@ -524,13 +590,13 @@ class GraphBuilder:
                     weight = float(count)
                     if weight <= 0:
                         continue
-                    
+
                     if src_cbg == dst_cbg:
                         if dst_cbg not in G:
                             G.add_node(dst_cbg, self_weight=0)
                         G.nodes[dst_cbg]['self_weight'] = G.nodes[dst_cbg].get('self_weight', 0) + weight
                         continue
-                    
+
                     if G.has_edge(src_cbg, dst_cbg):
                         G[src_cbg][dst_cbg]['weight'] += weight
                     else:
@@ -665,32 +731,32 @@ class Clustering:
         cluster = [u0]
         cluster_set = {u0}
         surround = list(set([j for j in list(G.adj[u0]) if j not in cluster_set]))
-        
+
         # Find all surrounding cbgs
         for j in list(G.adj[u0]):
             if j not in surround and j not in cluster_set:
                 surround.append(j)
-        
+
         if len(surround) == 0:
             self.logger.warning(f"No adjacent CBGs found. Cannot reach target population.")
             return cluster, population
-        
+
         itr = 0
-        
+
         while population < min_pop:
             max_weight = 0
             best_cbg = surround[0]
             best_pop = 0
             candidate_details = []
-            
+
             for candidate in surround:
                 if candidate in cluster_set:
                     continue
-                
+
                 cur_pop = cbg_population(candidate, self.config, self.logger)
                 if cur_pop == 0:
                     continue
-                
+
                 weight = sum([G.get_edge_data(candidate, cbg, {}).get('weight', 0) for cbg in cluster])
                 weight = float(weight)
                 movement_outside = self._movement_outside_cluster(G, candidate, cluster_set)
@@ -701,7 +767,7 @@ class Clustering:
                     'movement_to_cluster': weight,
                     'movement_to_outside': movement_outside,
                 })
-                
+
                 if weight > max_weight:
                     max_weight = weight
                     best_cbg = candidate
@@ -714,7 +780,7 @@ class Clustering:
             surround.remove(best_cbg)
             cluster.append(best_cbg)
             cluster_set.add(best_cbg)
-            
+
             # Update population
             population += best_pop
 
@@ -729,20 +795,20 @@ class Clustering:
                 cluster_after=cluster,
                 population_after=population
             )
-            
+
             self.logger.info(f"Iteration {itr}: Added CBG {best_cbg} with pop {best_pop}. New total: {population}")
-            
+
             # Add the new CBG's neighbors
             surround.extend([j for j in list(G.adj[best_cbg]) if j not in cluster_set])
             surround = list(set(surround))
-            
+
             itr += 1
             if itr > 500:
                 self.logger.warning(f"Max iterations exceeded (500). Cannot reach target population.")
                 break
-            
-        return cluster, population       
-            
+
+        return cluster, population
+
 
     def greedy_weight(self, G, u0, min_pop, trace_collector=None):
         """
@@ -1668,22 +1734,22 @@ class Visualizer:
     def cbg_geocode(cbg_id, gdf=None):
         """
         Find geographical coordinates for a Census Block Group (CBG).
-        
+
         Priority is given to the geodataframe if available; otherwise, falls back to POI data.
-        
+
         Args:
             cbg_id: The CBG ID to locate.
             df: SafeGraph patterns dataframe.
             poif: Points of Interest dataframe.
             gdf: Optional geodataframe with CBG shapes.
-            
+
         Returns:
             Dictionary with keys 'latitude' and 'longitude'.
         """
         try:
             point = gdf[gdf['CensusBlockGroup'] == str(int(float(cbg_id)))].representative_point()
             center = point.iloc[0]
-                    
+
             return {
                 'latitude': center.y,
                 'longitude': center.x
@@ -1704,9 +1770,9 @@ class Visualizer:
                         pos = Visualizer.cbg_geocode(cbg, gdf)
                         if pos['latitude'] is not None and pos['longitude'] is not None:
                             return [ pos['latitude'], pos['longitude'] ]
-            
+
                     return self.config.map["default_location"]
-                
+
                 return [ seed['latitude'], seed['longitude'] ]
             except Exception:
                 self.logger.warning("Error getting center coordinates, using default", exc_info=True)
@@ -1728,7 +1794,7 @@ class Visualizer:
                 feature['properties']['times'] = [(pd.Timestamp('today') + pd.Timedelta(i, 'D')).isoformat()]
                 feature['properties']['style'] = {'fillColor': color, 'color': color, 'fillOpacity': 0.7}
                 features.append(feature)
-                
+
                 loc = shape.representative_point().iloc[0]
                 folium.Marker(location=[loc.y, loc.x], popup=f'{cbg} - Population: {cbg_population(cbg, self.config, self.logger)}').add_to(self.map_obj)
             except Exception:
@@ -1793,7 +1859,7 @@ class Exporter:
 def main():
     seed_cbg = '240430002001'
     min_pop = 150_000
-    
+
     config = Config(seed_cbg, min_pop)
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
@@ -1820,7 +1886,7 @@ def main():
     # Generate map visualizations
     visualizer = Visualizer(config, logger)
     visualizer.generate_maps(G, gdf, algorithm_result)
-    
+
     # Save map to file
     output_map_path = os.path.join(config.output_dir, config.paths["output_html"])
     visualizer.map_obj.save(output_map_path)
@@ -1829,13 +1895,13 @@ def main():
     # Generate YAML output
     exporter = Exporter(config, logger)
     exporter.generate_yaml_output(G, algorithm_result)
-    
+
     with open(r'output/algorithm_result.json', 'w') as f:
         json.dump(algorithm_result, f, indent=2)
-        
+
     # request from dahbura
     with open(r'output/cbglistpop.json', 'w') as f:
-        cbglistpop = { 
+        cbglistpop = {
             'meta': {
                 'name': 'Hagerstown, MD',
                 'seed_cbg': seed_cbg,
@@ -1843,15 +1909,17 @@ def main():
                 'total_pop': algorithm_result[1]
             }
         }
-        
+
         for cbg in algorithm_result[0]:
             cbglistpop[cbg] = cbg_population(cbg, config, logger)
         json.dump(cbglistpop, f, indent=2)
 
     logger.info("Processing complete")
-    
+
 
 def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
+                start_date: Optional[_datetime] = None,
+                shared_data: Optional['PatternsData'] = None,
                 algorithm='czi_balanced', distance_penalty_weight=None,
                 distance_scale_km=None, optimal_candidate_limit=None,
                 optimal_population_floor_ratio=None, optimal_mip_rel_gap=None,
@@ -1860,31 +1928,34 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 include_trace=False):
     """
     Generate a convenience zone cluster starting from a seed CBG.
-    
+
     Args:
         cbg: Seed Census Block Group GEOID
         min_pop: Minimum population for the cluster
         patterns_file: Optional specific patterns CSV file path
         patterns_folder: Optional folder containing monthly pattern files
         month: Optional month key (YYYY-MM) when using patterns_folder
-    
+        start_date: Optional simulation start date for auto-resolving monthly file
+        shared_data: Optional pre-loaded PatternsData to avoid re-reading CSV
+
     Returns:
         Tuple of (geoids dict, map object, gdf GeoDataFrame)
         If include_trace=True, returns (geoids, map, gdf, trace_payload).
     """
-    config = Config(cbg, min_pop, patterns_file=patterns_file, 
-                    patterns_folder=patterns_folder, month=month)
+    config = Config(cbg, min_pop, patterns_file=patterns_file,
+                    patterns_folder=patterns_folder, month=month,
+                    start_date=start_date)
 
     logger = setup_logging(config)
     logger.info("Starting clustering analysis")
-    if month:
-        logger.info(f"Using monthly patterns: {month} from {patterns_folder or 'default'}")
+    if config.month:
+        logger.info(f"Using monthly patterns: {config.month} (file: {config.paths['patterns_csv']})")
 
     # Data loading
     data_loader = DataLoader(config, logger)
     zip_codes = data_loader.get_zip_codes()
     logger.info(f"Retrieved {len(zip_codes)} zip codes")
-    df = data_loader.load_safegraph_data(zip_codes)
+    df = data_loader.load_safegraph_data(zip_codes, shared_data=shared_data)
     gdf = data_loader.load_shapefiles()
     _ = data_loader.get_population_data()  # Population data is cached in cbg_population
 
@@ -1982,7 +2053,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
     # Generate map visualizations
     visualizer = Visualizer(config, logger)
     visualizer.generate_maps(G, gdf, algorithm_result)
-    
+
     # Get per-cbg population data (hh generator needs this)
     geoids = { cbg:cbg_population(cbg, config, logger) for cbg in algorithm_result[0] }
 
