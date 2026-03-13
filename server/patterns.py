@@ -28,6 +28,9 @@ def _parse_hour_list(val) -> List[int]:
     else:
         try:
             arr = ast.literal_eval(val)
+            # Handle double-encoded JSON from new CSV files
+            if isinstance(arr, str):
+                arr = ast.literal_eval(arr)
         except Exception:
             arr = []
     if not isinstance(arr, list) or len(arr) != 24:
@@ -45,6 +48,9 @@ def _parse_day_map(val) -> Dict[str, int]:
     else:
         try:
             d = json.loads(val)
+            # Handle double-encoded JSON from new CSV files
+            if isinstance(d, str):
+                d = json.loads(d)
         except Exception:
             try:
                 d = ast.literal_eval(val)
@@ -114,6 +120,8 @@ def _build_stats_from_df(df: pd.DataFrame,
             "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
             "hour_weights": hour_weights,
             "day_weights": day_weights,
+            "raw_hour_counts": hour_list,
+            "raw_day_counts": day_map,
         }
     return stats
 

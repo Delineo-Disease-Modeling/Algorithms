@@ -1,4 +1,4 @@
-from flask import Flask, request, jsonify, make_response, send_file
+from flask import Flask, request, jsonify, make_response, send_file, Response as FlaskResponse
 from flask_cors import CORS, cross_origin
 from czcode import (
   generate_cz,
@@ -50,6 +50,27 @@ CORS(app,
   expose_headers=['Set-Cookie'],
   supports_credentials=True
 )
+
+# --- Generation progress tracking for SSE ---
+# Maps czone_id -> list of {message, progress (0-100), done}
+_generation_progress = {}
+_generation_progress_lock = threading.Lock()
+
+def _update_progress(czone_id, message, progress, done=False, error=None):
+  """Thread-safe progress update for a generation job."""
+  entry = {'message': message, 'progress': progress, 'done': done}
+  if error:
+    entry['error'] = error
+  with _generation_progress_lock:
+    if czone_id not in _generation_progress:
+      _generation_progress[czone_id] = []
+    _generation_progress[czone_id].append(entry)
+
+def _get_progress_events(czone_id, cursor=0):
+  """Return new progress events since cursor."""
+  with _generation_progress_lock:
+    events = _generation_progress.get(czone_id, [])
+    return events[cursor:], len(events)
 
 TEST_PATTERNS_FILE = os.path.join(os.path.dirname(__file__), 'data', 'TEST', 'test.csv')
 TEST_CLUSTER_COLUMNS = ['poi_cbg', 'visitor_daytime_cbgs']
@@ -665,6 +686,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
   """
   try:
     # --- Load patterns data once for both popgen and patterns gen ---
+    _update_progress(czone_id, 'Loading patterns data...', 5)
     shared_data = None
     resolved_csv = patterns_file  # track which CSV we resolved to
 
@@ -695,9 +717,11 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
       shared_data = PatternsData.from_legacy_csv(patterns_file, cbg_set=cbg_set)
 
     report.info(f'Patterns data loaded: {len(shared_data.df) if shared_data else 0} rows')
+    _update_progress(czone_id, 'Patterns data loaded', 20)
 
     # Generate People, Households, Places data
     report.info('Generating synthetic population (papdata)...')
+    _update_progress(czone_id, 'Generating synthetic population...', 25)
     papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data,
                       patterns_csv=resolved_csv)
     people_count = len(papdata.get('people', {}))
@@ -711,9 +735,11 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
       report.info(f'Generated papdata: {people_count} people, {homes_count} homes ({homes_with_coords} with coordinates), {places_count} places')
     else:
       report.info(f'Generated papdata: {people_count} people, {homes_count} homes, {places_count} places')
+    _update_progress(czone_id, f'Population generated: {people_count} people, {places_count} places', 45)
 
     # Generate movement patterns (reusing shared_data)
     report.info('Generating movement patterns...')
+    _update_progress(czone_id, 'Generating movement patterns...', 50)
     patterns = gen_patterns(
       papdata,
       start_date,
@@ -724,11 +750,13 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     )
     patterns_count = len(patterns)
     report.info(f'Generated {patterns_count} timestep patterns')
+    _update_progress(czone_id, f'Generated {patterns_count} movement patterns', 75)
 
     # Free shared data before upload to reduce peak memory
     del shared_data
 
     report.info('Uploading data to DB API...')
+    _update_progress(czone_id, 'Uploading data...', 80)
     resp = requests.post('http://localhost:3000/api/patterns', data={
       'czone_id': int(czone_id),
     }, files={
@@ -745,10 +773,13 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
         'patterns_count': patterns_count,
         'cbg_count': len(geoids),
       })
+      _update_progress(czone_id, 'Done', 100, done=True)
     else:
       report.fail(f'Error uploading data: HTTP {resp.status_code}')
+      _update_progress(czone_id, f'Upload failed: HTTP {resp.status_code}', 80, error=True)
   except Exception as e:
     report.capture_exception()
+    _update_progress(czone_id, f'Error: {str(e)}', 0, error=True)
 
 
 def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
@@ -1451,6 +1482,8 @@ def route_cluster_cbgs():
   except ValueError as e:
     return make_response(jsonify({'message': str(e)}), 400)
   
+  include_trace = bool(request.json.get('include_trace', False))
+
   try:
     geoids, center, trace_payload = cluster_cbgs(
       cbg_str,
@@ -1461,16 +1494,16 @@ def route_cluster_cbgs():
       czi_params=effective_czi_params,
       optimal_params=effective_optimal_params,
       seed_guard_params=effective_seed_guard_params,
-      include_trace=True
+      include_trace=include_trace
     )
     cluster = list(geoids.keys())
     size = sum(list(geoids.values()))
-    
+
     # Also return GeoJSON for the map
     geojson = get_cbg_geojson(cluster, include_neighbors=True)
     trace_geojson = None
 
-    if trace_payload and trace_payload.get('steps'):
+    if include_trace and trace_payload and trace_payload.get('steps'):
       trace_cbgs = set(cluster)
       for step in trace_payload.get('steps', []):
         trace_cbgs.update(step.get('cluster_before', []))
@@ -1481,8 +1514,8 @@ def route_cluster_cbgs():
             trace_cbgs.add(candidate_cbg)
       if trace_cbgs:
         trace_geojson = get_cbg_geojson(list(trace_cbgs), include_neighbors=False)
-    
-    return jsonify({
+
+    response_data = {
       'cluster': cluster,
       'seed_cbg': cbg_str,
       'size': size,
@@ -1500,9 +1533,12 @@ def route_cluster_cbgs():
       'patterns_source': patterns_source,
       'patterns_month': patterns_month,
       'use_test_data': use_test_data,
-      'trace': trace_payload,
-      'trace_geojson': trace_geojson
-    })
+    }
+    if include_trace:
+      response_data['trace'] = trace_payload
+      response_data['trace_geojson'] = trace_geojson
+
+    return jsonify(response_data)
   except ValueError as e:
     return make_response(jsonify({'message': str(e)}), 400)
   except Exception as e:
@@ -1638,8 +1674,9 @@ def route_finalize_cz():
         patterns_file=patterns_file
       )
 
+    _update_progress(czone_id, 'Starting generation...', 0)
     threading.Thread(target=_background_generate, daemon=True).start()
-    
+
     return jsonify({
       'id': czone_id,
       'cluster': cluster,
@@ -1650,6 +1687,37 @@ def route_finalize_cz():
     import traceback
     traceback.print_exc()
     return make_response(jsonify({'message': str(e)}), 500)
+
+
+@app.route('/generation-progress/<int:czone_id>', methods=['GET'])
+@cross_origin()
+def route_generation_progress(czone_id):
+  """
+  SSE endpoint that streams generation progress for a convenience zone.
+  The client connects after finalize-cz returns and receives progress events.
+  Generation continues even if the client disconnects.
+  """
+  import time as _time
+
+  def event_stream():
+    cursor = 0
+    while True:
+      events, new_cursor = _get_progress_events(czone_id, cursor)
+      for evt in events:
+        yield f"data: {json.dumps(evt)}\n\n"
+        if evt.get('done') or evt.get('error'):
+          return
+      cursor = new_cursor
+      _time.sleep(1)
+
+  return FlaskResponse(
+    event_stream(),
+    mimetype='text/event-stream',
+    headers={
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    }
+  )
 
 
 @app.route('/cz-metrics', methods=['POST'])

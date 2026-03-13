@@ -165,27 +165,30 @@ def get_cbg_geojson(cbg_list, include_neighbors=False):
             }
             features.append(feature)
     
-    # If include_neighbors, find adjacent CBGs
+    # If include_neighbors, find adjacent CBGs using spatial index
     if include_neighbors and all_loaded_gdfs:
         neighbor_cbgs = set()
         selected_set = set(str(cbg).zfill(12) for cbg in cbg_list)
-        
+
         for gdf in all_loaded_gdfs:
             if gdf.crs and gdf.crs != "EPSG:4326":
                 gdf = gdf.to_crs("EPSG:4326")
-                
+
             gdf_selected = gdf[gdf['GEOID'].isin(selected_set)]
-            
+            sindex = gdf.sindex
+
             for idx, selected_row in gdf_selected.iterrows():
-                # Find CBGs that touch this one
-                touches = gdf[gdf.geometry.touches(selected_row.geometry)]
+                # Use spatial index to find candidate neighbors quickly
+                candidates_idx = list(sindex.intersection(selected_row.geometry.bounds))
+                candidates = gdf.iloc[candidates_idx]
+                touches = candidates[candidates.geometry.touches(selected_row.geometry)]
                 for _, neighbor_row in touches.iterrows():
                     neighbor_geoid = neighbor_row['GEOID']
                     if neighbor_geoid not in selected_set and neighbor_geoid not in neighbor_cbgs:
                         neighbor_cbgs.add(neighbor_geoid)
-                        
+
                         population = pop_data.get(neighbor_geoid, 0)
-                        
+
                         feature = {
                             'type': 'Feature',
                             'geometry': neighbor_row.geometry.__geo_interface__,

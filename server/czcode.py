@@ -584,6 +584,9 @@ class GraphBuilder:
                 continue
 
             visitor_dict = json.loads(row['visitor_daytime_cbgs'])
+            # Handle double-encoded JSON (new CSV files wrap JSON in extra quotes)
+            if isinstance(visitor_dict, str):
+                visitor_dict = json.loads(visitor_dict)
             for visitor_cbg, count in visitor_dict.items():
                 try:
                     src_cbg = str(int(float(visitor_cbg)))
