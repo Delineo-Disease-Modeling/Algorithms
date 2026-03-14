@@ -22,10 +22,51 @@ from uszipcode import SearchEngine
 from math import sin, cos, atan2, pi, sqrt
 from datetime import datetime as _datetime
 from typing import Optional, List
+from functools import lru_cache
 
 from patterns_loader import (
     PatternsData, resolve_patterns_files, states_from_cbgs, PATTERNS_BASE_DIR
 )
+
+# ---- Module-level caches (created once, reused across requests) ----
+_search_engine: Optional[SearchEngine] = None
+
+def _get_search_engine() -> SearchEngine:
+    """Return a module-level SearchEngine singleton (SQLite-backed, ~0.5s to init)."""
+    global _search_engine
+    if _search_engine is None:
+        _search_engine = SearchEngine()
+    return _search_engine
+
+
+# Shapefile cache: keyed by frozenset of state abbreviations
+_shapefile_cache: dict = {}
+
+def _get_cached_shapefiles(states: List[str], loader_fn) -> gpd.GeoDataFrame:
+    """Return cached GeoDataFrame for a set of states, or load and cache it."""
+    key = frozenset(states)
+    if key not in _shapefile_cache:
+        _shapefile_cache[key] = loader_fn()
+    return _shapefile_cache[key]
+
+# Population data cache
+_population_cache: Optional[pd.DataFrame] = None
+
+def _get_cached_population(csv_path: str) -> pd.DataFrame:
+    """Return cached population DataFrame."""
+    global _population_cache
+    if _population_cache is None:
+        _population_cache = pd.read_csv(csv_path, index_col='census_block_group')
+    return _population_cache
+
+# Mobility graph cache: keyed by (patterns_csv_path, frozenset(states))
+_graph_cache: dict = {}
+
+def _get_cached_graph(cache_key: tuple, build_fn):
+    """Return cached mobility graph, or build and cache it."""
+    if cache_key not in _graph_cache:
+        _graph_cache[cache_key] = build_fn()
+    return _graph_cache[cache_key]
 
 # USPS state abbreviation -> 2-digit state FIPS.
 STATE_ABBR_TO_FIPS = {
@@ -44,6 +85,13 @@ STATE_ABBR_TO_FIPS = {
 }
 STATE_FIPS_TO_ABBR = {fips: abbr for abbr, fips in STATE_ABBR_TO_FIPS.items()}
 
+def _normalize_cbg(raw) -> str:
+    """Convert any CBG representation to a zero-padded 12-digit string."""
+    try:
+        return str(int(float(raw))).zfill(12)
+    except (TypeError, ValueError):
+        return str(raw).strip().zfill(12)
+
 # ----------------------------
 # Configuration Module
 # ----------------------------
@@ -61,15 +109,12 @@ class Config:
             month: Optional month key (YYYY-MM) when using patterns_folder
             start_date: Optional simulation start date (used to auto-resolve monthly file)
         """
-        zip_codes = []
-        with open(r'./data/zip_to_cbg.json', 'r') as f:
-            zip_to_cbg = json.load(f)
-            for zip, cbgs in zip_to_cbg.items():
-                if cbg in cbgs:
-                    zip_codes.append(zip)
+        cbg = _normalize_cbg(cbg)
 
-        search = SearchEngine()
-        self.states = list(set([ search.by_zipcode(zip).state for zip in zip_codes ]))
+        # Derive state from CBG FIPS prefix (first 2 digits)
+        fips = cbg[:2]
+        abbr = STATE_FIPS_TO_ABBR.get(fips)
+        self.states = [abbr] if abbr else []
         self.states = list(set(self.states) | set(get_neighboring_states(self.states)))
 
         self.location_name = f'{cbg}'
@@ -111,12 +156,13 @@ class Config:
 
     def _resolve_patterns_file(self, patterns_file, patterns_folder, month):
         """
-        Resolve which patterns CSV file to use.
+        Resolve which patterns file to use.
 
         Priority:
         1. Explicit patterns_file if provided
-        2. Auto-resolve from state + month using patterns_loader (new folder structure)
-        3. State-scoped monthly file (converted preferred) when month is provided
+        2. State-scoped parquet file for the given month
+        3. Closest available month (parquet)
+        4. Fallback to legacy data/patterns.csv
         """
         # Priority 1: Explicit file
         if patterns_file:
@@ -124,15 +170,7 @@ class Config:
                 return patterns_file
             raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
 
-        # Priority 2: Auto-resolve from state + month using patterns_loader
-        if month and self.states:
-            resolved = resolve_patterns_files(self.states,
-                                              self.start_date or _datetime.now(),
-                                              PATTERNS_BASE_DIR)
-            if resolved:
-                return resolved[0]
-
-        search_root = patterns_folder or os.path.join(os.path.dirname(__file__), "data")
+        search_root = patterns_folder or os.path.join(os.path.dirname(__file__), "data", "patterns")
         month_key = str(month or "").strip()
 
         if month_key:
@@ -148,44 +186,10 @@ class Config:
                 if state_code and state_code not in state_candidates:
                     state_candidates.append(state_code)
 
-            candidate_paths = []
+            # Try exact month first
             for state in state_candidates:
                 stem = f"{month_key}-{state}"
-                candidate_paths.extend([
-                    os.path.join(search_root, state, f"{stem}.csv.gz"),
-                    os.path.join(search_root, state, f"{stem}.converted.csv"),
-                    os.path.join(search_root, state, f"{stem}.csv"),
-                    os.path.join(search_root, f"{stem}.csv.gz"),
-                    os.path.join(search_root, f"{stem}.converted.csv"),
-                    os.path.join(search_root, f"{stem}.csv"),
-                ])
-
-            import glob
-            for state in state_candidates:
-                stem = f"{month_key}-{state}"
-                candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{stem}.csv.gz"),
-                    recursive=True
-                )))
-                candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{stem}.converted.csv"),
-                    recursive=True
-                )))
-                candidate_paths.extend(sorted(glob.glob(
-                    os.path.join(search_root, "**", f"{stem}.csv"),
-                    recursive=True
-                )))
-
-            seen = set()
-            ordered_paths = []
-            for path in candidate_paths:
-                norm = os.path.abspath(path)
-                if norm in seen:
-                    continue
-                seen.add(norm)
-                ordered_paths.append(path)
-
-            for path in ordered_paths:
+                path = os.path.join(search_root, state, f"{stem}.parquet")
                 if os.path.exists(path):
                     return path
 
@@ -195,31 +199,24 @@ class Config:
                 available = _available_months_for_state(state, search_root)
                 nearest = closest_month(month_key, available)
                 if nearest and nearest != month_key:
-                    nearest_stem = f"{nearest}-{state}"
-                    fallback_candidates = [
-                        os.path.join(search_root, state, f"{nearest_stem}.csv.gz"),
-                        os.path.join(search_root, state, f"{nearest_stem}.converted.csv"),
-                        os.path.join(search_root, state, f"{nearest_stem}.csv"),
-                    ]
-                    for path in fallback_candidates:
-                        if os.path.exists(path):
-                            import logging
-                            logging.getLogger('cbg_clustering').info(
-                                f"No data for {month_key}, using closest month: {nearest}"
-                            )
-                            return path
+                    path = os.path.join(search_root, state, f"{nearest}-{state}.parquet")
+                    if os.path.exists(path):
+                        import logging
+                        logging.getLogger('cbg_clustering').info(
+                            f"No data for {month_key}, using closest month: {nearest}"
+                        )
+                        return path
 
-            states_msg = ", ".join(state_candidates) if state_candidates else "unknown state"
-            raise FileNotFoundError(
-                f"No state-scoped monthly patterns file found for month '{month_key}' "
-                f"under {search_root} for {states_msg}. "
-                "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.csv.gz' "
-                "or '<DATA>/<STATE>/YYYY-MM-<STATE>.csv'."
-            )
+        # Fallback: legacy patterns.csv
+        legacy = os.path.join(os.path.dirname(__file__), "data", "patterns.csv")
+        if os.path.exists(legacy):
+            return legacy
 
+        states_msg = ", ".join(state_candidates) if month_key and state_candidates else "unknown state"
         raise FileNotFoundError(
-            "No patterns_file was provided and no month was specified. "
-            "Global default patterns fallback is disabled; provide a state-scoped monthly file."
+            f"No patterns file found for month '{month_key}' "
+            f"under {search_root} for {states_msg}. "
+            "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.parquet'."
         )
 
 # ----------------------------
@@ -250,7 +247,7 @@ class DataLoader:
         """
         Retrieve zip codes for specified states.
         """
-        search = SearchEngine()
+        search = _get_search_engine()
         zip_codes = []
         for state in self.config.states:
             self.logger.info(f"Retrieving zip codes for {state}")
@@ -277,86 +274,38 @@ class DataLoader:
             if 'poi_cbg' in df.columns:
                 df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
                 df.dropna(subset=['poi_cbg'], inplace=True)
-                df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
+                df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string').str.zfill(12)
             return df
 
-        patterns_csv = self.config.paths["patterns_csv"]
-        source_stem = os.path.splitext(os.path.basename(patterns_csv))[0]
-        source_mtime = int(os.path.getmtime(patterns_csv)) if os.path.exists(patterns_csv) else 0
-        month_part = self.config.month if self.config.month else "nomonth"
-        # Cache key includes source file + mtime so stale extracts are not reused.
-        cache_version = "v3"
-        filename = f"{self.config.location_name}_{month_part}_{source_stem}_{source_mtime}_{cache_version}.csv"
+        patterns_file = self.config.paths["patterns_csv"]
 
-        full_filename = os.path.join(self.config.output_dir, filename)
-        try:
-            self.logger.info(f"Loading SafeGraph data from {full_filename}")
-            df = pd.read_csv(full_filename)
+        if patterns_file.endswith('.parquet'):
+            self.logger.info(f"Loading parquet patterns from {patterns_file}")
+            df = pd.read_parquet(patterns_file)
             df.columns = [str(c).strip().lower() for c in df.columns]
-            required_cols = {'poi_cbg', 'visitor_daytime_cbgs'}
-            if not required_cols.issubset(df.columns):
-                missing = sorted(required_cols - set(df.columns))
-                raise ValueError(f"Cached file missing required columns: {missing}")
-            # Ensure that CBGs are read as strings
+            if 'poi_cbg' in df.columns:
+                df['poi_cbg'] = df['poi_cbg'].astype(str).str.strip().str.zfill(12)
+            return df
+
+        # Legacy CSV fallback (patterns.csv)
+        self.logger.info(f"Loading legacy CSV from {patterns_file}")
+        df = pd.read_csv(patterns_file)
+        df.columns = [str(c).strip().lower() for c in df.columns]
+        if 'poi_cbg' in df.columns:
             df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
             df.dropna(subset=['poi_cbg'], inplace=True)
-            df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
-        except (FileNotFoundError, pd.errors.EmptyDataError, ValueError, KeyError):
-            self.logger.info(f"File {full_filename} not found. Processing raw data from {patterns_csv}")
-            allowed_state_fips = {
-                STATE_ABBR_TO_FIPS[state]
-                for state in self.config.states
-                if state in STATE_ABBR_TO_FIPS
-            }
-            datalist = []
-            with pd.read_csv(patterns_csv, chunksize=10000) as reader:
-                for chunk in reader:
-                    chunk = chunk.copy()
-                    chunk.columns = [str(c).strip().lower() for c in chunk.columns]
-                    if 'poi_cbg' in chunk.columns:
-                        chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
-                        chunk.dropna(subset=['poi_cbg'], inplace=True)
-                        chunk['poi_cbg'] = chunk['poi_cbg'].astype('int64').astype('string')
-
-                    # Prefer CBG state-prefix filtering (robust to ZIP DB gaps).
-                    if allowed_state_fips and 'poi_cbg' in chunk.columns:
-                        chunk = chunk[chunk['poi_cbg'].str.slice(0, 2).isin(allowed_state_fips)]
-                    # Fallback for fixtures/special files.
-                    elif 'postal_code' in chunk.columns and zip_codes:
-                        chunk['postal_code'] = pd.to_numeric(chunk['postal_code'], errors='coerce')
-                        datalist.append(chunk[chunk['postal_code'].isin(zip_codes)])
-                        continue
-
-                    datalist.append(chunk)
-            if not datalist:
-                raise ValueError(f"No data rows were loaded from {patterns_csv}")
-
-            df = pd.concat(datalist, axis=0, ignore_index=True)
-            df.columns = [str(c).strip().lower() for c in df.columns]
-            required_cols = {'poi_cbg', 'visitor_daytime_cbgs'}
-            if not required_cols.issubset(df.columns):
-                missing = sorted(required_cols - set(df.columns))
-                available = ', '.join(sorted(df.columns))
-                raise ValueError(
-                    f"Patterns file is missing required columns: {missing}. "
-                    f"Available columns: {available}"
-                )
-
-            # Convert poi_cbg to proper strings
-            df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
-            df.dropna(subset=['poi_cbg'], inplace=True)
-            # Now force truncation
-            df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string')
-
-            df.to_csv(full_filename, index=False)
-            self.logger.info(f"Saved processed data to {full_filename}")
+            df['poi_cbg'] = df['poi_cbg'].astype('int64').astype('string').str.zfill(12)
         return df
 
     def load_shapefiles(self):
         """
         Load and merge shapefiles for the specified states.
+        Uses module-level cache so repeated requests for the same states are instant.
         """
-        self.logger.info("Loading shapefiles")
+        return _get_cached_shapefiles(self.config.states, self._load_shapefiles_uncached)
+
+    def _load_shapefiles_uncached(self):
+        self.logger.info("Loading shapefiles (first request, will be cached)")
         gds = []
 
         for state in self.config.states:
@@ -427,7 +376,7 @@ class DataLoader:
         """
         Load census population data for CBGs.
         """
-        return pd.read_csv(self.config.paths["population_csv"], index_col='census_block_group')
+        return _get_cached_population(self.config.paths["population_csv"])
 
 
 # ----------------------------
@@ -487,7 +436,7 @@ def build_cbg_centers(gdf):
     reps = gdf_wgs.representative_point()
     for idx, raw_cbg in gdf_wgs[cbg_col].items():
         try:
-            cbg = str(int(float(raw_cbg)))
+            cbg = _normalize_cbg(raw_cbg)
         except (TypeError, ValueError):
             cbg = str(raw_cbg).strip()
         if not cbg:
@@ -575,21 +524,22 @@ class GraphBuilder:
         G = nx.Graph()
 
         for _, row in df.iterrows():
-            if not isinstance(row['visitor_daytime_cbgs'], str):
+            val = row['visitor_daytime_cbgs']
+            if not isinstance(val, str) or not val.strip():
                 continue
 
             try:
-                dst_cbg = str(int(float(row['poi_cbg'])))
+                dst_cbg = _normalize_cbg(row['poi_cbg'])
             except (TypeError, ValueError):
                 continue
 
-            visitor_dict = json.loads(row['visitor_daytime_cbgs'])
+            visitor_dict = json.loads(val)
             # Handle double-encoded JSON (new CSV files wrap JSON in extra quotes)
             if isinstance(visitor_dict, str):
                 visitor_dict = json.loads(visitor_dict)
             for visitor_cbg, count in visitor_dict.items():
                 try:
-                    src_cbg = str(int(float(visitor_cbg)))
+                    src_cbg = _normalize_cbg(visitor_cbg)
                     weight = float(count)
                     if weight <= 0:
                         continue
@@ -1750,7 +1700,7 @@ class Visualizer:
             Dictionary with keys 'latitude' and 'longitude'.
         """
         try:
-            point = gdf[gdf['CensusBlockGroup'] == str(int(float(cbg_id)))].representative_point()
+            point = gdf[gdf['CensusBlockGroup'] == _normalize_cbg(cbg_id)].representative_point()
             center = point.iloc[0]
 
             return {
@@ -1928,7 +1878,8 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 optimal_population_floor_ratio=None, optimal_mip_rel_gap=None,
                 optimal_time_limit_sec=None, optimal_max_iters=None,
                 seed_guard_distance_km=None,
-                include_trace=False):
+                include_trace=False,
+                progress_callback=None):
     """
     Generate a convenience zone cluster starting from a seed CBG.
 
@@ -1945,6 +1896,9 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         Tuple of (geoids dict, map object, gdf GeoDataFrame)
         If include_trace=True, returns (geoids, map, gdf, trace_payload).
     """
+    _prog = progress_callback or (lambda msg, pct: None)
+
+    _prog('Resolving location...', 5)
     config = Config(cbg, min_pop, patterns_file=patterns_file,
                     patterns_folder=patterns_folder, month=month,
                     start_date=start_date)
@@ -1955,16 +1909,25 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         logger.info(f"Using monthly patterns: {config.month} (file: {config.paths['patterns_csv']})")
 
     # Data loading
+    _prog('Loading zip codes...', 10)
     data_loader = DataLoader(config, logger)
     zip_codes = data_loader.get_zip_codes()
     logger.info(f"Retrieved {len(zip_codes)} zip codes")
+
+    _prog('Loading patterns data...', 20)
     df = data_loader.load_safegraph_data(zip_codes, shared_data=shared_data)
+
+    _prog('Loading shapefiles...', 40)
     gdf = data_loader.load_shapefiles()
     _ = data_loader.get_population_data()  # Population data is cached in cbg_population
 
-    # Graph generation
-    graph_builder = GraphBuilder(logger)
-    G = graph_builder.gen_graph(df)
+    # Graph generation (cached by patterns file + states)
+    _prog('Building mobility graph...', 55)
+    graph_cache_key = (config.paths['patterns_csv'], frozenset(config.states))
+    def _build_graph():
+        gb = GraphBuilder(logger)
+        return gb.gen_graph(df)
+    G = _get_cached_graph(graph_cache_key, _build_graph)
     cbg_centers = build_cbg_centers(gdf)
 
     if G.number_of_nodes() == 0:
@@ -1996,6 +1959,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
             "greedy_weight_seed_guard, greedy_ratio"
         )
 
+    _prog('Running clustering algorithm...', 75)
     logger.info(f"Using clustering algorithm: {algorithm_key}")
     trace_steps = [] if include_trace else None
     if algorithm_key == 'czi_balanced':
@@ -2053,6 +2017,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         )
     logger.info(f"Clustering complete: {len(algorithm_result[0])} CBGs, population: {algorithm_result[1]}")
 
+    _prog('Generating map...', 90)
     # Generate map visualizations
     visualizer = Visualizer(config, logger)
     visualizer.generate_maps(G, gdf, algorithm_result)
@@ -2060,6 +2025,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
     # Get per-cbg population data (hh generator needs this)
     geoids = { cbg:cbg_population(cbg, config, logger) for cbg in algorithm_result[0] }
 
+    _prog('Done', 100)
     logger.info("Processing complete")
 
     if include_trace:

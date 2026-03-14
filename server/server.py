@@ -21,7 +21,6 @@ from patterns_loader import (
 from datetime import datetime
 import os
 import csv
-import glob
 import threading
 import requests
 import json
@@ -51,7 +50,7 @@ CORS(app,
   supports_credentials=True
 )
 
-# --- Generation progress tracking for SSE ---
+# Generation progress tracking for SSE
 # Maps czone_id -> list of {message, progress (0-100), done}
 _generation_progress = {}
 _generation_progress_lock = threading.Lock()
@@ -71,6 +70,39 @@ def _get_progress_events(czone_id, cursor=0):
   with _generation_progress_lock:
     events = _generation_progress.get(czone_id, [])
     return events[cursor:], len(events)
+
+# ---- Clustering progress (same pattern as generation progress) ----
+_clustering_progress = {}
+_clustering_progress_lock = threading.Lock()
+_clustering_results = {}
+_clustering_counter = 0
+_clustering_counter_lock = threading.Lock()
+
+def _next_clustering_id():
+  global _clustering_counter
+  with _clustering_counter_lock:
+    _clustering_counter += 1
+    return _clustering_counter
+
+def _update_clustering_progress(cid, message, progress, done=False, error=None, result=None):
+  entry = {'message': message, 'progress': progress, 'done': done}
+  if error:
+    entry['error'] = error
+  with _clustering_progress_lock:
+    if cid not in _clustering_progress:
+      _clustering_progress[cid] = []
+    _clustering_progress[cid].append(entry)
+    if result is not None:
+      _clustering_results[cid] = result
+
+def _get_clustering_progress_events(cid, cursor=0):
+  with _clustering_progress_lock:
+    events = _clustering_progress.get(cid, [])
+    return events[cursor:], len(events)
+
+def _get_clustering_result(cid):
+  with _clustering_progress_lock:
+    return _clustering_results.get(cid)
 
 TEST_PATTERNS_FILE = os.path.join(os.path.dirname(__file__), 'data', 'TEST', 'test.csv')
 TEST_CLUSTER_COLUMNS = ['poi_cbg', 'visitor_daytime_cbgs']
@@ -167,8 +199,9 @@ def _extract_month_key(start_date_raw):
 
 def _resolve_monthly_patterns_file(cbg_str, month_key):
   """
-  Resolve month-specific pattern CSV for preview clustering.
-  Preferred format: data/{STATE}/{YYYY-MM}-{STATE}.csv
+  Resolve month-specific patterns file for preview clustering.
+  Preferred format: data/patterns/{STATE}/{YYYY-MM}-{STATE}.parquet
+  Falls back to legacy CSV formats.
   """
   if not cbg_str or not month_key:
     return None
@@ -176,36 +209,21 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
   state_fips = str(cbg_str)[:2]
   state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
 
-  candidates = []
-  if state_abbr:
-    stem = f'{month_key}-{state_abbr}'
-    # Prefer .csv.gz, then converted, then plain .csv
-    candidates.extend([
-      os.path.join(DATA_DIR, state_abbr, f'{stem}.csv.gz'),
-      os.path.join(DATA_DIR, state_abbr, f'{stem}.converted.csv'),
-      os.path.join(DATA_DIR, state_abbr, f'{stem}.csv'),
-      os.path.join(DATA_DIR, f'{stem}.csv.gz'),
-      os.path.join(DATA_DIR, f'{stem}.converted.csv'),
-      os.path.join(DATA_DIR, f'{stem}.csv'),
-    ])
-    candidates.extend(sorted(glob.glob(
-      os.path.join(DATA_DIR, '**', f'{stem}.csv.gz'),
-      recursive=True
-    )))
-    candidates.extend(sorted(glob.glob(
-      os.path.join(DATA_DIR, '**', f'{stem}.converted.csv'),
-      recursive=True
-    )))
-    candidates.extend(sorted(glob.glob(
-      os.path.join(DATA_DIR, '**', f'{stem}.csv'),
-      recursive=True
-    )))
+  if not state_abbr:
+    return None
+
+  stem = f'{month_key}-{state_abbr}'
+  patterns_dir = os.path.join(DATA_DIR, 'patterns')
+  candidates = [
+    os.path.join(patterns_dir, state_abbr, f'{stem}.parquet'),
+    os.path.join(patterns_dir, state_abbr, f'{stem}.csv.gz'),
+    os.path.join(patterns_dir, state_abbr, f'{stem}.csv'),
+  ]
 
   for path in candidates:
-    if path and os.path.exists(path):
+    if os.path.exists(path):
       return path
 
-  # Month-specific requests are strict: do not silently substitute another month.
   return None
 
 
@@ -215,18 +233,18 @@ def _list_available_months_for_state(cbg_str):
   if not state_abbr:
     return []
 
-  patterns = [
-    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.csv.gz'),
-    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.converted.csv'),
-    os.path.join(DATA_DIR, '**', f'????-??-{state_abbr}.csv'),
-  ]
+  patterns_dir = os.path.join(DATA_DIR, 'patterns')
+  state_dir = os.path.join(patterns_dir, state_abbr)
+  if not os.path.isdir(state_dir):
+    return []
+
+  import re
+  pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
   months = set()
-  for pattern in patterns:
-    for path in glob.glob(pattern, recursive=True):
-      base = os.path.basename(path)
-      month = _extract_month_key(base)
-      if month:
-        months.add(month)
+  for f in os.listdir(state_dir):
+    m = pat.match(f)
+    if m:
+      months.add(m.group(1))
   return sorted(months)
 
 
@@ -292,8 +310,7 @@ def _resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_d
     if not patterns_file and state_abbr:
       raise ValueError(
         f"Missing start_date for patterns resolution, and no monthly patterns files were found for state {state_abbr}. "
-        f"Expected files like '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.csv.gz' "
-        f"or '{DATA_DIR}/{state_abbr}/YYYY-MM-{state_abbr}.csv'."
+        f"Expected files like '{DATA_DIR}/patterns/{state_abbr}/YYYY-MM-{state_abbr}.parquet'."
       )
     if not patterns_file:
       raise ValueError(
@@ -785,7 +802,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
 def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
                  algorithm='czi_balanced', czi_params=None, optimal_params=None,
                  seed_guard_params=None,
-                 include_trace=False):
+                 include_trace=False, progress_callback=None):
   """Just cluster CBGs without generating patterns. Returns geoids dict and map center."""
   czi_params = czi_params or {}
   optimal_params = optimal_params or {}
@@ -805,7 +822,8 @@ def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=N
     optimal_time_limit_sec=optimal_params.get('optimal_time_limit_sec'),
     optimal_max_iters=optimal_params.get('optimal_max_iters'),
     seed_guard_distance_km=seed_guard_params.get('seed_guard_distance_km'),
-    include_trace=include_trace
+    include_trace=include_trace,
+    progress_callback=progress_callback
   )
   if include_trace:
     geoids, map_obj, _gdf, trace_payload = result
@@ -1484,68 +1502,79 @@ def route_cluster_cbgs():
   
   include_trace = bool(request.json.get('include_trace', False))
 
-  try:
-    geoids, center, trace_payload = cluster_cbgs(
-      cbg_str,
-      min_pop,
-      patterns_file=patterns_file,
-      month=patterns_month,
-      algorithm=algorithm,
-      czi_params=effective_czi_params,
-      optimal_params=effective_optimal_params,
-      seed_guard_params=effective_seed_guard_params,
-      include_trace=include_trace
-    )
-    cluster = list(geoids.keys())
-    size = sum(list(geoids.values()))
+  cid = _next_clustering_id()
 
-    # Also return GeoJSON for the map
-    geojson = get_cbg_geojson(cluster, include_neighbors=True)
-    trace_geojson = None
+  def _run_clustering():
+    try:
+      def _prog(msg, pct):
+        _update_clustering_progress(cid, msg, pct)
 
-    if include_trace and trace_payload and trace_payload.get('steps'):
-      trace_cbgs = set(cluster)
-      for step in trace_payload.get('steps', []):
-        trace_cbgs.update(step.get('cluster_before', []))
-        trace_cbgs.update(step.get('cluster_after', []))
-        for candidate in step.get('candidates', []):
-          candidate_cbg = candidate.get('cbg')
-          if candidate_cbg:
-            trace_cbgs.add(candidate_cbg)
-      if trace_cbgs:
-        trace_geojson = get_cbg_geojson(list(trace_cbgs), include_neighbors=False)
+      geoids, center, trace_payload = cluster_cbgs(
+        cbg_str,
+        min_pop,
+        patterns_file=patterns_file,
+        month=patterns_month,
+        algorithm=algorithm,
+        czi_params=effective_czi_params,
+        optimal_params=effective_optimal_params,
+        seed_guard_params=effective_seed_guard_params,
+        include_trace=include_trace,
+        progress_callback=_prog
+      )
+      cluster = list(geoids.keys())
+      size = sum(list(geoids.values()))
 
-    response_data = {
-      'cluster': cluster,
-      'seed_cbg': cbg_str,
-      'size': size,
-      'center': center,
-      'geojson': geojson,
-      'algorithm': algorithm,
-      'clustering_params': (
-        effective_czi_params
-        if algorithm == 'czi_balanced'
-        else effective_optimal_params if algorithm == 'czi_optimal_cap'
-        else effective_seed_guard_params if algorithm == 'greedy_weight_seed_guard'
-        else {}
-      ),
-      'patterns_file_used': patterns_file,
-      'patterns_source': patterns_source,
-      'patterns_month': patterns_month,
-      'use_test_data': use_test_data,
-    }
-    if include_trace:
-      response_data['trace'] = trace_payload
-      response_data['trace_geojson'] = trace_geojson
+      _update_clustering_progress(cid, 'Generating GeoJSON...', 95)
+      # Also return GeoJSON for the map
+      geojson = get_cbg_geojson(cluster, include_neighbors=True)
+      trace_geojson = None
 
-    return jsonify(response_data)
-  except ValueError as e:
-    return make_response(jsonify({'message': str(e)}), 400)
-  except Exception as e:
-    print(f'Error clustering CBGs: {e}')
-    import traceback
-    traceback.print_exc()
-    return make_response(jsonify({'message': str(e)}), 500)
+      if include_trace and trace_payload and trace_payload.get('steps'):
+        trace_cbgs_set = set(cluster)
+        for step in trace_payload.get('steps', []):
+          trace_cbgs_set.update(step.get('cluster_before', []))
+          trace_cbgs_set.update(step.get('cluster_after', []))
+          for candidate in step.get('candidates', []):
+            candidate_cbg = candidate.get('cbg')
+            if candidate_cbg:
+              trace_cbgs_set.add(candidate_cbg)
+        if trace_cbgs_set:
+          trace_geojson = get_cbg_geojson(list(trace_cbgs_set), include_neighbors=False)
+
+      response_data = {
+        'cluster': cluster,
+        'seed_cbg': cbg_str,
+        'size': size,
+        'center': center,
+        'geojson': geojson,
+        'algorithm': algorithm,
+        'clustering_params': (
+          effective_czi_params
+          if algorithm == 'czi_balanced'
+          else effective_optimal_params if algorithm == 'czi_optimal_cap'
+          else effective_seed_guard_params if algorithm == 'greedy_weight_seed_guard'
+          else {}
+        ),
+        'patterns_file_used': patterns_file,
+        'patterns_source': patterns_source,
+        'patterns_month': patterns_month,
+        'use_test_data': use_test_data,
+      }
+      if include_trace:
+        response_data['trace'] = trace_payload
+        response_data['trace_geojson'] = trace_geojson
+
+      _update_clustering_progress(cid, 'Done', 100, done=True, result=response_data)
+    except ValueError as e:
+      _update_clustering_progress(cid, str(e), 0, error=True)
+    except Exception as e:
+      print(f'Error clustering CBGs: {e}')
+      import traceback
+      traceback.print_exc()
+      _update_clustering_progress(cid, str(e), 0, error=True)
+
+  threading.Thread(target=_run_clustering, daemon=True).start()
+  return jsonify({'clustering_id': cid})
 
 
 @app.route('/finalize-cz', methods=['POST'])
@@ -1709,6 +1738,44 @@ def route_generation_progress(czone_id):
           return
       cursor = new_cursor
       _time.sleep(1)
+
+  return FlaskResponse(
+    event_stream(),
+    mimetype='text/event-stream',
+    headers={
+      'Cache-Control': 'no-cache',
+      'X-Accel-Buffering': 'no',
+    }
+  )
+
+
+@app.route('/clustering-progress/<int:cid>', methods=['GET'])
+@cross_origin()
+def route_clustering_progress(cid):
+  """
+  SSE endpoint that streams clustering progress.
+  When clustering finishes, the final event includes the full result payload.
+  """
+  import time as _time
+
+  def event_stream():
+    cursor = 0
+    while True:
+      events, new_cursor = _get_clustering_progress_events(cid, cursor)
+      for evt in events:
+        if evt.get('done'):
+          result = _get_clustering_result(cid)
+          evt_with_result = dict(evt)
+          if result:
+            evt_with_result['result'] = result
+          yield f"data: {json.dumps(evt_with_result)}\n\n"
+          return
+        if evt.get('error'):
+          yield f"data: {json.dumps(evt)}\n\n"
+          return
+        yield f"data: {json.dumps(evt)}\n\n"
+      cursor = new_cursor
+      _time.sleep(0.5)
 
   return FlaskResponse(
     event_stream(),

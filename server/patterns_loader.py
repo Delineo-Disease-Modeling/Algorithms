@@ -16,7 +16,7 @@ lowercase so downstream code works unchanged.
 import os
 import logging
 import pandas as pd
-from typing import Dict, List, Optional, Set
+from typing import List, Optional, Set
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,7 @@ def _available_months_for_state(state: str, base_dir: str) -> List[str]:
     state_dir = os.path.join(base_dir, state.upper())
     if not os.path.isdir(state_dir):
         return []
-    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.csv(?:\.gz)?$', re.IGNORECASE)
+    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
     months = set()
     for f in os.listdir(state_dir):
         m = pat.match(f)
@@ -107,8 +107,7 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
     """
     Resolve patterns file path(s) for given states and date.
 
-    Prefers .csv.gz, falls back to .csv.
-    Looks in: {base_dir}/{STATE}/{YYYY-MM}-{STATE}.csv.gz  (then .csv)
+    Looks in: {base_dir}/{STATE}/{YYYY-MM}-{STATE}.parquet
 
     Args:
         states: State abbreviations (e.g. ['OK', 'TX'])
@@ -126,45 +125,28 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
 
     for state in states:
         state_upper = state.upper()
-        # Try exact month first, then fall back to closest available
-        months_to_try = [month_key]
+        # Try exact month first
+        stem = f'{month_key}-{state_upper}'
+        path = os.path.join(base_dir, state_upper, f'{stem}.parquet')
+        if os.path.exists(path):
+            files.append(path)
+            continue
+
+        # Fall back to closest available month
         available = _available_months_for_state(state_upper, base_dir)
         nearest = closest_month(month_key, available)
         if nearest and nearest != month_key:
-            months_to_try.append(nearest)
-            logger.info(f"No exact match for {state_upper}/{month_key}, "
-                        f"using closest available month: {nearest}")
+            path = os.path.join(base_dir, state_upper, f'{nearest}-{state_upper}.parquet')
+            if os.path.exists(path):
+                logger.info(f"No exact match for {state_upper}/{month_key}, "
+                            f"using closest available month: {nearest}")
+                files.append(path)
+                continue
 
-        found = False
-        for mk in months_to_try:
-            stem = f'{mk}-{state_upper}'
-            candidates = [
-                os.path.join(base_dir, state_upper, f'{stem}.csv.gz'),
-                os.path.join(base_dir, state_upper, f'{stem}.csv'),
-                os.path.join(base_dir, f'{stem}.csv.gz'),
-                os.path.join(base_dir, f'{stem}.csv'),
-            ]
-            for path in candidates:
-                if os.path.exists(path):
-                    files.append(path)
-                    found = True
-                    break
-            if found:
-                break
-        if not found:
-            logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
+        logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
 
     return files
 
-
-def _detect_usecols(csv_path: str) -> List[str]:
-    """
-    Read the header of a CSV and return the actual column names that match
-    our needed columns (case-insensitive).
-    """
-    sample = pd.read_csv(csv_path, nrows=0)
-    header_map = {c.lower(): c for c in sample.columns}
-    return [header_map[c] for c in ALL_NEEDED_COLUMNS if c in header_map]
 
 
 class PatternsData:
@@ -184,45 +166,47 @@ class PatternsData:
              cbg_set: Optional[Set[str]] = None,
              chunksize: int = 20_000) -> 'PatternsData':
         """
-        Load and merge patterns from one or more state CSV files.
+        Load and merge patterns from one or more files.
 
+        Supports parquet (preferred) and legacy CSV fallback.
         Filters rows early (by zip_codes or cbg_set) to keep memory low.
-        Only reads the columns the algorithms actually need.
 
         Args:
-            file_paths: CSV files to read (may span multiple states)
+            file_paths: Parquet or CSV files to read (may span multiple states)
             zip_codes: Filter by postal_code (used during CZ clustering)
             cbg_set: Filter by poi_cbg (used for popgen + patterns)
-            chunksize: Rows per chunk for streaming read
+            chunksize: Rows per chunk for CSV streaming read
         """
         all_chunks: List[pd.DataFrame] = []
 
         for path in file_paths:
-            usecols = _detect_usecols(path)
-            if not usecols:
-                logger.warning(f"No recognized columns in {path}, skipping")
-                continue
-
-            logger.info(f"Loading patterns from {path} ({len(usecols)} columns)")
-
-            for chunk in pd.read_csv(path, usecols=usecols, chunksize=chunksize):
-                # Normalize column names to lowercase
-                chunk.columns = chunk.columns.str.lower()
-
-                # Normalize poi_cbg to string
-                if 'poi_cbg' in chunk.columns:
-                    chunk['poi_cbg'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
-                    chunk.dropna(subset=['poi_cbg'], inplace=True)
-                    chunk['poi_cbg'] = chunk['poi_cbg'].astype('int64').astype(str)
-
-                # Apply geographic filter
-                if cbg_set and 'poi_cbg' in chunk.columns:
-                    chunk = chunk[chunk['poi_cbg'].isin(cbg_set)]
-                elif zip_codes and 'postal_code' in chunk.columns:
-                    chunk = chunk[chunk['postal_code'].isin(zip_codes)]
-
-                if len(chunk) > 0:
-                    all_chunks.append(chunk)
+            if path.endswith('.parquet'):
+                logger.info(f"Loading parquet patterns from {path}")
+                df = pd.read_parquet(path)
+                df.columns = df.columns.str.lower()
+                if 'poi_cbg' in df.columns:
+                    df['poi_cbg'] = df['poi_cbg'].astype(str).str.strip().str.zfill(12)
+                if cbg_set and 'poi_cbg' in df.columns:
+                    df = df[df['poi_cbg'].isin(cbg_set)]
+                elif zip_codes and 'postal_code' in df.columns:
+                    df = df[df['postal_code'].isin(zip_codes)]
+                if not df.empty:
+                    all_chunks.append(df)
+            else:
+                # Legacy CSV fallback
+                logger.info(f"Loading CSV patterns from {path}")
+                df = pd.read_csv(path)
+                df.columns = df.columns.str.lower()
+                if 'poi_cbg' in df.columns:
+                    df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
+                    df.dropna(subset=['poi_cbg'], inplace=True)
+                    df['poi_cbg'] = df['poi_cbg'].astype('int64').astype(str).str.zfill(12)
+                if cbg_set and 'poi_cbg' in df.columns:
+                    df = df[df['poi_cbg'].isin(cbg_set)]
+                elif zip_codes and 'postal_code' in df.columns:
+                    df = df[df['postal_code'].isin(zip_codes)]
+                if not df.empty:
+                    all_chunks.append(df)
 
         if all_chunks:
             df = pd.concat(all_chunks, ignore_index=True)
