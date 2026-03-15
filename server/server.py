@@ -33,6 +33,8 @@ import re
 from functools import lru_cache
 from run_report import RunReport
 
+FULLSTACK_URL = os.environ.get('FULLSTACK_URL', 'http://localhost:3000')
+
 app = Flask(__name__)
 CORS(app,
   origins=[
@@ -774,7 +776,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
 
     report.info('Uploading data to DB API...')
     _update_progress(czone_id, 'Uploading data...', 80)
-    resp = requests.post('http://localhost:3000/api/patterns', data={
+    resp = requests.post(f'{FULLSTACK_URL}/api/patterns', data={
       'czone_id': int(czone_id),
     }, files={
       'papdata': ('papdata.json', BytesIO(json.dumps(papdata).encode()), 'text/plain'),
@@ -1212,7 +1214,7 @@ def create_cz(data, report):
   report.info(f'Clustered {len(cluster)} CBGs with total population {size}')
   report.debug(f'Cluster CBGs: {cluster}')
     
-  resp = requests.post('http://localhost:3000/api/convenience-zones', json={
+  resp = requests.post(f'{FULLSTACK_URL}/api/convenience-zones', json={
     'name': data['name'],
     'description': data['description'],
     'latitude': map.location[0],
@@ -1656,7 +1658,7 @@ def route_finalize_cz():
     longitude = data.get('longitude', 0)
     
     # Create DB record
-    resp = requests.post('http://localhost:3000/api/convenience-zones', json={
+    resp = requests.post(f'{FULLSTACK_URL}/api/convenience-zones', json={
       'name': data.get('name', ''),
       'description': data.get('description', ''),
       'latitude': latitude,
