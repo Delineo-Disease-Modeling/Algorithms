@@ -14,6 +14,9 @@ from czcode import (
 )
 from popgen import gen_pop
 from patterns import gen_patterns
+from monthly_patterns import parse_date
+from prep import get_pattern_availability, prepare_multi_month_inputs
+from storage_api import create_convenience_zone, upload_patterns
 from geojsongen import get_cbg_geojson, get_cbg_at_point
 from datetime import datetime
 import os
@@ -26,7 +29,6 @@ import pandas as pd
 import folium
 from jsonschema import validate
 from schema import gen_cz_schema
-from io import BytesIO
 import re
 from functools import lru_cache
 from run_report import RunReport
@@ -670,12 +672,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     report.info(f'Generated {patterns_count} timestep patterns')
         
     report.info('Uploading data to DB API...')
-    resp = requests.post('http://localhost:3000/api/patterns', data={
-      'czone_id': int(czone_id),
-    }, files={
-      'papdata': ('papdata.json', BytesIO(json.dumps(papdata).encode()), 'text/plain'),
-      'patterns': ('patterns.json', BytesIO(json.dumps(patterns).encode()), 'text/plain')
-    })
+    resp = upload_patterns(czone_id, papdata, patterns)
     
     if resp.ok:
       report.info('Data uploaded successfully!')
@@ -1095,7 +1092,7 @@ def create_cz(data, report):
   report.info(f'Clustered {len(cluster)} CBGs with total population {size}')
   report.debug(f'Cluster CBGs: {cluster}')
     
-  resp = requests.post('http://localhost:3000/api/convenience-zones', json={
+  resp = create_convenience_zone({
     'name': data['name'],
     'description': data['description'],
     'latitude': map.location[0],
@@ -1143,6 +1140,125 @@ def create_cz(data, report):
     'size': size,
     'map': map._repr_html_()
   })
+
+
+@app.route('/pattern-availability', methods=['GET'])
+@cross_origin()
+def route_pattern_availability():
+  state_filter = request.args.get('state')
+  start_date_str = request.args.get('start_date')
+  end_date_str = request.args.get('end_date')
+  patterns_folder = request.args.get('patterns_folder') or None
+
+  if not state_filter:
+    return make_response(
+      jsonify({'message': "Missing required parameter: state (e.g., 'OK')"}),
+      400
+    )
+
+  if bool(start_date_str) != bool(end_date_str):
+    return make_response(
+      jsonify({'message': 'Provide both start_date and end_date together'}),
+      400
+    )
+
+  start_date = None
+  end_date = None
+  if start_date_str and end_date_str:
+    try:
+      start_date = parse_date(start_date_str)
+      end_date = parse_date(end_date_str)
+    except ValueError as e:
+      return make_response(
+        jsonify({'message': f'Invalid date format. Use YYYY-MM-DD: {e}'}),
+        400
+      )
+
+    if end_date < start_date:
+      return make_response(
+        jsonify({'message': 'end_date must be on or after start_date'}),
+        400
+      )
+
+  try:
+    availability = get_pattern_availability(
+      state_filter,
+      start_date=start_date,
+      end_date=end_date,
+      patterns_folder=patterns_folder,
+    )
+  except ValueError as e:
+    return make_response(jsonify({'message': str(e)}), 400)
+
+  return jsonify({'data': availability})
+
+
+@app.route('/prepare-simulation-inputs', methods=['POST'])
+@cross_origin()
+def route_prepare_simulation_inputs():
+  payload = request.get_json(silent=True)
+  if not isinstance(payload, dict) or not payload:
+    return make_response(jsonify({'message': 'Please supply adequate JSON data'}), 400)
+
+  state_filter = payload.get('state')
+  start_date_str = payload.get('start_date')
+  end_date_str = payload.get('end_date')
+  patterns_folder = payload.get('patterns_folder') or None
+  papdata = payload.get('papdata')
+  czone_id_raw = payload.get('czone_id')
+
+  if not state_filter:
+    return make_response(
+      jsonify({'message': "Missing required parameter: state (e.g., 'OK')"}),
+      400
+    )
+
+  if not start_date_str or not end_date_str:
+    return make_response(
+      jsonify({'message': 'Missing required parameters: start_date and end_date'}),
+      400
+    )
+
+  try:
+    start_date = parse_date(start_date_str)
+    end_date = parse_date(end_date_str)
+  except ValueError as e:
+    return make_response(
+      jsonify({'message': f'Invalid date format. Use YYYY-MM-DD: {e}'}),
+      400
+    )
+
+  if end_date < start_date:
+    return make_response(
+      jsonify({'message': 'end_date must be on or after start_date'}),
+      400
+    )
+
+  czone_id = None
+  if czone_id_raw is not None and czone_id_raw != '':
+    try:
+      czone_id = int(czone_id_raw)
+    except (TypeError, ValueError):
+      return make_response(
+        jsonify({'message': 'czone_id must be an integer'}),
+        400
+      )
+
+  try:
+    prepared = prepare_multi_month_inputs(
+      state_filter,
+      start_date,
+      end_date,
+      czone_id=czone_id,
+      papdata=papdata,
+      patterns_folder=patterns_folder,
+    )
+  except ValueError as e:
+    return make_response(jsonify({'message': str(e)}), 400)
+  except RuntimeError as e:
+    return make_response(jsonify({'message': str(e)}), 502)
+
+  return jsonify({'data': prepared})
 
 @app.route('/generate-cz', methods=['POST'])
 @cross_origin()
@@ -1523,7 +1639,7 @@ def route_finalize_cz():
     longitude = data.get('longitude', 0)
     
     # Create DB record
-    resp = requests.post('http://localhost:3000/api/convenience-zones', json={
+    resp = create_convenience_zone({
       'name': data.get('name', ''),
       'description': data.get('description', ''),
       'latitude': latitude,
