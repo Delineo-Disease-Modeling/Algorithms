@@ -24,18 +24,43 @@ import csv
 import threading
 import requests
 import json
+import logging
 import pandas as pd
 import folium
 from jsonschema import validate
 from schema import gen_cz_schema
 from io import BytesIO
 import re
+import sys
 from functools import lru_cache
 from run_report import RunReport
 
 FULLSTACK_URL = os.environ.get('FULLSTACK_URL', 'http://localhost:3000')
 
 app = Flask(__name__)
+app.logger.setLevel(logging.INFO)
+
+
+def _build_stdout_logger(name):
+  logger = logging.getLogger(name)
+  if not logger.handlers:
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(logging.Formatter(
+      '%(asctime)s %(levelname)s %(name)s %(message)s'
+    ))
+    logger.addHandler(handler)
+  logger.setLevel(logging.INFO)
+  logger.propagate = False
+  return logger
+
+
+DIAGNOSTICS_LOGGER = _build_stdout_logger('algorithms.diagnostics')
+
+
+def _log_candidate_pois(message, *args, level=logging.INFO, exc_info=False):
+  DIAGNOSTICS_LOGGER.log(level, message, *args, exc_info=exc_info)
+
+
 CORS(app,
   origins=[
     'http://localhost:3000',
@@ -648,7 +673,7 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
       existing['source_rows'] += 1
 
   iter_info = diagnostics.get('iter') or {}
-  app.logger.info(
+  _log_candidate_pois(
     "candidate-pois file=%s format=%s pushdown=%s poi_col=%s poi_type=%s "
     "chunks=%s candidate_rows=%s visitor_rows=%s overlap_rows=%s sample_type=%s sample=%s",
     iter_info.get('path') or patterns_file,
@@ -2188,7 +2213,7 @@ def route_candidate_pois():
       month=patterns_month,
       cache_tag='v3'
     )
-    app.logger.info(
+    _log_candidate_pois(
       "candidate-pois seed=%s candidate=%s cluster_size=%s source=%s analysis_mode=%s file=%s month=%s",
       seed_cbg,
       candidate_cbg,
@@ -2215,7 +2240,12 @@ def route_candidate_pois():
       'use_test_data': use_test_data,
     })
   except Exception as e:
-    print(f'Error computing candidate POIs: {e}')
+    _log_candidate_pois(
+      'candidate-pois error=%s',
+      e,
+      level=logging.ERROR,
+      exc_info=True
+    )
     return make_response(jsonify({'message': f'Error computing candidate POIs: {str(e)}'}), 500)
 
 
