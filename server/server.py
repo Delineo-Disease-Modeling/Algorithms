@@ -423,21 +423,28 @@ def _safe_float(raw, default=0.0):
 
 
 def _parse_visitor_daytime_cbgs(raw):
-  if isinstance(raw, dict):
-    parsed = raw
-  else:
-    text = str(raw or '').strip()
+  parsed = raw
+  for _ in range(3):
+    if isinstance(parsed, dict):
+      break
+
+    text = str(parsed or '').strip()
     if not text:
       return {}
-    parsed = None
+
+    next_value = None
     for candidate in (text, text.replace("'", '"')):
       try:
-        parsed = json.loads(candidate)
+        next_value = json.loads(candidate)
         break
       except Exception:
         continue
-    if not isinstance(parsed, dict):
+    if next_value is None:
       return {}
+    parsed = next_value
+
+  if not isinstance(parsed, dict):
+    return {}
 
   normalized = {}
   for cbg, count in parsed.items():
