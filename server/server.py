@@ -426,6 +426,42 @@ def _parse_visitor_daytime_cbgs(raw):
   return normalized
 
 
+def _iter_candidate_poi_pattern_chunks(patterns_file, usecols_lower, chunksize=10000):
+  path = str(patterns_file or '')
+  lower_path = path.lower()
+
+  if lower_path.endswith('.parquet'):
+    import pyarrow.parquet as pq
+
+    parquet_file = pq.ParquetFile(path)
+    selected_cols = [
+      name for name in parquet_file.schema.names
+      if str(name).strip().lower() in usecols_lower
+    ]
+    if not selected_cols:
+      return
+
+    for batch in parquet_file.iter_batches(
+      batch_size=chunksize,
+      columns=selected_cols
+    ):
+      chunk = batch.to_pandas()
+      chunk.columns = [str(c).strip().lower() for c in chunk.columns]
+      yield chunk
+    return
+
+  with pd.read_csv(
+    path,
+    chunksize=chunksize,
+    dtype=str,
+    usecols=lambda c: str(c).strip().lower() in usecols_lower
+  ) as reader:
+    for chunk in reader:
+      chunk = chunk.copy()
+      chunk.columns = [str(c).strip().lower() for c in chunk.columns]
+      yield chunk
+
+
 def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limit=8):
   cluster_set = {_normalize_cbg(cbg) for cbg in cluster_cbgs}
   cluster_set.discard(None)
@@ -449,69 +485,65 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
   usecols = required_cols + metadata_cols
   usecols_lower = {str(c).strip().lower() for c in usecols}
 
-  with pd.read_csv(
+  for chunk in _iter_candidate_poi_pattern_chunks(
     patterns_file,
-    chunksize=10000,
-    dtype=str,
-    usecols=lambda c: str(c).strip().lower() in usecols_lower
-  ) as reader:
-    for chunk in reader:
-      chunk = chunk.copy()
-      chunk.columns = [str(c).strip().lower() for c in chunk.columns]
-      if 'poi_cbg' not in chunk.columns or 'visitor_daytime_cbgs' not in chunk.columns:
+    usecols_lower,
+    chunksize=10000
+  ):
+    if 'poi_cbg' not in chunk.columns or 'visitor_daytime_cbgs' not in chunk.columns:
+      continue
+
+    chunk['poi_cbg_norm'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
+    chunk = chunk[chunk['poi_cbg_norm'].notna()]
+    if chunk.empty:
+      continue
+
+    chunk['poi_cbg_norm'] = (
+      chunk['poi_cbg_norm']
+      .astype('int64')
+      .astype('string')
+      .str.zfill(12)
+    )
+    chunk = chunk[chunk['poi_cbg_norm'] == candidate_cbg]
+    if chunk.empty:
+      continue
+
+    for idx, row in chunk.iterrows():
+      visitors = _parse_visitor_daytime_cbgs(row.get('visitor_daytime_cbgs'))
+      if not visitors:
         continue
 
-      chunk['poi_cbg_norm'] = pd.to_numeric(chunk['poi_cbg'], errors='coerce')
-      chunk = chunk[chunk['poi_cbg_norm'].notna()]
-      if chunk.empty:
+      cluster_flow = sum(visitors.get(cbg, 0.0) for cbg in cluster_set)
+      if cluster_flow <= 0:
         continue
 
-      chunk['poi_cbg_norm'] = (
-        chunk['poi_cbg_norm']
-        .astype('int64')
-        .astype('string')
-        .str.zfill(12)
-      )
-      chunk = chunk[chunk['poi_cbg_norm'] == candidate_cbg]
-      if chunk.empty:
-        continue
+      source_rows += 1
+      placekey = str(row.get('placekey') or '').strip()
+      location_name = str(row.get('location_name') or '').strip()
+      item_id = placekey or f"{candidate_cbg}:{location_name or idx}"
 
-      for idx, row in chunk.iterrows():
-        visitors = _parse_visitor_daytime_cbgs(row.get('visitor_daytime_cbgs'))
-        if not visitors:
-          continue
+      existing = aggregated.get(item_id)
+      if existing is None:
+        existing = {
+          'placekey': placekey or None,
+          'location_name': location_name or 'Unknown POI',
+          'top_category': str(row.get('top_category') or '').strip() or None,
+          'sub_category': str(row.get('sub_category') or '').strip() or None,
+          'street_address': str(row.get('street_address') or '').strip() or None,
+          'city': str(row.get('city') or '').strip() or None,
+          'region': str(row.get('region') or '').strip() or None,
+          'postal_code': str(row.get('postal_code') or '').strip() or None,
+          'raw_visit_counts': 0.0,
+          'raw_visitor_counts': 0.0,
+          'cluster_flow': 0.0,
+          'source_rows': 0,
+        }
+        aggregated[item_id] = existing
 
-        cluster_flow = sum(visitors.get(cbg, 0.0) for cbg in cluster_set)
-        if cluster_flow <= 0:
-          continue
-
-        source_rows += 1
-        placekey = str(row.get('placekey') or '').strip()
-        location_name = str(row.get('location_name') or '').strip()
-        item_id = placekey or f"{candidate_cbg}:{location_name or idx}"
-
-        existing = aggregated.get(item_id)
-        if existing is None:
-          existing = {
-            'placekey': placekey or None,
-            'location_name': location_name or 'Unknown POI',
-            'top_category': str(row.get('top_category') or '').strip() or None,
-            'sub_category': str(row.get('sub_category') or '').strip() or None,
-            'street_address': str(row.get('street_address') or '').strip() or None,
-            'city': str(row.get('city') or '').strip() or None,
-            'region': str(row.get('region') or '').strip() or None,
-            'postal_code': str(row.get('postal_code') or '').strip() or None,
-            'raw_visit_counts': 0.0,
-            'raw_visitor_counts': 0.0,
-            'cluster_flow': 0.0,
-            'source_rows': 0,
-          }
-          aggregated[item_id] = existing
-
-        existing['cluster_flow'] += cluster_flow
-        existing['raw_visit_counts'] += _safe_float(row.get('raw_visit_counts'), 0.0)
-        existing['raw_visitor_counts'] += _safe_float(row.get('raw_visitor_counts'), 0.0)
-        existing['source_rows'] += 1
+      existing['cluster_flow'] += cluster_flow
+      existing['raw_visit_counts'] += _safe_float(row.get('raw_visit_counts'), 0.0)
+      existing['raw_visitor_counts'] += _safe_float(row.get('raw_visitor_counts'), 0.0)
+      existing['source_rows'] += 1
 
   if not aggregated:
     return []
