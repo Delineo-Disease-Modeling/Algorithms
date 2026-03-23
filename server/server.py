@@ -426,30 +426,109 @@ def _parse_visitor_daytime_cbgs(raw):
   return normalized
 
 
-def _iter_candidate_poi_pattern_chunks(patterns_file, usecols_lower, chunksize=10000):
+def _build_candidate_poi_parquet_filter(ds, field_name, field_type, candidate_cbg):
+  try:
+    candidate_int = int(str(candidate_cbg).strip())
+  except (TypeError, ValueError):
+    candidate_int = None
+
+  type_name = str(field_type)
+  if candidate_int is None:
+    return None, type_name
+
+  try:
+    import pyarrow.types as patypes
+
+    if patypes.is_integer(field_type):
+      return ds.field(field_name) == candidate_int, type_name
+    if patypes.is_floating(field_type):
+      return ds.field(field_name) == float(candidate_int), type_name
+    if patypes.is_string(field_type) or patypes.is_large_string(field_type):
+      return (
+        (ds.field(field_name) == str(candidate_int))
+        | (ds.field(field_name) == f"{candidate_int}.0")
+        | (ds.field(field_name) == str(candidate_cbg).strip())
+      ), type_name
+    if patypes.is_dictionary(field_type):
+      value_type = field_type.value_type
+      value_type_name = f"{type_name}->{value_type}"
+      if patypes.is_string(value_type) or patypes.is_large_string(value_type):
+        return (
+          (ds.field(field_name) == str(candidate_int))
+          | (ds.field(field_name) == f"{candidate_int}.0")
+          | (ds.field(field_name) == str(candidate_cbg).strip())
+        ), value_type_name
+      if patypes.is_integer(value_type):
+        return ds.field(field_name) == candidate_int, value_type_name
+      if patypes.is_floating(value_type):
+        return ds.field(field_name) == float(candidate_int), value_type_name
+      return None, value_type_name
+  except Exception:
+    pass
+
+  return None, type_name
+
+
+def _iter_candidate_poi_pattern_chunks(
+  patterns_file,
+  usecols_lower,
+  candidate_cbg=None,
+  chunksize=10000
+):
   path = str(patterns_file or '')
   lower_path = path.lower()
+  diagnostics = {
+    'path': path,
+    'format': 'parquet' if lower_path.endswith('.parquet') else 'csv',
+    'selected_cols': [],
+    'poi_column': None,
+    'poi_column_type': None,
+    'pushdown_filter': False,
+  }
 
   if lower_path.endswith('.parquet'):
-    import pyarrow.parquet as pq
+    import pyarrow.dataset as ds
 
-    parquet_file = pq.ParquetFile(path)
+    dataset = ds.dataset(path, format='parquet')
     selected_cols = [
-      name for name in parquet_file.schema.names
+      name for name in dataset.schema.names
       if str(name).strip().lower() in usecols_lower
     ]
+    diagnostics['selected_cols'] = selected_cols
     if not selected_cols:
+      yield None, diagnostics
       return
 
-    for batch in parquet_file.iter_batches(
-      batch_size=chunksize,
-      columns=selected_cols
-    ):
+    filter_expr = None
+    actual_poi_col = next(
+      (name for name in dataset.schema.names if str(name).strip().lower() == 'poi_cbg'),
+      None
+    )
+    diagnostics['poi_column'] = actual_poi_col
+    if actual_poi_col:
+      field = dataset.schema.field(actual_poi_col)
+      filter_expr, poi_type = _build_candidate_poi_parquet_filter(
+        ds,
+        actual_poi_col,
+        field.type,
+        candidate_cbg
+      )
+      diagnostics['poi_column_type'] = poi_type
+      diagnostics['pushdown_filter'] = filter_expr is not None
+
+    scanner = dataset.scanner(
+      columns=selected_cols,
+      filter=filter_expr,
+      batch_size=chunksize
+    )
+
+    for batch in scanner.to_batches():
       chunk = batch.to_pandas()
       chunk.columns = [str(c).strip().lower() for c in chunk.columns]
-      yield chunk
+      yield chunk, diagnostics
     return
 
+  diagnostics['selected_cols'] = sorted(usecols_lower)
   with pd.read_csv(
     path,
     chunksize=chunksize,
@@ -459,7 +538,7 @@ def _iter_candidate_poi_pattern_chunks(patterns_file, usecols_lower, chunksize=1
     for chunk in reader:
       chunk = chunk.copy()
       chunk.columns = [str(c).strip().lower() for c in chunk.columns]
-      yield chunk
+      yield chunk, diagnostics
 
 
 def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limit=8):
@@ -484,12 +563,27 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
   ]
   usecols = required_cols + metadata_cols
   usecols_lower = {str(c).strip().lower() for c in usecols}
+  diagnostics = {
+    'chunks': 0,
+    'candidate_rows': 0,
+    'rows_with_visitors': 0,
+    'rows_with_overlap': 0,
+    'sample_visitor_type': None,
+    'sample_visitor_excerpt': None,
+    'iter': None,
+  }
 
-  for chunk in _iter_candidate_poi_pattern_chunks(
+  for chunk, iter_diagnostics in _iter_candidate_poi_pattern_chunks(
     patterns_file,
     usecols_lower,
+    candidate_cbg=candidate_cbg,
     chunksize=10000
   ):
+    diagnostics['iter'] = iter_diagnostics
+    if chunk is None:
+      break
+
+    diagnostics['chunks'] += 1
     if 'poi_cbg' not in chunk.columns or 'visitor_daytime_cbgs' not in chunk.columns:
       continue
 
@@ -507,15 +601,23 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
     chunk = chunk[chunk['poi_cbg_norm'] == candidate_cbg]
     if chunk.empty:
       continue
+    diagnostics['candidate_rows'] += len(chunk)
 
     for idx, row in chunk.iterrows():
+      raw_visitor_value = row.get('visitor_daytime_cbgs')
+      if diagnostics['sample_visitor_type'] is None and raw_visitor_value not in (None, ''):
+        diagnostics['sample_visitor_type'] = type(raw_visitor_value).__name__
+        diagnostics['sample_visitor_excerpt'] = repr(raw_visitor_value)[:240]
+
       visitors = _parse_visitor_daytime_cbgs(row.get('visitor_daytime_cbgs'))
       if not visitors:
         continue
+      diagnostics['rows_with_visitors'] += 1
 
       cluster_flow = sum(visitors.get(cbg, 0.0) for cbg in cluster_set)
       if cluster_flow <= 0:
         continue
+      diagnostics['rows_with_overlap'] += 1
 
       source_rows += 1
       placekey = str(row.get('placekey') or '').strip()
@@ -544,6 +646,23 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
       existing['raw_visit_counts'] += _safe_float(row.get('raw_visit_counts'), 0.0)
       existing['raw_visitor_counts'] += _safe_float(row.get('raw_visitor_counts'), 0.0)
       existing['source_rows'] += 1
+
+  iter_info = diagnostics.get('iter') or {}
+  app.logger.info(
+    "candidate-pois file=%s format=%s pushdown=%s poi_col=%s poi_type=%s "
+    "chunks=%s candidate_rows=%s visitor_rows=%s overlap_rows=%s sample_type=%s sample=%s",
+    iter_info.get('path') or patterns_file,
+    iter_info.get('format'),
+    iter_info.get('pushdown_filter'),
+    iter_info.get('poi_column'),
+    iter_info.get('poi_column_type'),
+    diagnostics['chunks'],
+    diagnostics['candidate_rows'],
+    diagnostics['rows_with_visitors'],
+    diagnostics['rows_with_overlap'],
+    diagnostics['sample_visitor_type'],
+    diagnostics['sample_visitor_excerpt'],
+  )
 
   if not aggregated:
     return []
@@ -2068,6 +2187,16 @@ def route_candidate_pois():
       patterns_file,
       month=patterns_month,
       cache_tag='v3'
+    )
+    app.logger.info(
+      "candidate-pois seed=%s candidate=%s cluster_size=%s source=%s analysis_mode=%s file=%s month=%s",
+      seed_cbg,
+      candidate_cbg,
+      len(normalized_cluster),
+      patterns_source,
+      analysis_patterns_mode,
+      analysis_patterns_file,
+      patterns_month,
     )
     pois = _compute_top_candidate_pois(
       analysis_patterns_file,
