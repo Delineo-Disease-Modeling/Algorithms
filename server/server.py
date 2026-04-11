@@ -2455,5 +2455,75 @@ def route_cbg_at_point():
     return make_response(jsonify({'message': f'Error resolving CBG at point: {str(e)}'}), 500)
 
 
+@app.route('/pattern-availability', methods=['GET'])
+@cross_origin()
+def route_pattern_availability():
+  """
+  Returns which monthly pattern files are available for a given state and date range.
+  Query params:
+    - state: required, 2-letter state abbreviation (e.g. "MD")
+    - start_date: required, ISO date string (e.g. "2021-01-15")
+    - end_date: required, ISO date string (e.g. "2021-03-20")
+  """
+  state_abbr = (request.args.get('state') or '').strip().upper()
+  start_date_raw = request.args.get('start_date')
+  end_date_raw = request.args.get('end_date')
+
+  if not state_abbr:
+    return make_response(jsonify({'message': 'Missing state parameter'}), 400)
+  if not start_date_raw or not end_date_raw:
+    return make_response(jsonify({'message': 'Missing start_date or end_date parameter'}), 400)
+
+  start_month = _extract_month_key(start_date_raw)
+  end_month = _extract_month_key(end_date_raw)
+  if not start_month or not end_month:
+    return make_response(jsonify({'message': 'Invalid start_date or end_date format'}), 400)
+
+  # Enumerate all months in [start_month, end_month]
+  def months_in_range(start, end):
+    result = []
+    year, month = int(start[:4]), int(start[5:7])
+    end_year, end_month = int(end[:4]), int(end[5:7])
+    while (year, month) <= (end_year, end_month):
+      result.append(f'{year:04d}-{month:02d}')
+      month += 1
+      if month > 12:
+        month = 1
+        year += 1
+    return result
+
+  required_months = months_in_range(start_month, end_month)
+
+  # List available months for this state abbreviation
+  patterns_dir = os.path.join(DATA_DIR, 'patterns')
+  state_dir = os.path.join(patterns_dir, state_abbr)
+  available_months = []
+  if os.path.isdir(state_dir):
+    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
+    found = set()
+    for f in os.listdir(state_dir):
+      m = pat.match(f)
+      if m:
+        found.add(m.group(1))
+    available_months = sorted(found)
+
+  has_any_data = len(available_months) > 0
+  # The backend picks a single patterns file using start_date and falls back to
+  # the closest available month, so coverage is satisfied whenever any file exists.
+  has_coverage = has_any_data
+  missing_months = [] if has_coverage else required_months
+
+  return jsonify({
+    'data': {
+      'state': state_abbr,
+      'available_months': available_months,
+      'required_months': required_months,
+      'missing_months': missing_months,
+      'has_any_data': has_any_data,
+      'has_coverage': has_coverage,
+    }
+  })
+
+
 if __name__ == '__main__':
   app.run(host='0.0.0.0', port=1880)
