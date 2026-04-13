@@ -241,11 +241,17 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
 
   stem = f'{month_key}-{state_abbr}'
   patterns_dir = os.path.join(DATA_DIR, 'patterns')
-  candidates = [
-    os.path.join(patterns_dir, state_abbr, f'{stem}.parquet'),
-    os.path.join(patterns_dir, state_abbr, f'{stem}.csv.gz'),
-    os.path.join(patterns_dir, state_abbr, f'{stem}.csv'),
-  ]
+  # Check both data/patterns/<STATE>/ and data/<STATE>/ (legacy layout)
+  search_dirs = [os.path.join(patterns_dir, state_abbr),
+                 os.path.join(DATA_DIR, state_abbr)]
+  candidates = []
+  for d in search_dirs:
+    candidates.extend([
+      os.path.join(d, f'{stem}.parquet'),
+      os.path.join(d, f'{stem}.csv.gz'),
+      os.path.join(d, f'{stem}.converted.csv'),
+      os.path.join(d, f'{stem}.csv'),
+    ])
 
   for path in candidates:
     if os.path.exists(path):
@@ -260,18 +266,18 @@ def _list_available_months_for_state(cbg_str):
   if not state_abbr:
     return []
 
-  patterns_dir = os.path.join(DATA_DIR, 'patterns')
-  state_dir = os.path.join(patterns_dir, state_abbr)
-  if not os.path.isdir(state_dir):
-    return []
-
   import re
-  pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
+  pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.(?:parquet|csv(?:\.gz)?|converted\.csv)$', re.IGNORECASE)
   months = set()
-  for f in os.listdir(state_dir):
-    m = pat.match(f)
-    if m:
-      months.add(m.group(1))
+  # Check both data/patterns/<STATE>/ and data/<STATE>/ (legacy layout)
+  for base in [os.path.join(DATA_DIR, 'patterns'), DATA_DIR]:
+    state_dir = os.path.join(base, state_abbr)
+    if not os.path.isdir(state_dir):
+      continue
+    for f in os.listdir(state_dir):
+      m = pat.match(f)
+      if m:
+        months.add(m.group(1))
   return sorted(months)
 
 

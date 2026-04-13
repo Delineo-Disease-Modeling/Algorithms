@@ -22,6 +22,9 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 PATTERNS_BASE_DIR = os.path.join(os.path.dirname(__file__), 'data', 'patterns')
+# Legacy layout: CSVs live directly in data/<STATE>/ instead of data/patterns/<STATE>/
+_DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
+_PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
 
 # All columns any algorithm step might need (lowercase canonical names).
 # CZ clustering:  poi_cbg, visitor_daytime_cbgs, postal_code
@@ -75,7 +78,7 @@ def _available_months_for_state(state: str, base_dir: str) -> List[str]:
     state_dir = os.path.join(base_dir, state.upper())
     if not os.path.isdir(state_dir):
         return []
-    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
+    pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.(?:parquet|csv(?:\.gz)?|converted\.csv)$', re.IGNORECASE)
     months = set()
     for f in os.listdir(state_dir):
         m = pat.match(f)
@@ -123,27 +126,47 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
     month_key = start_date.strftime('%Y-%m')
     files = []
 
+    # Check both the given base_dir and the legacy data/<STATE>/ layout
+    search_dirs = [base_dir]
+    if _DATA_DIR != base_dir and os.path.isdir(_DATA_DIR):
+        search_dirs.append(_DATA_DIR)
+
     for state in states:
         state_upper = state.upper()
-        # Try exact month first
+        found = False
+        # Try exact month first across all search dirs and extensions
         stem = f'{month_key}-{state_upper}'
-        path = os.path.join(base_dir, state_upper, f'{stem}.parquet')
-        if os.path.exists(path):
-            files.append(path)
+        for sd in search_dirs:
+            for ext in _PATTERN_EXTS:
+                path = os.path.join(sd, state_upper, f'{stem}{ext}')
+                if os.path.exists(path):
+                    files.append(path)
+                    found = True
+                    break
+            if found:
+                break
+        if found:
             continue
 
         # Fall back to closest available month
-        available = _available_months_for_state(state_upper, base_dir)
-        nearest = closest_month(month_key, available)
-        if nearest and nearest != month_key:
-            path = os.path.join(base_dir, state_upper, f'{nearest}-{state_upper}.parquet')
-            if os.path.exists(path):
-                logger.info(f"No exact match for {state_upper}/{month_key}, "
-                            f"using closest available month: {nearest}")
-                files.append(path)
-                continue
+        for sd in search_dirs:
+            available = _available_months_for_state(state_upper, sd)
+            nearest = closest_month(month_key, available)
+            if nearest and nearest != month_key:
+                nstem = f'{nearest}-{state_upper}'
+                for ext in _PATTERN_EXTS:
+                    path = os.path.join(sd, state_upper, f'{nstem}{ext}')
+                    if os.path.exists(path):
+                        logger.info(f"No exact match for {state_upper}/{month_key}, "
+                                    f"using closest available month: {nearest}")
+                        files.append(path)
+                        found = True
+                        break
+            if found:
+                break
 
-        logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
+        if not found:
+            logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
 
     return files
 

@@ -170,7 +170,13 @@ class Config:
                 return patterns_file
             raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
 
-        search_root = patterns_folder or os.path.join(os.path.dirname(__file__), "data", "patterns")
+        data_base = os.path.join(os.path.dirname(__file__), "data")
+        search_root = patterns_folder or os.path.join(data_base, "patterns")
+        # Also check the legacy layout where CSVs live directly in data/<STATE>/
+        search_roots = [search_root]
+        if not patterns_folder and data_base not in search_roots:
+            search_roots.append(data_base)
+
         month_key = str(month or "").strip()
 
         if month_key:
@@ -186,26 +192,32 @@ class Config:
                 if state_code and state_code not in state_candidates:
                     state_candidates.append(state_code)
 
-            # Try exact month first
-            for state in state_candidates:
-                stem = f"{month_key}-{state}"
-                path = os.path.join(search_root, state, f"{stem}.parquet")
-                if os.path.exists(path):
-                    return path
+            # Try exact month first across all search roots and file extensions
+            _exts = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
+            for root in search_roots:
+                for state in state_candidates:
+                    stem = f"{month_key}-{state}"
+                    for ext in _exts:
+                        path = os.path.join(root, state, f"{stem}{ext}")
+                        if os.path.exists(path):
+                            return path
 
             # Exact month not found — try closest available month
             from patterns_loader import closest_month, _available_months_for_state
-            for state in state_candidates:
-                available = _available_months_for_state(state, search_root)
-                nearest = closest_month(month_key, available)
-                if nearest and nearest != month_key:
-                    path = os.path.join(search_root, state, f"{nearest}-{state}.parquet")
-                    if os.path.exists(path):
-                        import logging
-                        logging.getLogger('cbg_clustering').info(
-                            f"No data for {month_key}, using closest month: {nearest}"
-                        )
-                        return path
+            for root in search_roots:
+                for state in state_candidates:
+                    available = _available_months_for_state(state, root)
+                    nearest = closest_month(month_key, available)
+                    if nearest and nearest != month_key:
+                        stem = f"{nearest}-{state}"
+                        for ext in _exts:
+                            path = os.path.join(root, state, f"{stem}{ext}")
+                            if os.path.exists(path):
+                                import logging
+                                logging.getLogger('cbg_clustering').info(
+                                    f"No data for {month_key}, using closest month: {nearest}"
+                                )
+                                return path
 
         # Fallback: legacy patterns.csv
         legacy = os.path.join(os.path.dirname(__file__), "data", "patterns.csv")
