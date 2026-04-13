@@ -727,7 +727,7 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
                     continue
 
     source_headers = set(_read_csv_headers(source_csv))
-    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code']
+    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code', 'street_address']
     available_metadata_cols = [col for col in metadata_cols if col in source_headers]
     places = pd.read_csv(source_csv, usecols=['placekey'] + available_metadata_cols)
     places = places[places['placekey'].isin(placekeys)].reset_index()
@@ -744,7 +744,8 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None):
             'longitude': row['longitude'],
             # Sometimes this is empty
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
-            'postal_code': row['postal_code']
+            'postal_code': row['postal_code'],
+            'street_address': row['street_address'],
         }
     
     return output
