@@ -579,28 +579,12 @@ def _iter_candidate_poi_pattern_chunks(
       yield chunk, diagnostics
 
 
-def _build_candidate_poi_debug_summary(patterns_file, diagnostics):
-  iter_info = diagnostics.get('iter') or {}
-  return {
-    'file': iter_info.get('path') or str(patterns_file or ''),
-    'format': iter_info.get('format'),
-    'pushdown': bool(iter_info.get('pushdown_filter')),
-    'poi_col': iter_info.get('poi_column'),
-    'poi_type': iter_info.get('poi_column_type'),
-    'chunks': int(diagnostics.get('chunks') or 0),
-    'candidate_rows': int(diagnostics.get('candidate_rows') or 0),
-    'visitor_rows': int(diagnostics.get('rows_with_visitors') or 0),
-    'overlap_rows': int(diagnostics.get('rows_with_overlap') or 0),
-    'sample_type': diagnostics.get('sample_visitor_type'),
-    'sample': diagnostics.get('sample_visitor_excerpt'),
-  }
-
 
 def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limit=8):
   cluster_set = {_normalize_cbg(cbg) for cbg in cluster_cbgs}
   cluster_set.discard(None)
   if not cluster_set:
-    return [], _build_candidate_poi_debug_summary(patterns_file, {})
+    return []
 
   try:
     limit = int(limit)
@@ -718,10 +702,8 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
     diagnostics['sample_visitor_type'],
     diagnostics['sample_visitor_excerpt'],
   )
-  debug_summary = _build_candidate_poi_debug_summary(patterns_file, diagnostics)
-
   if not aggregated:
-    return [], debug_summary
+    return []
 
   ranked = sorted(
     aggregated.values(),
@@ -742,7 +724,7 @@ def _compute_top_candidate_pois(patterns_file, candidate_cbg, cluster_cbgs, limi
     item['raw_visit_counts'] = round(float(item.get('raw_visit_counts', 0.0)), 2)
     item['raw_visitor_counts'] = round(float(item.get('raw_visitor_counts', 0.0)), 2)
 
-  return ranked, debug_summary
+  return ranked
 
 def _normalize_cluster_algorithm(algorithm):
   if algorithm is None:
@@ -2237,21 +2219,6 @@ def route_candidate_pois():
   except ValueError as e:
     return make_response(jsonify({'message': str(e)}), 400)
 
-  debug_payload = {
-    'request': {
-      'seed_cbg': seed_cbg,
-      'candidate_cbg': candidate_cbg,
-      'cluster_size': len(normalized_cluster),
-    },
-    'patterns': {
-      'source': patterns_source,
-      'analysis_mode': None,
-      'file': patterns_file,
-      'month': patterns_month,
-    },
-    'reader': None,
-  }
-
   try:
     analysis_patterns_file, analysis_patterns_mode = _resolve_localized_patterns_extract(
       seed_cbg,
@@ -2259,12 +2226,6 @@ def route_candidate_pois():
       month=patterns_month,
       cache_tag='v3'
     )
-    debug_payload['patterns'] = {
-      'source': patterns_source,
-      'analysis_mode': analysis_patterns_mode,
-      'file': analysis_patterns_file,
-      'month': patterns_month,
-    }
     _log_candidate_pois(
       "candidate-pois seed=%s candidate=%s cluster_size=%s source=%s analysis_mode=%s file=%s month=%s",
       seed_cbg,
@@ -2275,18 +2236,16 @@ def route_candidate_pois():
       analysis_patterns_file,
       patterns_month,
     )
-    pois, reader_debug = _compute_top_candidate_pois(
+    pois = _compute_top_candidate_pois(
       analysis_patterns_file,
       candidate_cbg=candidate_cbg,
       cluster_cbgs=normalized_cluster,
       limit=limit
     )
-    debug_payload['reader'] = reader_debug
     return jsonify({
       'candidate_cbg': candidate_cbg,
       'cluster_size': len(normalized_cluster),
       'pois': pois,
-      'debug': debug_payload,
       'patterns_file_used': analysis_patterns_file,
       'patterns_source': patterns_source,
       'patterns_analysis_mode': analysis_patterns_mode,
@@ -2302,7 +2261,6 @@ def route_candidate_pois():
     )
     return make_response(jsonify({
       'message': f'Error computing candidate POIs: {str(e)}',
-      'debug': debug_payload,
     }), 500)
 
 
