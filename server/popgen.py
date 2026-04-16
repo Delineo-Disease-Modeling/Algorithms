@@ -762,12 +762,31 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
         if col not in places.columns:
             places[col] = None
 
+    def _coerce_coord(v):
+        """Force lat/lon into a float or None.
+
+        pd.read_csv infers the column dtype from the file contents: a single
+        non-numeric cell (empty string, "NA", stray text) promotes the whole
+        column to object and every cell comes back as a str. The frontend
+        map uses Number.isFinite which is strict and rejects strings, so we
+        normalize to float here.
+        """
+        if v is None:
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return None
+        if f != f:  # NaN
+            return None
+        return f
+
     for i, row in places.iterrows():
         output['places'][str(i)] = {
             'placekey': row['placekey'],
             'label': row['location_name'],
-            'latitude': row['latitude'],
-            'longitude': row['longitude'],
+            'latitude': _coerce_coord(row['latitude']),
+            'longitude': _coerce_coord(row['longitude']),
             # Sometimes this is empty
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
             'postal_code': row['postal_code']
