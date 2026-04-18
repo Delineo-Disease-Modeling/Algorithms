@@ -4,13 +4,11 @@ Shared Patterns Data Loader
 Resolves state-specific monthly pattern files and loads them once for
 shared use across all algorithm steps (CZ clustering, popgen, patterns gen).
 
-New file layout (compressed, preferred):
-    data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv.gz
-Legacy/uncompressed fallback:
-    data/patterns/{STATE}/{YYYY-MM}-{STATE}.csv
+File layout (parquet preferred, gzipped CSV and plain CSV also supported):
+    data/patterns/{STATE}/{YYYY-MM}-{STATE}.{parquet,csv.gz,csv}
 
-Column names in new files are UPPERCASE; this module normalizes them to
-lowercase so downstream code works unchanged.
+Column names in source files are UPPERCASE; this module normalizes them
+to lowercase so downstream code works unchanged.
 """
 
 import os
@@ -22,17 +20,16 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 PATTERNS_BASE_DIR = os.path.join(os.path.dirname(__file__), 'data', 'patterns')
-# Legacy layout: CSVs live directly in data/<STATE>/ instead of data/patterns/<STATE>/
-_DATA_DIR = os.path.join(os.path.dirname(__file__), 'data')
 _PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
 
 # All columns any algorithm step might need (lowercase canonical names).
 # CZ clustering:  poi_cbg, visitor_daytime_cbgs, postal_code
-# Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, postal_code
+# Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, postal_code, polygon_wkt
 # Patterns gen:   placekey, median_dwell, popularity_by_hour, popularity_by_day
 ALL_NEEDED_COLUMNS = [
     'poi_cbg', 'visitor_daytime_cbgs', 'postal_code',
     'placekey', 'location_name', 'top_category', 'latitude', 'longitude',
+    'polygon_wkt',
     'median_dwell', 'popularity_by_hour', 'popularity_by_day',
 ]
 
@@ -126,44 +123,33 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
     month_key = start_date.strftime('%Y-%m')
     files = []
 
-    # Check both the given base_dir and the legacy data/<STATE>/ layout
-    search_dirs = [base_dir]
-    if _DATA_DIR != base_dir and os.path.isdir(_DATA_DIR):
-        search_dirs.append(_DATA_DIR)
-
     for state in states:
         state_upper = state.upper()
         found = False
-        # Try exact month first across all search dirs and extensions
+        # Try exact month first across all supported extensions
         stem = f'{month_key}-{state_upper}'
-        for sd in search_dirs:
-            for ext in _PATTERN_EXTS:
-                path = os.path.join(sd, state_upper, f'{stem}{ext}')
-                if os.path.exists(path):
-                    files.append(path)
-                    found = True
-                    break
-            if found:
+        for ext in _PATTERN_EXTS:
+            path = os.path.join(base_dir, state_upper, f'{stem}{ext}')
+            if os.path.exists(path):
+                files.append(path)
+                found = True
                 break
         if found:
             continue
 
-        # Fall back to closest available month
-        for sd in search_dirs:
-            available = _available_months_for_state(state_upper, sd)
-            nearest = closest_month(month_key, available)
-            if nearest and nearest != month_key:
-                nstem = f'{nearest}-{state_upper}'
-                for ext in _PATTERN_EXTS:
-                    path = os.path.join(sd, state_upper, f'{nstem}{ext}')
-                    if os.path.exists(path):
-                        logger.info(f"No exact match for {state_upper}/{month_key}, "
-                                    f"using closest available month: {nearest}")
-                        files.append(path)
-                        found = True
-                        break
-            if found:
-                break
+        # Fall back to closest available month within the same state
+        available = _available_months_for_state(state_upper, base_dir)
+        nearest = closest_month(month_key, available)
+        if nearest and nearest != month_key:
+            nstem = f'{nearest}-{state_upper}'
+            for ext in _PATTERN_EXTS:
+                path = os.path.join(base_dir, state_upper, f'{nstem}{ext}')
+                if os.path.exists(path):
+                    logger.info(f"No exact match for {state_upper}/{month_key}, "
+                                f"using closest available month: {nearest}")
+                    files.append(path)
+                    found = True
+                    break
 
         if not found:
             logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
@@ -239,18 +225,6 @@ class PatternsData:
         logger.info(f"Loaded {len(df)} pattern rows total")
         return cls(df)
 
-    @classmethod
-    def from_legacy_csv(cls, csv_path: str,
-                        zip_codes: Optional[List[int]] = None,
-                        cbg_set: Optional[Set[str]] = None,
-                        chunksize: int = 20_000) -> 'PatternsData':
-        """
-        Load from a single legacy patterns.csv (lowercase columns).
-        Convenience wrapper for backwards compatibility.
-        """
-        return cls.load([csv_path], zip_codes=zip_codes, cbg_set=cbg_set,
-                        chunksize=chunksize)
-
     @property
     def df(self) -> pd.DataFrame:
         """The full pre-filtered DataFrame."""
@@ -277,7 +251,7 @@ class PatternsData:
     def for_popgen_places(self, placekeys: List[str]) -> pd.DataFrame:
         """Place info for popgen: placekey, location_name, top_category, lat, lon, postal_code."""
         cols = [c for c in ['placekey', 'location_name', 'top_category',
-                            'latitude', 'longitude', 'postal_code']
+                            'latitude', 'longitude', 'postal_code', 'polygon_wkt']
                 if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()

@@ -1,13 +1,16 @@
 import json
 import random
 import os
-import csv
 import numpy as np
 import pandas as pd
 from typing import List, Dict, Any, Optional, Union, Tuple
 from dataclasses import dataclass
 import requests
 from czcode import generate_cz
+try:
+    from shapely import wkt as shapely_wkt
+except ImportError:
+    shapely_wkt = None
 
 try:
     from residential import ResidentialCache
@@ -15,56 +18,6 @@ try:
 except ImportError:
     RESIDENTIAL_AVAILABLE = False
     ResidentialCache = None
-
-
-POI_SOURCE_REQUIRED_COLUMNS = [
-    'poi_cbg',
-    'placekey',
-]
-
-
-def _read_csv_headers(csv_path: str) -> List[str]:
-    with open(csv_path, 'r', encoding='utf-8', newline='') as f:
-        reader = csv.reader(f)
-        headers = next(reader, [])
-    return [h.strip() for h in headers if h is not None]
-
-
-def _resolve_poi_source_file(poi_source_file: Optional[str] = None) -> str:
-    """
-    Resolve the source CSV used to map CBGs to POIs for papdata generation.
-    """
-    candidates = [
-        poi_source_file,
-        os.getenv('DELINEO_POI_SOURCE_FILE'),
-    ]
-
-    checked: List[str] = []
-    seen = set()
-    for candidate in candidates:
-        if not candidate:
-            continue
-        path = os.path.abspath(candidate)
-        if path in seen:
-            continue
-        seen.add(path)
-        checked.append(path)
-        if not os.path.exists(path):
-            continue
-        try:
-            headers = set(_read_csv_headers(path))
-        except Exception:
-            continue
-        missing = [c for c in POI_SOURCE_REQUIRED_COLUMNS if c not in headers]
-        if not missing:
-            return path
-
-    raise FileNotFoundError(
-        "No valid POI source CSV found. Checked: "
-        + ", ".join(checked)
-        + ". Global default fallback is disabled; provide a state-scoped source file. "
-        + f"Required columns: {POI_SOURCE_REQUIRED_COLUMNS}"
-    )
 
 
 class CensusDataPuller:
@@ -666,20 +619,16 @@ class SyntheticPopulationGenerator:
         return population_df
 
 
-def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
-                 shared_data=None, patterns_csv=None):
+def convert_data(df, cz_data, shared_data=None):
     """
     Convert data frame with person and household information into a specific dictionary format.
 
     Args:
         df: DataFrame with person/household data
         cz_data: Dictionary mapping CBG IDs to population counts
-        poi_source_file: Optional path to a POI source CSV (used in fallback resolution)
-        shared_data: Optional pre-loaded PatternsData (avoids re-reading CSV)
-        patterns_csv: Optional path to patterns CSV (used if shared_data not provided)
+        shared_data: Pre-loaded PatternsData used to derive the places dict.
+            If None/empty, the output will contain zero places.
     """
-    from patterns_loader import PatternsData
-
     # Initialize output dictionary
     output = {
         "people": {},
@@ -720,43 +669,13 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
     # Get places from the patterns data
     cbgs = list(cz_data.keys())
     cbg_set = set(cbgs)
-    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code']
+    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code', 'polygon_wkt']
 
     if shared_data is not None and not shared_data.is_empty():
-        # Use pre-loaded shared data (no CSV re-read needed)
         placekeys = shared_data.get_placekeys_for_cbgs(cbg_set)
         places = shared_data.for_popgen_places(placekeys)
     else:
-        # Fallback: resolve the source CSV via poi_source_file or patterns_csv
-        source_csv = None
-        if poi_source_file:
-            try:
-                source_csv = _resolve_poi_source_file(poi_source_file)
-            except FileNotFoundError:
-                source_csv = None
-        if source_csv is None:
-            source_csv = patterns_csv or r'./data/patterns.csv'
-
-        placekeys = []
-        # Read only the columns we need, in chunks, with case normalization
-        for chunk in pd.read_csv(source_csv, chunksize=10000,
-                                 usecols=lambda c: c.lower() in ('poi_cbg', 'placekey')):
-            chunk.columns = chunk.columns.str.lower()
-            for _, row in chunk.iterrows():
-                try:
-                    cbg = str(int(float(row['poi_cbg'])))
-                    if cbg in cbg_set:
-                        placekeys.append(row['placekey'])
-                except Exception:
-                    continue
-
-        # Read place details with case-insensitive column selection
-        places = pd.read_csv(source_csv,
-                             usecols=lambda c: c.lower() in (
-                                 'placekey', 'location_name', 'top_category',
-                                 'latitude', 'longitude', 'postal_code'))
-        places.columns = places.columns.str.lower()
-        places = places[places['placekey'].isin(placekeys)].reset_index(drop=True)
+        places = pd.DataFrame(columns=['placekey'] + metadata_cols)
 
     for col in metadata_cols:
         if col not in places.columns:
@@ -781,6 +700,25 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
             return None
         return f
 
+    def _coerce_footprint(raw):
+        if shapely_wkt is None or raw is None:
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        try:
+            geom = shapely_wkt.loads(text)
+        except Exception:
+            return None
+        if geom is None or geom.is_empty:
+            return None
+        if geom.geom_type not in ('Polygon', 'MultiPolygon'):
+            return None
+        try:
+            return geom.__geo_interface__
+        except Exception:
+            return None
+
     for i, row in places.iterrows():
         output['places'][str(i)] = {
             'placekey': row['placekey'],
@@ -789,22 +727,20 @@ def convert_data(df, cz_data, poi_source_file: Optional[str] = None,
             'longitude': _coerce_coord(row['longitude']),
             # Sometimes this is empty
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
-            'postal_code': row['postal_code']
+            'postal_code': row['postal_code'],
+            'footprint': _coerce_footprint(row.get('polygon_wkt'))
         }
 
     return output
 
-def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None,
-            shared_data=None, patterns_csv=None):
+def gen_pop(cz_data, gdf=None, shared_data=None):
     """
     Generate synthetic population for a convenience zone.
 
     Args:
         cz_data: Dictionary mapping CBG IDs to population counts
         gdf: Optional GeoDataFrame with CBG geometries for residential area sampling
-        poi_source_file: Optional path to a POI source CSV (passed to convert_data)
-        shared_data: Optional pre-loaded PatternsData to share with convert_data
-        patterns_csv: Optional patterns CSV path (used if shared_data not provided)
+        shared_data: Pre-loaded PatternsData used to derive the places dict.
 
     Returns:
         Dictionary with people, homes, and places data (papdata format)
@@ -842,8 +778,7 @@ def gen_pop(cz_data, gdf=None, poi_source_file: Optional[str] = None,
     # Save the population to CSV
     population = generator.save_population(population)
 
-    return convert_data(population, cz_data, poi_source_file=poi_source_file,
-                        shared_data=shared_data, patterns_csv=patterns_csv)
+    return convert_data(population, cz_data, shared_data=shared_data)
 
 if __name__ == '__main__':
     try:

@@ -26,6 +26,7 @@ import requests
 import json
 import logging
 import pandas as pd
+import geopandas as gpd
 import folium
 from jsonschema import validate
 from schema import gen_cz_schema
@@ -141,7 +142,8 @@ VALID_CLUSTER_ALGORITHMS = {
   'greedy_fast',
   'greedy_weight',
   'greedy_weight_seed_guard',
-  'greedy_ratio'
+  'greedy_ratio',
+  'greedy_ttwa'
 }
 DEFAULT_DISTANCE_PENALTY_WEIGHT = 0.02
 DEFAULT_DISTANCE_SCALE_KM = 20.0
@@ -151,6 +153,7 @@ DEFAULT_OPTIMAL_POP_FLOOR_RATIO = 0.9
 DEFAULT_OPTIMAL_MIP_REL_GAP = 0.02
 DEFAULT_OPTIMAL_TIME_LIMIT_SEC = 20.0
 DEFAULT_OPTIMAL_MAX_ITERS = 8
+DEFAULT_CONTAINMENT_THRESHOLD = 0.70
 
 # Keep this aligned with czcode.py for state lookup from CBG FIPS prefix.
 STATE_ABBR_TO_FIPS = {
@@ -227,8 +230,7 @@ def _extract_month_key(start_date_raw):
 def _resolve_monthly_patterns_file(cbg_str, month_key):
   """
   Resolve month-specific patterns file for preview clustering.
-  Preferred format: data/patterns/{STATE}/{YYYY-MM}-{STATE}.parquet
-  Falls back to legacy CSV formats.
+  Expected layout: data/patterns/{STATE}/{YYYY-MM}-{STATE}.{parquet,csv.gz,csv}
   """
   if not cbg_str or not month_key:
     return None
@@ -240,20 +242,9 @@ def _resolve_monthly_patterns_file(cbg_str, month_key):
     return None
 
   stem = f'{month_key}-{state_abbr}'
-  patterns_dir = os.path.join(DATA_DIR, 'patterns')
-  # Check both data/patterns/<STATE>/ and data/<STATE>/ (legacy layout)
-  search_dirs = [os.path.join(patterns_dir, state_abbr),
-                 os.path.join(DATA_DIR, state_abbr)]
-  candidates = []
-  for d in search_dirs:
-    candidates.extend([
-      os.path.join(d, f'{stem}.parquet'),
-      os.path.join(d, f'{stem}.csv.gz'),
-      os.path.join(d, f'{stem}.converted.csv'),
-      os.path.join(d, f'{stem}.csv'),
-    ])
-
-  for path in candidates:
+  state_dir = os.path.join(DATA_DIR, 'patterns', state_abbr)
+  for ext in ('.parquet', '.csv.gz', '.converted.csv', '.csv'):
+    path = os.path.join(state_dir, f'{stem}{ext}')
     if os.path.exists(path):
       return path
 
@@ -269,11 +260,8 @@ def _list_available_months_for_state(cbg_str):
   import re
   pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.(?:parquet|csv(?:\.gz)?|converted\.csv)$', re.IGNORECASE)
   months = set()
-  # Check both data/patterns/<STATE>/ and data/<STATE>/ (legacy layout)
-  for base in [os.path.join(DATA_DIR, 'patterns'), DATA_DIR]:
-    state_dir = os.path.join(base, state_abbr)
-    if not os.path.isdir(state_dir):
-      continue
+  state_dir = os.path.join(DATA_DIR, 'patterns', state_abbr)
+  if os.path.isdir(state_dir):
     for f in os.listdir(state_dir):
       m = pat.match(f)
       if m:
@@ -742,6 +730,7 @@ def _normalize_cluster_algorithm(algorithm):
     'seed_guard': 'greedy_weight_seed_guard',
     'weight_guard': 'greedy_weight_seed_guard',
     'ratio': 'greedy_ratio',
+    'ttwa': 'greedy_ttwa',
   }
   alg = aliases.get(alg, alg)
   return alg if alg in VALID_CLUSTER_ALGORITHMS else None
@@ -800,6 +789,23 @@ def _parse_seed_guard_params(payload):
     return None, "Invalid 'seed_guard_distance_km': must be <= 500"
 
   return {'seed_guard_distance_km': value}, None
+
+
+def _parse_ttwa_params(payload):
+  payload = payload or {}
+  raw = payload.get('containment_threshold')
+  if raw is None or raw == '':
+    return {'containment_threshold': None}, None
+
+  try:
+    value = float(raw)
+  except (TypeError, ValueError):
+    return None, "Invalid 'containment_threshold': expected a number"
+
+  if value < 0 or value > 1:
+    return None, "Invalid 'containment_threshold': must be between 0 and 1"
+
+  return {'containment_threshold': value}, None
 
 
 def _parse_czi_optimal_params(payload):
@@ -896,33 +902,18 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     # --- Load patterns data once for both popgen and patterns gen ---
     _update_progress(czone_id, 'Loading patterns data...', 5)
     shared_data = None
-    resolved_csv = patterns_file  # track which CSV we resolved to
+    cbg_set = set(geoids.keys())
 
-    if not patterns_file:
-      # Auto-resolve from state + month using new folder structure
-      cbgs = list(geoids.keys())
-      states = states_from_cbgs(cbgs)
+    if patterns_file:
+      shared_data = PatternsData.load([patterns_file], cbg_set=cbg_set)
+    else:
+      # Auto-resolve from state + month using data/patterns/{STATE}/ layout
+      states = states_from_cbgs(list(cbg_set))
       if states:
         resolved_files = resolve_patterns_files(states, start_date)
         if resolved_files:
           report.info(f'Auto-resolved patterns files: {resolved_files}')
-          cbg_set = set(cbgs)
           shared_data = PatternsData.load(resolved_files, cbg_set=cbg_set)
-          resolved_csv = resolved_files[0]
-
-    # If no state-specific files found, try legacy patterns.csv
-    if shared_data is None and not patterns_file:
-      legacy_csv = os.path.join(os.path.dirname(__file__), 'data', 'patterns.csv')
-      if os.path.exists(legacy_csv):
-        report.info(f'Using legacy patterns.csv')
-        cbg_set = set(geoids.keys())
-        shared_data = PatternsData.from_legacy_csv(legacy_csv, cbg_set=cbg_set)
-        resolved_csv = legacy_csv
-
-    if patterns_file and not shared_data:
-      # Explicit file provided but not yet loaded as shared data
-      cbg_set = set(geoids.keys())
-      shared_data = PatternsData.from_legacy_csv(patterns_file, cbg_set=cbg_set)
 
     report.info(f'Patterns data loaded: {len(shared_data.df) if shared_data else 0} rows')
     _update_progress(czone_id, 'Patterns data loaded', 20)
@@ -930,8 +921,7 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
     # Generate People, Households, Places data
     report.info('Generating synthetic population (papdata)...')
     _update_progress(czone_id, 'Generating synthetic population...', 25)
-    papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data,
-                      patterns_csv=resolved_csv)
+    papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data)
     people_count = len(papdata.get('people', {}))
     homes_count = len(papdata.get('homes', {}))
     places_count = len(papdata.get('places', {}))
@@ -952,8 +942,6 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
       papdata,
       start_date,
       length,
-      patterns_file=patterns_file,
-      patterns_folder=patterns_folder,
       shared_data=shared_data
     )
     patterns_count = len(patterns)
@@ -992,12 +980,13 @@ def gen_and_upload_data(geoids, czone_id, start_date, length, report, gdf=None,
 
 def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
                  algorithm='czi_balanced', czi_params=None, optimal_params=None,
-                 seed_guard_params=None,
+                 seed_guard_params=None, ttwa_params=None,
                  include_trace=False, progress_callback=None):
   """Just cluster CBGs without generating patterns. Returns geoids dict and map center."""
   czi_params = czi_params or {}
   optimal_params = optimal_params or {}
   seed_guard_params = seed_guard_params or {}
+  ttwa_params = ttwa_params or {}
   result = generate_cz(
     cbg,
     min_pop,
@@ -1013,6 +1002,7 @@ def cluster_cbgs(cbg, min_pop, patterns_file=None, patterns_folder=None, month=N
     optimal_time_limit_sec=optimal_params.get('optimal_time_limit_sec'),
     optimal_max_iters=optimal_params.get('optimal_max_iters'),
     seed_guard_distance_km=seed_guard_params.get('seed_guard_distance_km'),
+    containment_threshold=ttwa_params.get('containment_threshold'),
     include_trace=include_trace,
     progress_callback=progress_callback
   )
@@ -1589,6 +1579,7 @@ def route_cluster_cbgs():
   czi_params = {}
   optimal_params = {}
   seed_guard_params = {}
+  ttwa_params = {}
   if algorithm == 'czi_balanced':
     czi_params, err = _parse_czi_balanced_params(request.json)
     if err:
@@ -1601,10 +1592,15 @@ def route_cluster_cbgs():
     seed_guard_params, err = _parse_seed_guard_params(request.json)
     if err:
       return make_response(jsonify({'message': err}), 400)
+  elif algorithm == 'greedy_ttwa':
+    ttwa_params, err = _parse_ttwa_params(request.json)
+    if err:
+      return make_response(jsonify({'message': err}), 400)
 
   effective_czi_params = {}
   effective_optimal_params = {}
   effective_seed_guard_params = {}
+  effective_ttwa_params = {}
   if algorithm == 'czi_balanced':
     effective_czi_params = {
       'distance_penalty_weight': (
@@ -1652,6 +1648,14 @@ def route_cluster_cbgs():
         seed_guard_params.get('seed_guard_distance_km')
         if seed_guard_params.get('seed_guard_distance_km') is not None
         else DEFAULT_SEED_GUARD_DISTANCE_KM
+      ),
+    }
+  elif algorithm == 'greedy_ttwa':
+    effective_ttwa_params = {
+      'containment_threshold': (
+        ttwa_params.get('containment_threshold')
+        if ttwa_params.get('containment_threshold') is not None
+        else DEFAULT_CONTAINMENT_THRESHOLD
       ),
     }
 
@@ -1709,6 +1713,7 @@ def route_cluster_cbgs():
         czi_params=effective_czi_params,
         optimal_params=effective_optimal_params,
         seed_guard_params=effective_seed_guard_params,
+        ttwa_params=effective_ttwa_params,
         include_trace=include_trace,
         progress_callback=_prog
       )
@@ -1744,6 +1749,7 @@ def route_cluster_cbgs():
           if algorithm == 'czi_balanced'
           else effective_optimal_params if algorithm == 'czi_optimal_cap'
           else effective_seed_guard_params if algorithm == 'greedy_weight_seed_guard'
+          else effective_ttwa_params if algorithm == 'greedy_ttwa'
           else {}
         ),
         'patterns_file_used': patterns_file,
@@ -1841,6 +1847,17 @@ def route_finalize_cz():
       f"Using patterns source: {patterns_source}"
       + (f" ({patterns_month})" if patterns_month else "")
     )
+
+    gdf = None
+    try:
+      geojson = get_cbg_geojson(cluster, include_neighbors=False)
+      if isinstance(geojson, dict) and geojson.get('features'):
+        gdf = gpd.GeoDataFrame.from_features(geojson['features'], crs='EPSG:4326')
+        report.info(f'Prepared residential sampling geometry for {len(gdf)} CBGs')
+      else:
+        report.warning('No CBG geometry available for residential sampling during finalize-cz')
+    except Exception as e:
+      report.warning(f'Could not prepare CBG geometry for residential sampling: {e}')
     
     # Get center from first CBG's location (approximate)
     latitude = data.get('latitude', 0)
@@ -1891,6 +1908,7 @@ def route_finalize_cz():
         start_date,
         data.get('length', 168),
         report,
+        gdf=gdf,
         patterns_file=patterns_file
       )
 
