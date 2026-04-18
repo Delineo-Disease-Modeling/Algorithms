@@ -59,7 +59,9 @@ def _get_cached_population(csv_path: str) -> pd.DataFrame:
         _population_cache = pd.read_csv(csv_path, index_col='census_block_group')
     return _population_cache
 
-# Mobility graph cache: keyed by (patterns_csv_path, frozenset(states))
+# Mobility graph cache. Key shape:
+#   undirected: (patterns_csv_path, frozenset(states))
+#   directed:   (patterns_csv_path, frozenset(states), 'directed')
 _graph_cache: dict = {}
 
 def _get_cached_graph(cache_key: tuple, build_fn):
@@ -160,9 +162,8 @@ class Config:
 
         Priority:
         1. Explicit patterns_file if provided
-        2. State-scoped parquet file for the given month
-        3. Closest available month (parquet)
-        4. Fallback to legacy data/patterns.csv
+        2. State-scoped file for the given month under data/patterns/{STATE}/
+        3. Closest available month within the same state
         """
         # Priority 1: Explicit file
         if patterns_file:
@@ -170,17 +171,13 @@ class Config:
                 return patterns_file
             raise FileNotFoundError(f"Patterns file not found: {patterns_file}")
 
-        data_base = os.path.join(os.path.dirname(__file__), "data")
-        search_root = patterns_folder or os.path.join(data_base, "patterns")
-        # Also check the legacy layout where CSVs live directly in data/<STATE>/
-        search_roots = [search_root]
-        if not patterns_folder and data_base not in search_roots:
-            search_roots.append(data_base)
-
+        search_root = patterns_folder or os.path.join(
+            os.path.dirname(__file__), "data", "patterns"
+        )
         month_key = str(month or "").strip()
+        state_candidates: List[str] = []
 
         if month_key:
-            state_candidates = []
             core = str(self.core_cbg or "").strip()
             if len(core) >= 2:
                 state_hint = STATE_FIPS_TO_ABBR.get(core[:2])
@@ -192,43 +189,36 @@ class Config:
                 if state_code and state_code not in state_candidates:
                     state_candidates.append(state_code)
 
-            # Try exact month first across all search roots and file extensions
             _exts = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
-            for root in search_roots:
-                for state in state_candidates:
-                    stem = f"{month_key}-{state}"
-                    for ext in _exts:
-                        path = os.path.join(root, state, f"{stem}{ext}")
-                        if os.path.exists(path):
-                            return path
+            # Try exact month first
+            for state in state_candidates:
+                stem = f"{month_key}-{state}"
+                for ext in _exts:
+                    path = os.path.join(search_root, state, f"{stem}{ext}")
+                    if os.path.exists(path):
+                        return path
 
             # Exact month not found — try closest available month
             from patterns_loader import closest_month, _available_months_for_state
-            for root in search_roots:
-                for state in state_candidates:
-                    available = _available_months_for_state(state, root)
-                    nearest = closest_month(month_key, available)
-                    if nearest and nearest != month_key:
-                        stem = f"{nearest}-{state}"
-                        for ext in _exts:
-                            path = os.path.join(root, state, f"{stem}{ext}")
-                            if os.path.exists(path):
-                                import logging
-                                logging.getLogger('cbg_clustering').info(
-                                    f"No data for {month_key}, using closest month: {nearest}"
-                                )
-                                return path
-
-        # Fallback: legacy patterns.csv
-        legacy = os.path.join(os.path.dirname(__file__), "data", "patterns.csv")
-        if os.path.exists(legacy):
-            return legacy
+            for state in state_candidates:
+                available = _available_months_for_state(state, search_root)
+                nearest = closest_month(month_key, available)
+                if nearest and nearest != month_key:
+                    stem = f"{nearest}-{state}"
+                    for ext in _exts:
+                        path = os.path.join(search_root, state, f"{stem}{ext}")
+                        if os.path.exists(path):
+                            import logging
+                            logging.getLogger('cbg_clustering').info(
+                                f"No data for {month_key}, using closest month: {nearest}"
+                            )
+                            return path
 
         states_msg = ", ".join(state_candidates) if month_key and state_candidates else "unknown state"
         raise FileNotFoundError(
             f"No patterns file found for month '{month_key}' "
             f"under {search_root} for {states_msg}. "
-            "Expected files like '<DATA>/<STATE>/YYYY-MM-<STATE>.parquet'."
+            "Expected files like '<DATA>/patterns/<STATE>/YYYY-MM-<STATE>.parquet'."
         )
 
 # ----------------------------
@@ -299,8 +289,8 @@ class DataLoader:
                 df['poi_cbg'] = df['poi_cbg'].astype(str).str.strip().str.zfill(12)
             return df
 
-        # Legacy CSV fallback (patterns.csv)
-        self.logger.info(f"Loading legacy CSV from {patterns_file}")
+        # CSV / gzipped CSV path (data/patterns/<STATE>/YYYY-MM-<STATE>.csv[.gz])
+        self.logger.info(f"Loading CSV patterns from {patterns_file}")
         df = pd.read_csv(patterns_file)
         df.columns = [str(c).strip().lower() for c in df.columns]
         if 'poi_cbg' in df.columns:
@@ -571,6 +561,56 @@ class GraphBuilder:
 
         self.logger.info(f"Generated graph with {G.number_of_nodes()} nodes and {G.number_of_edges()} edges")
         return G
+
+    def gen_digraph(self, df):
+        """
+        Generate a directed mobility graph from SafeGraph daytime visit data.
+
+        Edge semantics: daytime_cbg -> poi_cbg with weight = visit count. Self-
+        visits are stored as the 'self_weight' node attribute, not as self-loop
+        edges (matches gen_graph).
+
+        Used by TTWA-style clustering, which needs direction to compute
+        origin-containment and destination-containment separately.
+        """
+        self.logger.info("Generating directed graph from movement data")
+        DG = nx.DiGraph()
+
+        for _, row in df.iterrows():
+            val = row['visitor_daytime_cbgs']
+            if not isinstance(val, str) or not val.strip():
+                continue
+
+            try:
+                dst_cbg = _normalize_cbg(row['poi_cbg'])
+            except (TypeError, ValueError):
+                continue
+
+            visitor_dict = json.loads(val)
+            if isinstance(visitor_dict, str):
+                visitor_dict = json.loads(visitor_dict)
+            for visitor_cbg, count in visitor_dict.items():
+                try:
+                    src_cbg = _normalize_cbg(visitor_cbg)
+                    weight = float(count)
+                    if weight <= 0:
+                        continue
+
+                    if src_cbg == dst_cbg:
+                        if dst_cbg not in DG:
+                            DG.add_node(dst_cbg, self_weight=0)
+                        DG.nodes[dst_cbg]['self_weight'] = DG.nodes[dst_cbg].get('self_weight', 0) + weight
+                        continue
+
+                    if DG.has_edge(src_cbg, dst_cbg):
+                        DG[src_cbg][dst_cbg]['weight'] += weight
+                    else:
+                        DG.add_edge(src_cbg, dst_cbg, weight=weight)
+                except (TypeError, ValueError):
+                    continue
+
+        self.logger.info(f"Generated directed graph with {DG.number_of_nodes()} nodes and {DG.number_of_edges()} edges")
+        return DG
 
 
 # ----------------------------
@@ -1080,6 +1120,187 @@ class Clustering:
             if it > 1000:
                 self.logger.warning("Reached maximum iterations (1000). Stopping algorithm.")
                 break
+        return cluster, population
+
+    def greedy_ttwa(
+        self,
+        DG,
+        u0,
+        min_pop,
+        containment_threshold=0.70,
+        max_iter=1000,
+        trace_collector=None,
+    ):
+        """
+        Grow a zone by iteratively adding the CBG that most improves zone-level
+        self-containment, TTWA-style.
+
+        Self-containment is min(origin_containment, destination_containment)
+        computed over directed daytime flows. No spatial-contiguity constraint
+        is imposed: weakly-connected far-away CBGs contribute near-zero marginal
+        containment and are naturally excluded, while strongly-connected distant
+        cities get pulled in as second-order nodes (the polycentric case).
+
+        Stopping rule: stop once no candidate strictly improves zone containment,
+        provided the population floor has been met. The threshold is used for
+        reporting and to warn if unreachable; min_pop is a hard floor.
+        """
+        self.logger.info(
+            f"Starting greedy_ttwa with seed CBG {u0} "
+            f"(threshold={containment_threshold}, min_pop={min_pop})"
+        )
+
+        if u0 not in DG:
+            raise ValueError(f"Seed CBG {u0} not present in directed mobility graph")
+
+        def _self_weight(node):
+            return float(DG.nodes[node].get('self_weight', 0) or 0)
+
+        cluster = [u0]
+        cluster_set = {u0}
+        population = cbg_population(u0, self.config, self.logger)
+
+        internal = _self_weight(u0)
+        out_origin = 0.0  # flow: cluster -> outside
+        out_dest = 0.0    # flow: outside -> cluster
+        for _, v, data in DG.out_edges(u0, data=True):
+            if v == u0:
+                continue
+            out_origin += float(data.get('weight', 0))
+        for u, _, data in DG.in_edges(u0, data=True):
+            if u == u0:
+                continue
+            out_dest += float(data.get('weight', 0))
+
+        def _containment(internal_, out_origin_, out_dest_):
+            orig_total = internal_ + out_origin_
+            dest_total = internal_ + out_dest_
+            orig_c = internal_ / orig_total if orig_total > 0 else 0.0
+            dest_c = internal_ / dest_total if dest_total > 0 else 0.0
+            return orig_c, dest_c, min(orig_c, dest_c)
+
+        orig_c, dest_c, zone_c = _containment(internal, out_origin, out_dest)
+        self.logger.info(
+            f"Seed containment: origin={orig_c:.4f} dest={dest_c:.4f} "
+            f"zone={zone_c:.4f} pop={population}"
+        )
+
+        it = 1
+        while it <= max_iter:
+            candidates = set()
+            for node in cluster:
+                candidates.update(DG.successors(node))
+                candidates.update(DG.predecessors(node))
+            candidates -= cluster_set
+            if not candidates:
+                self.logger.info("No further candidates; stopping.")
+                break
+
+            best = None
+            best_score = None
+            best_deltas = None
+            candidate_details = []
+            for cand in candidates:
+                delta_internal = _self_weight(cand)
+                delta_out_origin = 0.0
+                delta_out_dest = 0.0
+
+                for _, y, data in DG.out_edges(cand, data=True):
+                    if y == cand:
+                        continue
+                    w = float(data.get('weight', 0))
+                    if y in cluster_set:
+                        delta_internal += w
+                        delta_out_dest -= w
+                    else:
+                        delta_out_origin += w
+
+                for y, _, data in DG.in_edges(cand, data=True):
+                    if y == cand:
+                        continue
+                    w = float(data.get('weight', 0))
+                    if y in cluster_set:
+                        delta_internal += w
+                        delta_out_origin -= w
+                    else:
+                        delta_out_dest += w
+
+                new_internal = internal + delta_internal
+                new_out_origin = out_origin + delta_out_origin
+                new_out_dest = out_dest + delta_out_dest
+                _, _, new_zone_c = _containment(new_internal, new_out_origin, new_out_dest)
+                score = new_zone_c - zone_c
+
+                candidate_details.append({
+                    'cbg': cand,
+                    'population': int(cbg_population(cand, self.config, self.logger)),
+                    'score': float(score),
+                    'new_zone_containment': float(new_zone_c),
+                    'delta_internal': float(delta_internal),
+                    'delta_out_origin': float(delta_out_origin),
+                    'delta_out_dest': float(delta_out_dest),
+                })
+
+                if (
+                    best_score is None
+                    or score > best_score
+                    or (score == best_score and (best is None or cand < best))
+                ):
+                    best_score = score
+                    best = cand
+                    best_deltas = (delta_internal, delta_out_origin, delta_out_dest)
+
+            if best is None:
+                break
+
+            if population >= min_pop and best_score <= 0:
+                self.logger.info(
+                    f"No candidate improves zone containment (best Δ={best_score:.4g}); "
+                    f"stopping with zone_c={zone_c:.4f} pop={population}"
+                )
+                break
+
+            chosen_pop = cbg_population(best, self.config, self.logger)
+            prev_cluster = list(cluster)
+            prev_population = population
+
+            cluster.append(best)
+            cluster_set.add(best)
+            d_int, d_oo, d_od = best_deltas
+            internal += d_int
+            out_origin += d_oo
+            out_dest += d_od
+            orig_c, dest_c, zone_c = _containment(internal, out_origin, out_dest)
+            population += chosen_pop
+
+            self._record_trace_step(
+                trace_collector,
+                iteration=it - 1,
+                cluster_before=prev_cluster,
+                population_before=prev_population,
+                candidates=candidate_details,
+                selected_cbg=best,
+                selected_population=chosen_pop,
+                cluster_after=cluster,
+                population_after=population,
+            )
+
+            self.logger.info(
+                f"Iteration {it}: added {best} (pop {chosen_pop}); "
+                f"zone_c={zone_c:.4f} (orig={orig_c:.4f}, dest={dest_c:.4f}) "
+                f"pop={population}"
+            )
+            it += 1
+
+        if it > max_iter:
+            self.logger.warning(f"Reached max_iter={max_iter}; stopping.")
+
+        if zone_c < containment_threshold:
+            self.logger.warning(
+                f"Final zone_c={zone_c:.4f} below threshold "
+                f"{containment_threshold}; zone may be weakly self-contained."
+            )
+
         return cluster, population
 
     def _select_candidate_nodes(self, G: nx.Graph, u0: str, candidate_limit: int):
@@ -1890,6 +2111,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 optimal_population_floor_ratio=None, optimal_mip_rel_gap=None,
                 optimal_time_limit_sec=None, optimal_max_iters=None,
                 seed_guard_distance_km=None,
+                containment_threshold=None,
                 include_trace=False,
                 progress_callback=None):
     """
@@ -1963,12 +2185,13 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         'greedy_weight': clustering_algo.greedy_weight,
         'greedy_weight_seed_guard': clustering_algo.greedy_weight_seed_guard,
         'greedy_ratio': clustering_algo.greedy_ratio,
+        'greedy_ttwa': clustering_algo.greedy_ttwa,
     }
     if algorithm_key not in algorithm_map:
         raise ValueError(
             f"Invalid clustering algorithm '{algorithm}'. "
             "Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_weight, "
-            "greedy_weight_seed_guard, greedy_ratio"
+            "greedy_weight_seed_guard, greedy_ratio, greedy_ttwa"
         )
 
     _prog('Running clustering algorithm...', 75)
@@ -2019,6 +2242,32 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
             config.core_cbg,
             config.min_cluster_pop,
             **seed_guard_kwargs
+        )
+    elif algorithm_key == 'greedy_ttwa':
+        digraph_cache_key = (config.paths['patterns_csv'], frozenset(config.states), 'directed')
+        def _build_digraph():
+            gb = GraphBuilder(logger)
+            return gb.gen_digraph(df)
+        DG = _get_cached_graph(digraph_cache_key, _build_digraph)
+        if DG.number_of_nodes() == 0:
+            raise ValueError(
+                "No directed mobility graph could be built from the selected patterns data."
+            )
+        if config.core_cbg not in DG:
+            raise ValueError(
+                f"Seed CBG {config.core_cbg} is not present in the directed mobility graph for "
+                f"{config.paths['patterns_csv']}. Try a different start date or location."
+            )
+        ttwa_kwargs = {}
+        if containment_threshold is not None:
+            ttwa_kwargs['containment_threshold'] = float(containment_threshold)
+        if trace_steps is not None:
+            ttwa_kwargs['trace_collector'] = trace_steps
+        algorithm_result = clustering_algo.greedy_ttwa(
+            DG,
+            config.core_cbg,
+            config.min_cluster_pop,
+            **ttwa_kwargs
         )
     else:
         algorithm_result = algorithm_map[algorithm_key](
