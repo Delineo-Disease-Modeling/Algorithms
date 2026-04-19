@@ -24,11 +24,12 @@ _PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
 
 # All columns any algorithm step might need (lowercase canonical names).
 # CZ clustering:  poi_cbg, visitor_daytime_cbgs, postal_code
-# Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, postal_code, polygon_wkt
+# Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, street_address, postal_code, polygon_wkt
 # Patterns gen:   placekey, median_dwell, popularity_by_hour, popularity_by_day
 ALL_NEEDED_COLUMNS = [
     'poi_cbg', 'visitor_daytime_cbgs', 'postal_code',
     'placekey', 'location_name', 'top_category', 'latitude', 'longitude',
+    'street_address',
     'polygon_wkt',
     'median_dwell', 'popularity_by_hour', 'popularity_by_day',
 ]
@@ -249,9 +250,9 @@ class PatternsData:
         return self._df.loc[mask, 'placekey'].dropna().unique().tolist()
 
     def for_popgen_places(self, placekeys: List[str]) -> pd.DataFrame:
-        """Place info for popgen: placekey, location_name, top_category, lat, lon, postal_code."""
+        """Place info for popgen: placekey, name, category, coords, address, zip, polygon."""
         cols = [c for c in ['placekey', 'location_name', 'top_category',
-                            'latitude', 'longitude', 'postal_code', 'polygon_wkt']
+                            'latitude', 'longitude', 'street_address', 'postal_code', 'polygon_wkt']
                 if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()

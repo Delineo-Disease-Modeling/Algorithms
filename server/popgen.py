@@ -669,7 +669,15 @@ def convert_data(df, cz_data, shared_data=None):
     # Get places from the patterns data
     cbgs = list(cz_data.keys())
     cbg_set = set(cbgs)
-    metadata_cols = ['location_name', 'top_category', 'latitude', 'longitude', 'postal_code', 'polygon_wkt']
+    metadata_cols = [
+        'location_name',
+        'top_category',
+        'latitude',
+        'longitude',
+        'street_address',
+        'postal_code',
+        'polygon_wkt',
+    ]
 
     if shared_data is not None and not shared_data.is_empty():
         placekeys = shared_data.get_placekeys_for_cbgs(cbg_set)
@@ -719,6 +727,12 @@ def convert_data(df, cz_data, shared_data=None):
         except Exception:
             return None
 
+    def _clean_optional_text(v):
+        if pd.isna(v):
+            return None
+        text = str(v).strip()
+        return text or None
+
     for i, row in places.iterrows():
         output['places'][str(i)] = {
             'placekey': row['placekey'],
@@ -727,6 +741,7 @@ def convert_data(df, cz_data, shared_data=None):
             'longitude': _coerce_coord(row['longitude']),
             # Sometimes this is empty
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
+            'street_address': _clean_optional_text(row.get('street_address')),
             'postal_code': row['postal_code'],
             'footprint': _coerce_footprint(row.get('polygon_wkt'))
         }
