@@ -73,22 +73,11 @@ def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monk
     assert captured['seed_cbgs'] == ['012345678901']
 
 
-def test_cluster_cbgs_route_passes_seed_region_for_hierarchical_algorithm(client, app, monkeypatch):
+def test_cluster_cbgs_route_rejects_hierarchical_algorithm(client, app, monkeypatch):
     monkeypatch.setattr(
         'server_app.request_parsing.resolve_patterns_file_for_request',
         lambda seed_cbg, start_date_raw=None, use_test_data=False: ('/tmp/patterns.parquet', 'monthly', '2021-05'),
     )
-
-    captured = {}
-
-    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
-        captured['cbg_str'] = cbg_str
-        captured['min_pop'] = min_pop
-        captured['algorithm_config'] = algorithm_config
-        captured['seed_cbgs'] = seed_cbgs
-        return 29
-
-    monkeypatch.setattr(app.config['analysis_service'], 'start_cluster_job', fake_start_cluster_job)
 
     response = client.post('/cluster-cbgs', json={
         'cbg': '240010001001',
@@ -98,12 +87,8 @@ def test_cluster_cbgs_route_passes_seed_region_for_hierarchical_algorithm(client
         'start_date': '2021-05-15',
     })
 
-    assert response.status_code == 200
-    assert response.get_json() == {'clustering_id': 29}
-    assert captured['cbg_str'] == '240010001001'
-    assert captured['seed_cbgs'] == ['240010001001', '240010002002']
-    assert captured['algorithm_config']['algorithm'] == 'hierarchical_core_satellites'
-    assert captured['algorithm_config']['effective_hierarchical_params']['local_radius_km'] == 20.0
+    assert response.status_code == 400
+    assert "Invalid 'algorithm'" in response.get_json()['message']
 
 
 def test_frontier_candidates_route_deduplicates_cbgs_and_parses_limit(client, app, monkeypatch):

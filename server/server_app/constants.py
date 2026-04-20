@@ -27,7 +27,6 @@ VALID_CLUSTER_ALGORITHMS = {
     'greedy_weight_seed_guard',
     'greedy_ratio',
     'greedy_ttwa',
-    'hierarchical_core_satellites',
 }
 
 DEFAULT_DISTANCE_PENALTY_WEIGHT = 0.02

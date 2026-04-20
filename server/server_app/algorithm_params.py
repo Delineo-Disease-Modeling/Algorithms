@@ -18,9 +18,6 @@ def normalize_cluster_algorithm(algorithm):
         'weight_guard': 'greedy_weight_seed_guard',
         'ratio': 'greedy_ratio',
         'ttwa': 'greedy_ttwa',
-        'hierarchical': 'hierarchical_core_satellites',
-        'hierarchy': 'hierarchical_core_satellites',
-        'core_satellites': 'hierarchical_core_satellites',
     }
     alg = aliases.get(alg, alg)
     return alg if alg in VALID_CLUSTER_ALGORITHMS else None
