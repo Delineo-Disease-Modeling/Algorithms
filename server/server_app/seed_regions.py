@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from functools import lru_cache
 
@@ -8,7 +9,10 @@ from czcode_modules.cache_service import DEFAULT_ALGORITHM_CACHE
 from .constants import DATA_DIR
 
 
-ZIP_TO_CBG_PATH = f"{DATA_DIR}/zip_to_cbg.json"
+ZIP_TO_CBG_PATHS = (
+    f"{DATA_DIR}/zip_to_cbg.json",
+    os.path.join(os.path.dirname(__file__), 'bundled_seed_data', 'zip_to_cbg.json'),
+)
 
 
 def normalize_zip(value):
@@ -35,14 +39,24 @@ def normalize_seed_cbgs(values):
 
 @lru_cache(maxsize=1)
 def get_zip_to_cbgs_map():
-    try:
-        with open(ZIP_TO_CBG_PATH, 'r', encoding='utf-8') as f:
-            raw = json.load(f)
-    except FileNotFoundError as exc:
+    raw = None
+    checked_paths = []
+    for zip_to_cbg_path in ZIP_TO_CBG_PATHS:
+        checked_paths.append(zip_to_cbg_path)
+        try:
+            with open(zip_to_cbg_path, 'r', encoding='utf-8') as f:
+                raw = json.load(f)
+            break
+        except FileNotFoundError:
+            continue
+
+    if raw is None:
         raise FileNotFoundError(
-            f"Required seed-region data file is missing: {ZIP_TO_CBG_PATH}. "
-            "Guided connected cities requires zip_to_cbg.json in the mounted algorithms data directory."
-        ) from exc
+            "Required seed-region data file is missing. "
+            f"Checked: {', '.join(checked_paths)}. "
+            "Guided connected cities requires zip_to_cbg.json either in the mounted algorithms data directory "
+            "or in the bundled fallback path."
+        )
 
     normalized = {}
     for zip_code, cbgs in raw.items():

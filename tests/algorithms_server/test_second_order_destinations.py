@@ -1,6 +1,7 @@
 import networkx as nx
 
 from server_app.analysis_service import PreviewClusteringService
+from server_app import seed_regions
 
 
 class DummyPatternSelection:
@@ -85,3 +86,28 @@ def test_compute_second_order_destinations_ranks_zip_regions_by_seed_outflow(mon
     assert result['destinations'][1]['unit_id'] == '33333'
     assert round(result['total_seed_external_outbound_flow'], 4) == 35.0
     assert round(result['recommended_captured_external_outbound_share'], 4) == 1.0
+
+
+def test_get_zip_to_cbgs_map_uses_bundled_fallback_when_primary_missing(tmp_path, monkeypatch):
+    fallback_path = tmp_path / 'bundled' / 'zip_to_cbg.json'
+    fallback_path.parent.mkdir(parents=True, exist_ok=True)
+    fallback_path.write_text('{"74002": ["401139400082"]}', encoding='utf-8')
+
+    monkeypatch.setattr(
+        seed_regions,
+        'ZIP_TO_CBG_PATHS',
+        (
+            str(tmp_path / 'missing' / 'zip_to_cbg.json'),
+            str(fallback_path),
+        ),
+    )
+    seed_regions.get_zip_to_cbgs_map.cache_clear()
+    seed_regions.get_cbg_to_zip_map.cache_clear()
+
+    try:
+        assert seed_regions.get_zip_to_cbgs_map() == {
+            '74002': ['401139400082']
+        }
+    finally:
+        seed_regions.get_zip_to_cbgs_map.cache_clear()
+        seed_regions.get_cbg_to_zip_map.cache_clear()
