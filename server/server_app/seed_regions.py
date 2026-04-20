@@ -35,8 +35,14 @@ def normalize_seed_cbgs(values):
 
 @lru_cache(maxsize=1)
 def get_zip_to_cbgs_map():
-    with open(ZIP_TO_CBG_PATH, 'r', encoding='utf-8') as f:
-        raw = json.load(f)
+    try:
+        with open(ZIP_TO_CBG_PATH, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(
+            f"Required seed-region data file is missing: {ZIP_TO_CBG_PATH}. "
+            "Guided connected cities requires zip_to_cbg.json in the mounted algorithms data directory."
+        ) from exc
 
     normalized = {}
     for zip_code, cbgs in raw.items():
@@ -63,6 +69,32 @@ def seed_cbgs_for_zip(zip_code):
     if not zip_norm:
         return []
     return list(get_zip_to_cbgs_map().get(zip_norm, ()))
+
+
+def resolve_seed_region_for_zip(zip_code):
+    zip_norm = normalize_zip(zip_code)
+    if not zip_norm:
+        return None
+
+    seed_cbgs = seed_cbgs_for_zip(zip_norm)
+    if not seed_cbgs:
+        return None
+
+    city_info = describe_city_approximation_for_zip(zip_norm) or {}
+    label = _clean_location_text(city_info.get('label')) or f'ZIP {zip_norm}'
+    city = _clean_location_text(city_info.get('city'))
+    state = _clean_location_text(city_info.get('state'))
+
+    return {
+        'zip': zip_norm,
+        'seed_cbgs': seed_cbgs,
+        'seed_name': label,
+        'city': city,
+        'state': state.upper() if state else None,
+        'unit_id': city_info.get('unit_id'),
+        'unit_type': city_info.get('unit_type') or 'zip_fallback',
+        'label': label,
+    }
 
 
 def _clean_location_text(value):

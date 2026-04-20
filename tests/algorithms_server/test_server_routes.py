@@ -1,3 +1,40 @@
+def test_seed_region_route_returns_resolved_seed_region(client, monkeypatch):
+    monkeypatch.setattr(
+        'server_app.routes.resolve_seed_region_for_zip',
+        lambda zip_code: {
+            'zip': zip_code,
+            'seed_cbgs': ['401139400081', '401139400082'],
+            'seed_name': 'Barnsdall, OK',
+            'city': 'Barnsdall',
+            'state': 'OK',
+            'unit_id': 'city:OK:barnsdall',
+            'unit_type': 'city_approximation',
+            'label': 'Barnsdall, OK',
+        },
+    )
+
+    response = client.get('/seed-region?zip=74002')
+
+    assert response.status_code == 200
+    assert response.get_json() == {
+        'zip': '74002',
+        'seed_cbgs': ['401139400081', '401139400082'],
+        'seed_name': 'Barnsdall, OK',
+        'city': 'Barnsdall',
+        'state': 'OK',
+        'unit_id': 'city:OK:barnsdall',
+        'unit_type': 'city_approximation',
+        'label': 'Barnsdall, OK',
+    }
+
+
+def test_seed_region_route_rejects_invalid_zip(client):
+    response = client.get('/seed-region?zip=74')
+
+    assert response.status_code == 400
+    assert response.get_json()['message'] == "Missing or invalid 'zip': expected exactly 5 digits"
+
+
 def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monkeypatch):
     monkeypatch.setattr(
         'server_app.request_parsing.resolve_patterns_file_for_request',

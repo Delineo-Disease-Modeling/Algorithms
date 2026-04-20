@@ -38,6 +38,7 @@ from .request_parsing import (
     require_cbg,
     resolve_pattern_selection,
 )
+from .seed_regions import normalize_zip, resolve_seed_region_for_zip
 
 
 def _api_error_response(error):
@@ -50,6 +51,32 @@ def register_routes(
     generation_store,
     clustering_store,
 ):
+    @app.route('/seed-region', methods=['GET'])
+    @cross_origin()
+    def route_seed_region():
+        zip_code = normalize_zip(request.args.get('zip'))
+        if not zip_code:
+            return make_response(
+                jsonify({'message': "Missing or invalid 'zip': expected exactly 5 digits"}),
+                400,
+            )
+
+        try:
+            seed_region = resolve_seed_region_for_zip(zip_code)
+            if not seed_region:
+                return make_response(
+                    jsonify({'message': f'No seed region found for ZIP {zip_code}'}),
+                    404,
+                )
+            return jsonify(seed_region)
+        except FileNotFoundError as exc:
+            return make_response(jsonify({'message': str(exc)}), 500)
+        except Exception as exc:
+            return make_response(
+                jsonify({'message': f'Error resolving seed region: {str(exc)}'}),
+                500,
+            )
+
     @app.route('/generate-cz', methods=['POST'])
     @cross_origin()
     def route_generate_cz():
