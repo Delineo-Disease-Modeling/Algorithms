@@ -11,6 +11,7 @@ from .export import Exporter
 from .graph import GraphBuilder
 from .logging_utils import setup_logging
 from .metrics import Helpers, cbg_population
+from server_app.seed_regions import get_cbg_to_zip_map, get_zip_to_cbgs_map
 from .visualization import Visualizer
 
 
@@ -74,6 +75,9 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 optimal_candidate_limit=None, optimal_population_floor_ratio=None,
                 optimal_mip_rel_gap=None, optimal_time_limit_sec=None,
                 optimal_max_iters=None, seed_guard_distance_km=None,
+                seed_cbgs=None, local_radius_km=None,
+                core_containment_threshold=None, core_improvement_epsilon=None,
+                satellite_flow_threshold=None, max_satellites=None,
                 containment_threshold=None, include_trace=False,
                 progress_callback=None,
                 cache_service=DEFAULT_ALGORITHM_CACHE):
@@ -109,17 +113,6 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
     )
     cbg_centers = build_cbg_centers(gdf)
 
-    if G.number_of_nodes() == 0:
-        raise ValueError(
-            "No mobility graph could be built from the selected patterns data. "
-            "Try a different start date or location."
-        )
-    if config.core_cbg not in G:
-        raise ValueError(
-            f"Seed CBG {config.core_cbg} is not present in the mobility graph for "
-            f"{config.paths['patterns_csv']}. Try a different start date or location."
-        )
-
     clustering_algo = Clustering(config, logger)
     algorithm_key = str(algorithm or 'czi_balanced').strip().lower()
     algorithm_map = {
@@ -130,17 +123,45 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         'greedy_weight_seed_guard': clustering_algo.greedy_weight_seed_guard,
         'greedy_ratio': clustering_algo.greedy_ratio,
         'greedy_ttwa': clustering_algo.greedy_ttwa,
+        'hierarchical_core_satellites': clustering_algo.hierarchical_core_satellites,
     }
+
+    if G.number_of_nodes() == 0:
+        raise ValueError(
+            "No mobility graph could be built from the selected patterns data. "
+            "Try a different start date or location."
+        )
+    normalized_seed_cbgs = []
+    seen_seed_cbgs = set()
+    for seed_cbg in seed_cbgs or [config.core_cbg]:
+        if not seed_cbg or seed_cbg in seen_seed_cbgs:
+            continue
+        seen_seed_cbgs.add(seed_cbg)
+        normalized_seed_cbgs.append(seed_cbg)
+
+    if algorithm_key == 'hierarchical_core_satellites':
+        if not any(seed_cbg in G for seed_cbg in normalized_seed_cbgs):
+            raise ValueError(
+                "None of the resolved seed-region CBGs are present in the mobility graph. "
+                "Try a different location or date."
+            )
+    elif config.core_cbg not in G:
+        raise ValueError(
+            f"Seed CBG {config.core_cbg} is not present in the mobility graph for "
+            f"{config.paths['patterns_csv']}. Try a different start date or location."
+        )
+
     if algorithm_key not in algorithm_map:
         raise ValueError(
             f"Invalid clustering algorithm '{algorithm}'. "
             "Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_weight, "
-            "greedy_weight_seed_guard, greedy_ratio, greedy_ttwa"
+            "greedy_weight_seed_guard, greedy_ratio, greedy_ttwa, hierarchical_core_satellites"
         )
 
     prog('Running clustering algorithm...', 75)
     logger.info(f"Using clustering algorithm: {algorithm_key}")
     trace_steps = [] if include_trace else None
+    algorithm_metadata = {}
     if algorithm_key == 'czi_balanced':
         czi_kwargs = {'cbg_centers': cbg_centers}
         if distance_penalty_weight is not None:
@@ -211,6 +232,37 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
             config.min_cluster_pop,
             **ttwa_kwargs
         )
+    elif algorithm_key == 'hierarchical_core_satellites':
+        digraph_cache_key = (config.paths['patterns_csv'], frozenset(config.states), 'directed')
+        DG = cache_service.get_or_build_graph(
+            digraph_cache_key,
+            lambda: GraphBuilder(logger).gen_digraph(df),
+        )
+        hierarchy_kwargs = {
+            'cbg_to_zip': get_cbg_to_zip_map(),
+            'zip_to_cbgs': get_zip_to_cbgs_map(),
+            'cbg_centers': cbg_centers,
+        }
+        if local_radius_km is not None:
+            hierarchy_kwargs['local_radius_km'] = float(local_radius_km)
+        if core_containment_threshold is not None:
+            hierarchy_kwargs['core_containment_threshold'] = float(core_containment_threshold)
+        if core_improvement_epsilon is not None:
+            hierarchy_kwargs['core_improvement_epsilon'] = float(core_improvement_epsilon)
+        if satellite_flow_threshold is not None:
+            hierarchy_kwargs['satellite_flow_threshold'] = float(satellite_flow_threshold)
+        if max_satellites is not None:
+            hierarchy_kwargs['max_satellites'] = int(max_satellites)
+        if trace_steps is not None:
+            hierarchy_kwargs['trace_collector'] = trace_steps
+        algorithm_result = clustering_algo.hierarchical_core_satellites(
+            DG,
+            normalized_seed_cbgs,
+            config.min_cluster_pop,
+            **hierarchy_kwargs
+        )
+        if len(algorithm_result) > 2 and isinstance(algorithm_result[2], dict):
+            algorithm_metadata = algorithm_result[2]
     else:
         algorithm_result = algorithm_map[algorithm_key](
             G,
@@ -241,6 +293,12 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 "czi_optimal_cap is solved as a global optimization and does not have a "
                 "single greedy add-one expansion sequence."
             )
+        elif algorithm_key == 'hierarchical_core_satellites':
+            trace_payload['note'] = (
+                "Trace steps show local core growth. ZIP-level satellite selection is "
+                "applied after the local core stabilizes."
+            )
+            trace_payload['algorithm_metadata'] = algorithm_metadata
         return geoids, visualizer.map_obj, gdf, trace_payload
 
     return geoids, visualizer.map_obj, gdf

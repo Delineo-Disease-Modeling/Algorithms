@@ -6,19 +6,25 @@ from common_geo import normalize_cbg
 from .algorithm_params import (
     normalize_cluster_algorithm,
     parse_czi_balanced_params,
+    parse_hierarchical_params,
     parse_czi_optimal_params,
     parse_seed_guard_params,
     parse_ttwa_params,
 )
 from .constants import (
     DEFAULT_CONTAINMENT_THRESHOLD,
+    DEFAULT_CORE_CONTAINMENT_THRESHOLD,
+    DEFAULT_CORE_IMPROVEMENT_EPSILON,
     DEFAULT_DISTANCE_PENALTY_WEIGHT,
     DEFAULT_DISTANCE_SCALE_KM,
+    DEFAULT_LOCAL_RADIUS_KM,
+    DEFAULT_MAX_SATELLITES,
     DEFAULT_OPTIMAL_CANDIDATE_LIMIT,
     DEFAULT_OPTIMAL_MAX_ITERS,
     DEFAULT_OPTIMAL_MIP_REL_GAP,
     DEFAULT_OPTIMAL_POP_FLOOR_RATIO,
     DEFAULT_OPTIMAL_TIME_LIMIT_SEC,
+    DEFAULT_SATELLITE_FLOW_THRESHOLD,
     DEFAULT_SEED_GUARD_DISTANCE_KM,
     TEST_PATTERNS_FILE,
 )
@@ -101,12 +107,13 @@ def resolve_pattern_selection(seed_cbg, payload):
 def parse_cluster_algorithm_config(payload):
     algorithm = normalize_cluster_algorithm(payload.get('algorithm'))
     if not algorithm:
-        raise ApiError("Invalid 'algorithm'. Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_ratio, greedy_ttwa, greedy_weight, greedy_weight_seed_guard", status_code=400)
+        raise ApiError("Invalid 'algorithm'. Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_ratio, greedy_ttwa, greedy_weight, greedy_weight_seed_guard, hierarchical_core_satellites", status_code=400)
 
     czi_params = {}
     optimal_params = {}
     seed_guard_params = {}
     ttwa_params = {}
+    hierarchical_params = {}
 
     if algorithm == 'czi_balanced':
         czi_params, err = parse_czi_balanced_params(payload)
@@ -116,6 +123,8 @@ def parse_cluster_algorithm_config(payload):
         seed_guard_params, err = parse_seed_guard_params(payload)
     elif algorithm == 'greedy_ttwa':
         ttwa_params, err = parse_ttwa_params(payload)
+    elif algorithm == 'hierarchical_core_satellites':
+        hierarchical_params, err = parse_hierarchical_params(payload)
     else:
         err = None
 
@@ -126,6 +135,7 @@ def parse_cluster_algorithm_config(payload):
     effective_optimal_params = {}
     effective_seed_guard_params = {}
     effective_ttwa_params = {}
+    effective_hierarchical_params = {}
 
     if algorithm == 'czi_balanced':
         effective_czi_params = {
@@ -184,6 +194,34 @@ def parse_cluster_algorithm_config(payload):
                 else DEFAULT_CONTAINMENT_THRESHOLD
             ),
         }
+    elif algorithm == 'hierarchical_core_satellites':
+        effective_hierarchical_params = {
+            'local_radius_km': (
+                hierarchical_params.get('local_radius_km')
+                if hierarchical_params.get('local_radius_km') is not None
+                else DEFAULT_LOCAL_RADIUS_KM
+            ),
+            'core_containment_threshold': (
+                hierarchical_params.get('core_containment_threshold')
+                if hierarchical_params.get('core_containment_threshold') is not None
+                else DEFAULT_CORE_CONTAINMENT_THRESHOLD
+            ),
+            'core_improvement_epsilon': (
+                hierarchical_params.get('core_improvement_epsilon')
+                if hierarchical_params.get('core_improvement_epsilon') is not None
+                else DEFAULT_CORE_IMPROVEMENT_EPSILON
+            ),
+            'satellite_flow_threshold': (
+                hierarchical_params.get('satellite_flow_threshold')
+                if hierarchical_params.get('satellite_flow_threshold') is not None
+                else DEFAULT_SATELLITE_FLOW_THRESHOLD
+            ),
+            'max_satellites': (
+                hierarchical_params.get('max_satellites')
+                if hierarchical_params.get('max_satellites') is not None
+                else DEFAULT_MAX_SATELLITES
+            ),
+        }
 
     return {
         'algorithm': algorithm,
@@ -191,10 +229,12 @@ def parse_cluster_algorithm_config(payload):
         'optimal_params': optimal_params,
         'seed_guard_params': seed_guard_params,
         'ttwa_params': ttwa_params,
+        'hierarchical_params': hierarchical_params,
         'effective_czi_params': effective_czi_params,
         'effective_optimal_params': effective_optimal_params,
         'effective_seed_guard_params': effective_seed_guard_params,
         'effective_ttwa_params': effective_ttwa_params,
+        'effective_hierarchical_params': effective_hierarchical_params,
     }
 
 

@@ -128,6 +128,111 @@ class Clustering:
 
         return contributor_set, excluded_set
 
+    @staticmethod
+    def _seed_centroid(seed_cbgs, cbg_centers):
+        if not cbg_centers:
+            return None
+
+        coords = []
+        for cbg in seed_cbgs or []:
+            center = cbg_centers.get(cbg)
+            if center is None:
+                continue
+            coords.append((float(center[0]), float(center[1])))
+
+        if not coords:
+            return None
+
+        lat = sum(item[0] for item in coords) / len(coords)
+        lon = sum(item[1] for item in coords) / len(coords)
+        return (lat, lon)
+
+    @staticmethod
+    def _directed_containment(DG, cluster_set):
+        internal = 0.0
+        out_origin = 0.0
+        out_dest = 0.0
+
+        for node in cluster_set:
+            if node not in DG:
+                continue
+
+            internal += float(DG.nodes[node].get('self_weight', 0) or 0)
+
+            for _, v, data in DG.out_edges(node, data=True):
+                if v == node:
+                    continue
+                w = float(data.get('weight', 0) or 0)
+                if v in cluster_set:
+                    internal += w
+                else:
+                    out_origin += w
+
+            for u, _, data in DG.in_edges(node, data=True):
+                if u == node or u in cluster_set:
+                    continue
+                out_dest += float(data.get('weight', 0) or 0)
+
+        orig_total = internal + out_origin
+        dest_total = internal + out_dest
+        origin_containment = internal / orig_total if orig_total > 0 else 0.0
+        destination_containment = internal / dest_total if dest_total > 0 else 0.0
+        zone_containment = min(origin_containment, destination_containment)
+
+        return {
+            'internal': internal,
+            'out_origin': out_origin,
+            'out_dest': out_dest,
+            'origin': origin_containment,
+            'destination': destination_containment,
+            'zone': zone_containment,
+        }
+
+    @staticmethod
+    def _within_local_radius(seed_centroid, candidate_cbg, cbg_centers, local_radius_km):
+        if seed_centroid is None or not cbg_centers:
+            return True
+
+        try:
+            radius_km = float(local_radius_km)
+        except (TypeError, ValueError):
+            radius_km = 0.0
+
+        if radius_km <= 0:
+            return True
+
+        candidate_center = cbg_centers.get(candidate_cbg)
+        if candidate_center is None:
+            return False
+
+        try:
+            dist_km = float(distance(
+                seed_centroid[0],
+                seed_centroid[1],
+                candidate_center[0],
+                candidate_center[1],
+            ))
+        except Exception:
+            return False
+
+        return dist_km <= radius_km
+
+    @staticmethod
+    def _node_total_directed_flow(DG, node):
+        if node not in DG:
+            return 0.0
+
+        total = float(DG.nodes[node].get('self_weight', 0) or 0)
+        for _, v, data in DG.out_edges(node, data=True):
+            if v == node:
+                continue
+            total += float(data.get('weight', 0) or 0)
+        for u, _, data in DG.in_edges(node, data=True):
+            if u == node:
+                continue
+            total += float(data.get('weight', 0) or 0)
+        return total
+
     def greedy_fast(self, G: nx.Graph, u0: str, min_pop: int, trace_collector=None):
         self.logger.info(f"Starting greedy_fast algorithm with seed CBG {u0}")
         population = cbg_population(u0, self.config, self.logger)
@@ -668,6 +773,310 @@ class Clustering:
             )
 
         return cluster, population
+
+    def hierarchical_core_satellites(
+        self,
+        DG,
+        seed_cbgs,
+        min_pop,
+        cbg_to_zip=None,
+        zip_to_cbgs=None,
+        cbg_centers=None,
+        local_radius_km=20.0,
+        core_containment_threshold=0.70,
+        core_improvement_epsilon=0.0025,
+        satellite_flow_threshold=0.02,
+        max_satellites=4,
+        max_iter=1000,
+        trace_collector=None,
+    ):
+        cbg_to_zip = cbg_to_zip or {}
+        zip_to_cbgs = zip_to_cbgs or {}
+        cbg_centers = cbg_centers or {}
+
+        seed_cluster = []
+        missing_seed_cbgs = []
+        seen = set()
+        for cbg in seed_cbgs or []:
+            if cbg in seen:
+                continue
+            seen.add(cbg)
+            if cbg in DG:
+                seed_cluster.append(cbg)
+            else:
+                missing_seed_cbgs.append(cbg)
+
+        if not seed_cluster:
+            raise ValueError("None of the seed region CBGs are present in the directed mobility graph")
+
+        self.logger.info(
+            "Starting hierarchical_core_satellites with %d seed CBGs, min_pop=%s, local_radius_km=%s",
+            len(seed_cluster),
+            int(min_pop),
+            float(local_radius_km),
+        )
+
+        core_cluster = list(seed_cluster)
+        core_set = set(core_cluster)
+        seed_centroid = self._seed_centroid(seed_cluster, cbg_centers)
+        seed_zip_codes = sorted({
+            zip_code for zip_code in (cbg_to_zip.get(cbg) for cbg in seed_cluster) if zip_code
+        })
+
+        core_population = sum(cbg_population(cbg, self.config, self.logger) for cbg in core_cluster)
+        core_metrics = self._directed_containment(DG, core_set)
+
+        self.logger.info(
+            "Initial seed region: pop=%d origin=%.4f dest=%.4f zone=%.4f",
+            core_population,
+            core_metrics['origin'],
+            core_metrics['destination'],
+            core_metrics['zone'],
+        )
+
+        iteration = 1
+        while iteration <= max_iter:
+            local_candidates = set()
+            for node in core_cluster:
+                if node not in DG:
+                    continue
+                for candidate in DG.successors(node):
+                    if candidate in core_set:
+                        continue
+                    if not self._within_local_radius(seed_centroid, candidate, cbg_centers, local_radius_km):
+                        continue
+                    local_candidates.add(candidate)
+                for candidate in DG.predecessors(node):
+                    if candidate in core_set:
+                        continue
+                    if not self._within_local_radius(seed_centroid, candidate, cbg_centers, local_radius_km):
+                        continue
+                    local_candidates.add(candidate)
+
+            if not local_candidates:
+                self.logger.info("No local-core candidates remain; stopping local growth.")
+                break
+
+            best_candidate = None
+            best_metrics = None
+            best_score = None
+            candidate_details = []
+
+            for candidate in sorted(local_candidates):
+                next_set = set(core_set)
+                next_set.add(candidate)
+                next_metrics = self._directed_containment(DG, next_set)
+                score = float(next_metrics['zone'] - core_metrics['zone'])
+                candidate_zip = cbg_to_zip.get(candidate)
+                candidate_details.append({
+                    'cbg': candidate,
+                    'population': int(cbg_population(candidate, self.config, self.logger)),
+                    'score': score,
+                    'new_zone_containment': float(next_metrics['zone']),
+                    'origin_containment': float(next_metrics['origin']),
+                    'destination_containment': float(next_metrics['destination']),
+                    'seed_zip': candidate_zip,
+                })
+
+                if (
+                    best_score is None
+                    or score > best_score
+                    or (
+                        abs(score - best_score) < 1e-12
+                        and (best_candidate is None or candidate < best_candidate)
+                    )
+                ):
+                    best_candidate = candidate
+                    best_metrics = next_metrics
+                    best_score = score
+
+            if best_candidate is None:
+                break
+
+            if best_score <= 0:
+                self.logger.info(
+                    "Local core stabilized with no improving candidate (best delta=%.4g).",
+                    float(best_score),
+                )
+                break
+
+            if (
+                core_metrics['zone'] >= float(core_containment_threshold)
+                and best_score <= float(core_improvement_epsilon)
+            ):
+                self.logger.info(
+                    "Local core reached containment target %.4f with marginal gain %.4g; stopping.",
+                    float(core_metrics['zone']),
+                    float(best_score),
+                )
+                break
+
+            chosen_population = int(cbg_population(best_candidate, self.config, self.logger))
+            prev_cluster = list(core_cluster)
+            prev_population = int(core_population)
+
+            core_cluster.append(best_candidate)
+            core_set.add(best_candidate)
+            core_population += chosen_population
+            core_metrics = best_metrics
+
+            self._record_trace_step(
+                trace_collector,
+                iteration=iteration - 1,
+                cluster_before=prev_cluster,
+                population_before=prev_population,
+                candidates=candidate_details,
+                selected_cbg=best_candidate,
+                selected_population=chosen_population,
+                cluster_after=core_cluster,
+                population_after=core_population,
+                metrics_after={
+                    'stage': 'local_core',
+                    'origin_containment': float(core_metrics['origin']),
+                    'destination_containment': float(core_metrics['destination']),
+                    'zone_containment': float(core_metrics['zone']),
+                },
+            )
+
+            self.logger.info(
+                "Local core iteration %d: added %s pop=%d zone=%.4f",
+                iteration,
+                best_candidate,
+                chosen_population,
+                core_metrics['zone'],
+            )
+            iteration += 1
+
+        final_cluster = list(core_cluster)
+        final_set = set(core_set)
+        total_population = int(core_population)
+
+        satellite_candidates = []
+        satellite_units = {}
+        for node in core_cluster:
+            if node not in DG:
+                continue
+            neighbor_iter = list(DG.successors(node)) + list(DG.predecessors(node))
+            for candidate in neighbor_iter:
+                if candidate in final_set:
+                    continue
+                unit_id = cbg_to_zip.get(candidate)
+                if not unit_id or unit_id in seed_zip_codes:
+                    continue
+                satellite_units.setdefault(unit_id, set())
+
+        for unit_id in list(satellite_units.keys()):
+            unit_cbgs = []
+            for cbg in zip_to_cbgs.get(unit_id, []):
+                if cbg in final_set or cbg not in DG:
+                    continue
+                unit_cbgs.append(cbg)
+
+            if not unit_cbgs:
+                continue
+
+            shared_flow = 0.0
+            total_flow = 0.0
+            unit_population = 0
+            for cbg in unit_cbgs:
+                unit_population += int(cbg_population(cbg, self.config, self.logger))
+                total_flow += self._node_total_directed_flow(DG, cbg)
+
+                for _, v, data in DG.out_edges(cbg, data=True):
+                    if v in core_set:
+                        shared_flow += float(data.get('weight', 0) or 0)
+                for u, _, data in DG.in_edges(cbg, data=True):
+                    if u in core_set:
+                        shared_flow += float(data.get('weight', 0) or 0)
+
+            if unit_population <= 0 or shared_flow <= 0 or total_flow <= 0:
+                continue
+
+            coupling = float(shared_flow / total_flow)
+            satellite_candidates.append({
+                'unit_id': unit_id,
+                'label': f"ZIP {unit_id}",
+                'cbgs': sorted(unit_cbgs),
+                'population': int(unit_population),
+                'shared_flow': float(shared_flow),
+                'total_flow': float(total_flow),
+                'coupling': coupling,
+                'cbg_count': len(unit_cbgs),
+            })
+
+        satellite_candidates.sort(
+            key=lambda item: (
+                float(item['coupling']),
+                float(item['shared_flow']),
+                int(item['population']),
+                str(item['unit_id']),
+            ),
+            reverse=True,
+        )
+
+        selected_satellites = []
+        try:
+            max_satellites_int = max(0, int(max_satellites))
+        except (TypeError, ValueError):
+            max_satellites_int = 0
+
+        for candidate in satellite_candidates:
+            if max_satellites_int == 0:
+                break
+            if max_satellites_int and len(selected_satellites) >= max_satellites_int:
+                break
+            if candidate['coupling'] <= 0:
+                break
+            if total_population >= int(min_pop) and candidate['coupling'] < float(satellite_flow_threshold):
+                break
+
+            added_cbgs = [cbg for cbg in candidate['cbgs'] if cbg not in final_set]
+            if not added_cbgs:
+                continue
+
+            final_cluster.extend(added_cbgs)
+            final_set.update(added_cbgs)
+            total_population += int(candidate['population'])
+            selected_satellites.append({
+                'unit_id': candidate['unit_id'],
+                'label': candidate['label'],
+                'population': int(candidate['population']),
+                'coupling': float(candidate['coupling']),
+                'shared_flow': float(candidate['shared_flow']),
+                'cbg_count': int(candidate['cbg_count']),
+            })
+
+        final_metrics = self._directed_containment(DG, final_set)
+        metadata = {
+            'seed_cbgs': list(seed_cluster),
+            'missing_seed_cbgs': list(missing_seed_cbgs),
+            'seed_zip_codes': seed_zip_codes,
+            'core_cluster': list(core_cluster),
+            'core_population': int(core_population),
+            'core_containment': {
+                'origin': float(core_metrics['origin']),
+                'destination': float(core_metrics['destination']),
+                'zone': float(core_metrics['zone']),
+            },
+            'selected_satellites': selected_satellites,
+            'satellite_candidate_count': len(satellite_candidates),
+            'final_containment': {
+                'origin': float(final_metrics['origin']),
+                'destination': float(final_metrics['destination']),
+                'zone': float(final_metrics['zone']),
+            },
+            'external_pressure_share': float(max(0.0, 1.0 - final_metrics['zone'])),
+            'population_target_met': bool(total_population >= int(min_pop)),
+        }
+
+        if total_population < int(min_pop):
+            self.logger.warning(
+                "Hierarchical cluster ended below target population: pop=%d target=%d",
+                total_population,
+                int(min_pop),
+            )
+
+        return final_cluster, total_population, metadata
 
     def _select_candidate_nodes(self, G: nx.Graph, u0: str, candidate_limit: int):
         if u0 not in G:

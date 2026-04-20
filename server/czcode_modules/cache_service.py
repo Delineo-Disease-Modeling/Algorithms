@@ -1,23 +1,30 @@
-from typing import Optional
+import threading
 
 import geopandas as gpd
 import pandas as pd
-from uszipcode import SearchEngine
+
+try:
+    from uszipcode import SearchEngine
+except ImportError:  # pragma: no cover - depends on local runtime packaging.
+    SearchEngine = None
 
 
 class AlgorithmCacheService:
     """Explicit cache container for heavyweight algorithm resources."""
 
     def __init__(self):
-        self._search_engine: Optional[SearchEngine] = None
+        self._search_engines_by_thread = {}
         self._shapefile_cache = {}
         self._population_cache = {}
         self._graph_cache = {}
 
-    def get_search_engine(self) -> SearchEngine:
-        if self._search_engine is None:
-            self._search_engine = SearchEngine()
-        return self._search_engine
+    def get_search_engine(self):
+        if SearchEngine is None:
+            raise RuntimeError('uszipcode is not installed in this Python environment')
+        thread_id = threading.get_ident()
+        if thread_id not in self._search_engines_by_thread:
+            self._search_engines_by_thread[thread_id] = SearchEngine()
+        return self._search_engines_by_thread[thread_id]
 
     def get_or_load_shapefiles(self, states, loader_fn) -> gpd.GeoDataFrame:
         key = frozenset(states)

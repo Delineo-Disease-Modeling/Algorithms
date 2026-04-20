@@ -43,7 +43,6 @@ from .request_parsing import (
 def _api_error_response(error):
     return make_response(jsonify(error.to_payload()), error.status_code)
 
-
 def register_routes(
     app: Flask,
     generation_service,
@@ -78,12 +77,15 @@ def register_routes(
 
             algorithm_config = parse_cluster_algorithm_config(payload)
             payload['algorithm'] = algorithm_config['algorithm']
+            payload['seed_cbgs'] = normalize_cbg_list(payload.get('seed_cbgs', [payload['cbg']]), 'seed_cbgs')
             if algorithm_config['algorithm'] == 'czi_balanced':
                 payload.update({k: v for k, v in algorithm_config['czi_params'].items() if v is not None})
             elif algorithm_config['algorithm'] == 'czi_optimal_cap':
                 payload.update({k: v for k, v in algorithm_config['optimal_params'].items() if v is not None})
             elif algorithm_config['algorithm'] == 'greedy_weight_seed_guard':
                 payload.update({k: v for k, v in algorithm_config['seed_guard_params'].items() if v is not None})
+            elif algorithm_config['algorithm'] == 'hierarchical_core_satellites':
+                payload.update({k: v for k, v in algorithm_config['hierarchical_params'].items() if v is not None})
 
             try:
                 validate(instance=payload, schema=gen_cz_schema)
@@ -146,6 +148,7 @@ def register_routes(
             if cbg_value is None:
                 raise ApiError("Missing required field: 'cbg'", status_code=400)
             cbg_str = require_cbg({'cbg': cbg_value}, 'cbg')
+            seed_cbgs = normalize_cbg_list(payload.get('seed_cbgs', [cbg_str]), 'seed_cbgs')
             algorithm_config = parse_cluster_algorithm_config(payload)
             pattern_selection = resolve_pattern_selection(cbg_str, payload)
             include_trace = bool(payload.get('include_trace', False))
@@ -155,6 +158,7 @@ def register_routes(
                 pattern_selection,
                 algorithm_config,
                 include_trace,
+                seed_cbgs=seed_cbgs,
             )
             return jsonify({'clustering_id': cid})
         except ApiError as error:
@@ -272,6 +276,42 @@ def register_routes(
             return make_response(jsonify({'message': str(exc)}), 400)
         except Exception as exc:
             return make_response(jsonify({'message': f'Error computing frontier candidates: {str(exc)}'}), 500)
+
+    @app.route('/second-order-destinations', methods=['POST'])
+    @cross_origin()
+    def route_second_order_destinations():
+        try:
+            payload = parse_json_payload(request)
+            cbg_value = parse_test_seed_if_needed(payload, payload.get('cbg'))
+            if cbg_value is None:
+                raise ApiError("Missing required field: 'cbg'", status_code=400)
+            cbg_str = require_cbg({'cbg': cbg_value}, 'cbg')
+            seed_cbgs = normalize_cbg_list(payload.get('seed_cbgs', [cbg_str]), 'seed_cbgs')
+            pattern_selection = resolve_pattern_selection(cbg_str, payload)
+
+            raw_limit = payload.get('limit')
+            parsed_limit = None
+            if raw_limit is not None:
+                try:
+                    parsed_limit = int(raw_limit)
+                except (TypeError, ValueError) as exc:
+                    raise ApiError("Invalid 'limit': expected integer", status_code=400) from exc
+                if parsed_limit <= 0:
+                    parsed_limit = None
+
+            result = analysis_service.compute_second_order_destinations(
+                cbg_str,
+                seed_cbgs,
+                parsed_limit,
+                pattern_selection,
+            )
+            return jsonify(result)
+        except ApiError as error:
+            return _api_error_response(error)
+        except ValueError as exc:
+            return make_response(jsonify({'message': str(exc)}), 400)
+        except Exception as exc:
+            return make_response(jsonify({'message': f'Error computing second-order destinations: {str(exc)}'}), 500)
 
     @app.route('/candidate-pois', methods=['POST'])
     @cross_origin()

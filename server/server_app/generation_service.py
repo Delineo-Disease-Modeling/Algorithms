@@ -118,7 +118,13 @@ class ConvenienceZoneGenerationService:
             optimal_mip_rel_gap=algorithm_config['optimal_params'].get('optimal_mip_rel_gap'),
             optimal_time_limit_sec=algorithm_config['optimal_params'].get('optimal_time_limit_sec'),
             optimal_max_iters=algorithm_config['optimal_params'].get('optimal_max_iters'),
-            seed_guard_distance_km=algorithm_config['seed_guard_params'].get('seed_guard_distance_km')
+            seed_guard_distance_km=algorithm_config['seed_guard_params'].get('seed_guard_distance_km'),
+            seed_cbgs=data.get('seed_cbgs'),
+            local_radius_km=algorithm_config['effective_hierarchical_params'].get('local_radius_km'),
+            core_containment_threshold=algorithm_config['effective_hierarchical_params'].get('core_containment_threshold'),
+            core_improvement_epsilon=algorithm_config['effective_hierarchical_params'].get('core_improvement_epsilon'),
+            satellite_flow_threshold=algorithm_config['effective_hierarchical_params'].get('satellite_flow_threshold'),
+            max_satellites=algorithm_config['effective_hierarchical_params'].get('max_satellites'),
         )
 
         cluster = list(geoids.keys())
