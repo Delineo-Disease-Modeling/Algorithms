@@ -34,6 +34,8 @@ def test_compute_second_order_destinations_ranks_zip_regions_by_seed_outflow(mon
         return populations.get(cbg, 0)
 
     monkeypatch.setattr('server_app.analysis_service.cbg_population', fake_population)
+    monkeypatch.setattr('server_app.analysis_service.Config', lambda *args, **kwargs: DummyPatternSelection())
+    monkeypatch.setattr('server_app.analysis_service.setup_logging', lambda _config: None)
     monkeypatch.setattr(
         'server_app.analysis_service.get_cbg_to_zip_map',
         lambda: {
@@ -78,12 +80,12 @@ def test_compute_second_order_destinations_ranks_zip_regions_by_seed_outflow(mon
     assert result['seed_cbgs'] == ['seed_a', 'seed_b']
     assert result['seed_population'] == 220
     assert result['destination_count'] == 2
-    assert result['destinations'][0]['unit_id'] == '22222'
+    assert result['destinations'][0]['unit_id'] == 'zip:22222'
     assert result['destinations'][0]['outbound_flow'] == 30.0
     assert result['destinations'][0]['inbound_flow'] == 7.0
     assert result['destinations'][0]['population'] == 170
     assert result['destinations'][0]['recommended'] is True
-    assert result['destinations'][1]['unit_id'] == '33333'
+    assert result['destinations'][1]['unit_id'] == 'zip:33333'
     assert round(result['total_seed_external_outbound_flow'], 4) == 35.0
     assert round(result['recommended_captured_external_outbound_share'], 4) == 1.0
 
