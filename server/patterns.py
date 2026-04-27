@@ -124,17 +124,7 @@ def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: i
     """
     Build a global "intensity" distribution across places for a given weekday+hour.
     Returns (place_ids, weights) where weights are unnormalized intensities.
-    
-    Note: We zero out weights for late night hours (10pm-6am) to prevent unrealistic
-    movement to places that should be closed, even if SafeGraph shows small non-zero
-    values (which can happen from ATM visits, parking lot lingering, etc.)
     """
-    # Suppress movement to places during night hours (10pm-6am)
-    # This ensures no new trips start after 10pm, combined with the closing time
-    # logic that sends everyone home at 10pm.
-    if hour >= 22 or hour < 6:
-        return [], []
-    
     ids: List[str] = []
     wts: List[float] = []
     for pid, s in stats.items():
@@ -159,8 +149,6 @@ def _compute_peak_busyness(stats: Dict[str, Dict[str, Any]]) -> float:
     peak = 0.0
     for weekday in WEEKDAYS:
         for hour in range(24):
-            if hour >= 22 or hour < 6:
-                continue
             total = 0.0
             for s in stats.values():
                 raw_h = s["raw_hour_counts"][hour]
@@ -176,8 +164,6 @@ def _aggregate_busyness(stats: Dict[str, Dict[str, Any]], weekday: str, hour: in
     Compute aggregate raw activity for a specific (weekday, hour) timeslot.
     Sum raw_hour_counts[hour] * raw_day_counts[weekday] across all facilities.
     """
-    if hour >= 22 or hour < 6:
-        return 0.0
     total = 0.0
     for s in stats.values():
         raw_h = s["raw_hour_counts"][hour]
@@ -242,15 +228,6 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         current_time = start_time + timedelta(hours=hour_idx)
         weekday = WEEKDAYS[current_time.weekday()]
         hour_of_day = current_time.hour
-
-        # "Closing time" - send everyone home at 10pm (hour 22)
-        # This handles cases where dwell time would keep someone past closing
-        if hour_of_day == 22:
-            for pid, st in people_state.items():
-                if st["at_place"]:
-                    st["at_place"] = False
-                    st["place_id"] = None
-                    st["leave_time_idx"] = None
 
         # People who need to leave now (normal dwell time expiry)
         for pid, st in people_state.items():
