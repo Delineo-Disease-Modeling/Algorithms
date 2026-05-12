@@ -78,4 +78,4 @@ overall_busy = _aggregate_busyness(...) / peak_busyness  # each hour
 
 ## Future tuning
 
-The `0.35` cap and `0.85` multiplier on line 316 control the upper bound of movement. Now that `overall_busy` produces a proper 0-1 signal, these constants can be tuned based on empirical validation — e.g., comparing simulated time-away-from-home distributions against real-world mobility data.
+The `0.35` cap and `0.85` multiplier (around line 280) control the upper bound of movement. Now that `overall_busy` produces a proper 0-1 signal, these constants can be tuned based on empirical validation — e.g., comparing simulated time-away-from-home distributions against real-world mobility data.

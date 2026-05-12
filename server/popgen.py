@@ -51,12 +51,19 @@ class CensusDataPuller:
             "single_mother_with_children": "B11003_004E",
             "single_father_with_children": "B11003_005E",
             # From B11016
+            "size_1": "B11016_010E",
             "size_2": "B11016_003E",
             "size_3": "B11016_004E",
             "size_4": "B11016_005E",
             "size_5": "B11016_006E",
             "size_6": "B11016_007E",
             "size_7_plus": "B11016_008E",
+            "nonfamily_size_2": "B11016_011E",
+            "nonfamily_size_3": "B11016_012E",
+            "nonfamily_size_4": "B11016_013E",
+            "nonfamily_size_5": "B11016_014E",
+            "nonfamily_size_6": "B11016_015E",
+            "nonfamily_size_7_plus": "B11016_016E",
             # From B11017
             "multigenerational_households": "B11017_002E",
             # From B09019
@@ -344,6 +351,36 @@ class SyntheticPopulationGenerator:
         age = int(np.random.normal(dist['mean'], dist['std']))
         return max(min(age, dist['max']), dist['min'])  # Clamp to min/max
 
+    @staticmethod
+    def _safe_count(value: Union[str, int, float, None]) -> int:
+        """Convert a Census count to a non-negative int, treating missing values as zero."""
+        try:
+            return max(0, int(value))
+        except (TypeError, ValueError):
+            return 0
+
+    def _household_size_distribution(self, county_data: Dict[str, Any]) -> List[Tuple[int, int]]:
+        """Return household size counts for sizes 1 through 7+."""
+        size_distribution = []
+
+        for i in range(1, 8):
+            size_key = f"size_{i}" if i < 7 else "size_7_plus"
+            count = self._safe_count(county_data.get(size_key))
+
+            if i == 1 and count == 0:
+                count = (
+                    self._safe_count(county_data.get("male_hh_living_alone"))
+                    + self._safe_count(county_data.get("female_hh_living_alone"))
+                )
+            elif i > 1:
+                nonfamily_key = f"nonfamily_size_{i}" if i < 7 else "nonfamily_size_7_plus"
+                count += self._safe_count(county_data.get(nonfamily_key))
+
+            if count > 0:
+                size_distribution.append((i, count))
+
+        return size_distribution
+
     def determine_household_composition(self, county_code: str) -> Dict[str, int]:
         """Determine the composition of a household based on census data."""
         county_data = self.census_data[county_code]
@@ -352,13 +389,8 @@ class SyntheticPopulationGenerator:
         is_family = random.random() < (county_data["total_family_households"] / county_data["total_households"])
         
         # Determine household size based on distribution
-        size_distribution = []
-        size_counts = 0
-        for i in range(2, 8):  # Sizes 2 through 7+
-            size_key = f"size_{i}" if i < 7 else "size_7_plus"
-            if size_key in county_data:
-                size_distribution.append((i, county_data[size_key]))
-                size_counts += county_data[size_key]
+        size_distribution = self._household_size_distribution(county_data)
+        size_counts = sum(count for _, count in size_distribution)
         
         # If we don't have size distribution data, use average household size
         if size_counts == 0:
@@ -559,6 +591,10 @@ class SyntheticPopulationGenerator:
             for _ in range(cbg_households):
                 household = self.generate_household(county_data, county_code, cbg)
                 population.extend(household)
+                if cz_population and len(population) >= cz_population:
+                    break
+            if cz_population and len(population) >= cz_population:
+                break
             
         return population
     
