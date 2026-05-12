@@ -6,6 +6,7 @@ from common_geo import normalize_cbg
 from .algorithm_params import (
     normalize_cluster_algorithm,
     parse_czi_balanced_params,
+    parse_mobility_prune_params,
     parse_czi_optimal_params,
     parse_seed_guard_params,
     parse_ttwa_params,
@@ -14,6 +15,7 @@ from .constants import (
     DEFAULT_CONTAINMENT_THRESHOLD,
     DEFAULT_DISTANCE_PENALTY_WEIGHT,
     DEFAULT_DISTANCE_SCALE_KM,
+    DEFAULT_MOBILITY_PRUNE_MIN_SEED_CAPTURE,
     DEFAULT_OPTIMAL_CANDIDATE_LIMIT,
     DEFAULT_OPTIMAL_MAX_ITERS,
     DEFAULT_OPTIMAL_MIP_REL_GAP,
@@ -102,7 +104,7 @@ def parse_cluster_algorithm_config(payload):
     algorithm = normalize_cluster_algorithm(payload.get('algorithm'))
     if not algorithm:
         raise ApiError(
-            "Invalid 'algorithm'. Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_ratio, greedy_ttwa, greedy_weight, greedy_weight_seed_guard",
+            "Invalid 'algorithm'. Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_ratio, greedy_ttwa, greedy_weight, greedy_weight_seed_guard, mobility_prune",
             status_code=400,
         )
 
@@ -110,6 +112,7 @@ def parse_cluster_algorithm_config(payload):
     optimal_params = {}
     seed_guard_params = {}
     ttwa_params = {}
+    mobility_prune_params = {}
 
     if algorithm == 'czi_balanced':
         czi_params, err = parse_czi_balanced_params(payload)
@@ -119,6 +122,8 @@ def parse_cluster_algorithm_config(payload):
         seed_guard_params, err = parse_seed_guard_params(payload)
     elif algorithm == 'greedy_ttwa':
         ttwa_params, err = parse_ttwa_params(payload)
+    elif algorithm == 'mobility_prune':
+        mobility_prune_params, err = parse_mobility_prune_params(payload)
     else:
         err = None
 
@@ -129,6 +134,7 @@ def parse_cluster_algorithm_config(payload):
     effective_optimal_params = {}
     effective_seed_guard_params = {}
     effective_ttwa_params = {}
+    effective_mobility_prune_params = {}
 
     if algorithm == 'czi_balanced':
         effective_czi_params = {
@@ -187,6 +193,14 @@ def parse_cluster_algorithm_config(payload):
                 else DEFAULT_CONTAINMENT_THRESHOLD
             ),
         }
+    elif algorithm == 'mobility_prune':
+        effective_mobility_prune_params = {
+            'min_seed_capture': (
+                mobility_prune_params.get('min_seed_capture')
+                if mobility_prune_params.get('min_seed_capture') is not None
+                else DEFAULT_MOBILITY_PRUNE_MIN_SEED_CAPTURE
+            ),
+        }
 
     return {
         'algorithm': algorithm,
@@ -194,11 +208,13 @@ def parse_cluster_algorithm_config(payload):
         'optimal_params': optimal_params,
         'seed_guard_params': seed_guard_params,
         'ttwa_params': ttwa_params,
+        'mobility_prune_params': mobility_prune_params,
         'hierarchical_params': {},
         'effective_czi_params': effective_czi_params,
         'effective_optimal_params': effective_optimal_params,
         'effective_seed_guard_params': effective_seed_guard_params,
         'effective_ttwa_params': effective_ttwa_params,
+        'effective_mobility_prune_params': effective_mobility_prune_params,
         'effective_hierarchical_params': {},
     }
 

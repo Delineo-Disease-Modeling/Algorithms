@@ -73,6 +73,39 @@ def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monk
     assert captured['seed_cbgs'] == ['012345678901']
 
 
+def test_cluster_cbgs_route_accepts_mobility_prune_alias(client, app, monkeypatch):
+    monkeypatch.setattr(
+        'server_app.request_parsing.resolve_patterns_file_for_request',
+        lambda seed_cbg, start_date_raw=None, use_test_data=False: ('/tmp/patterns.parquet', 'monthly', '2021-01'),
+    )
+
+    captured = {}
+
+    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
+        captured['algorithm_config'] = algorithm_config
+        captured['seed_cbgs'] = seed_cbgs
+        return 18
+
+    monkeypatch.setattr(app.config['analysis_service'], 'start_cluster_job', fake_start_cluster_job)
+
+    response = client.post('/cluster-cbgs', json={
+        'cbg': '240010001001',
+        'seed_cbgs': ['240010001001', '240010002002'],
+        'min_pop': 9000,
+        'algorithm': 'reverse_prune',
+        'mobility_prune_min_seed_capture': 0.55,
+        'start_date': '2021-01-15',
+    })
+
+    assert response.status_code == 200
+    assert response.get_json() == {'clustering_id': 18}
+    assert captured['algorithm_config']['algorithm'] == 'mobility_prune'
+    assert captured['algorithm_config']['effective_mobility_prune_params'] == {
+        'min_seed_capture': 0.55,
+    }
+    assert captured['seed_cbgs'] == ['240010001001', '240010002002']
+
+
 def test_cluster_cbgs_route_rejects_hierarchical_algorithm(client, app, monkeypatch):
     monkeypatch.setattr(
         'server_app.request_parsing.resolve_patterns_file_for_request',

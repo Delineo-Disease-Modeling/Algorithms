@@ -125,6 +125,7 @@ class ConvenienceZoneGenerationService:
             core_improvement_epsilon=algorithm_config['effective_hierarchical_params'].get('core_improvement_epsilon'),
             satellite_flow_threshold=algorithm_config['effective_hierarchical_params'].get('satellite_flow_threshold'),
             max_satellites=algorithm_config['effective_hierarchical_params'].get('max_satellites'),
+            mobility_prune_min_seed_capture=algorithm_config['effective_mobility_prune_params'].get('min_seed_capture'),
         )
 
         cluster = list(geoids.keys())

@@ -78,6 +78,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
                 seed_cbgs=None, local_radius_km=None,
                 core_containment_threshold=None, core_improvement_epsilon=None,
                 satellite_flow_threshold=None, max_satellites=None,
+                mobility_prune_min_seed_capture=None,
                 containment_threshold=None, include_trace=False,
                 progress_callback=None,
                 cache_service=DEFAULT_ALGORITHM_CACHE):
@@ -124,6 +125,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         'greedy_ratio': clustering_algo.greedy_ratio,
         'greedy_ttwa': clustering_algo.greedy_ttwa,
         'hierarchical_core_satellites': clustering_algo.hierarchical_core_satellites,
+        'mobility_prune': clustering_algo.mobility_prune,
     }
 
     if G.number_of_nodes() == 0:
@@ -139,7 +141,7 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         seen_seed_cbgs.add(seed_cbg)
         normalized_seed_cbgs.append(seed_cbg)
 
-    if algorithm_key == 'hierarchical_core_satellites':
+    if algorithm_key in {'hierarchical_core_satellites', 'mobility_prune'}:
         if not any(seed_cbg in G for seed_cbg in normalized_seed_cbgs):
             raise ValueError(
                 "None of the resolved seed-region CBGs are present in the mobility graph. "
@@ -155,7 +157,8 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         raise ValueError(
             f"Invalid clustering algorithm '{algorithm}'. "
             "Valid options: czi_balanced, czi_optimal_cap, greedy_fast, greedy_weight, "
-            "greedy_weight_seed_guard, greedy_ratio, greedy_ttwa, hierarchical_core_satellites"
+            "greedy_weight_seed_guard, greedy_ratio, greedy_ttwa, hierarchical_core_satellites, "
+            "mobility_prune"
         )
 
     prog('Running clustering algorithm...', 75)
@@ -263,6 +266,20 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
         )
         if len(algorithm_result) > 2 and isinstance(algorithm_result[2], dict):
             algorithm_metadata = algorithm_result[2]
+    elif algorithm_key == 'mobility_prune':
+        prune_kwargs = {}
+        if mobility_prune_min_seed_capture is not None:
+            prune_kwargs['min_seed_capture'] = float(mobility_prune_min_seed_capture)
+        if trace_steps is not None:
+            prune_kwargs['trace_collector'] = trace_steps
+        algorithm_result = clustering_algo.mobility_prune(
+            G,
+            normalized_seed_cbgs,
+            config.min_cluster_pop,
+            **prune_kwargs
+        )
+        if len(algorithm_result) > 2 and isinstance(algorithm_result[2], dict):
+            algorithm_metadata = algorithm_result[2]
     else:
         algorithm_result = algorithm_map[algorithm_key](
             G,
@@ -297,6 +314,12 @@ def generate_cz(cbg, min_pop, patterns_file=None, patterns_folder=None, month=No
             trace_payload['note'] = (
                 "Trace steps show local core growth. ZIP-level satellite selection is "
                 "applied after the local core stabilizes."
+            )
+            trace_payload['algorithm_metadata'] = algorithm_metadata
+        elif algorithm_key == 'mobility_prune':
+            trace_payload['note'] = (
+                "Trace steps show bounded mobility-envelope growth followed by reverse "
+                "pruning. CBGs are removed by lowest movement loss per resident removed."
             )
             trace_payload['algorithm_metadata'] = algorithm_metadata
         return geoids, visualizer.map_obj, gdf, trace_payload

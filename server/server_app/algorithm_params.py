@@ -18,6 +18,11 @@ def normalize_cluster_algorithm(algorithm):
         'weight_guard': 'greedy_weight_seed_guard',
         'ratio': 'greedy_ratio',
         'ttwa': 'greedy_ttwa',
+        'prune': 'mobility_prune',
+        'mobility_prune': 'mobility_prune',
+        'mobility_pruning': 'mobility_prune',
+        'reverse_prune': 'mobility_prune',
+        'movement_prune': 'mobility_prune',
     }
     alg = aliases.get(alg, alg)
     return alg if alg in VALID_CLUSTER_ALGORITHMS else None
@@ -112,6 +117,27 @@ def parse_ttwa_params(payload):
         return None, "Invalid 'containment_threshold': must be between 0 and 1"
 
     return {'containment_threshold': value}, None
+
+
+def parse_mobility_prune_params(payload):
+    payload = payload or {}
+    field_name = (
+        'mobility_prune_min_seed_capture'
+        if payload.get('mobility_prune_min_seed_capture') is not None
+        else 'mobility_prune_min_czi'
+    )
+    min_seed_capture, err = _parse_float(
+        payload,
+        field_name,
+        min_value=0.0,
+        max_value=1.0,
+    )
+    if err:
+        return None, err
+
+    return {
+        'min_seed_capture': min_seed_capture,
+    }, None
 
 
 def parse_hierarchical_params(payload):

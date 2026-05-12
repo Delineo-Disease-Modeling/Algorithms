@@ -136,6 +136,7 @@ def register_routes(
                     'distance_penalty_weight': payload.get('distance_penalty_weight'),
                     'distance_scale_km': payload.get('distance_scale_km'),
                     'seed_guard_distance_km': payload.get('seed_guard_distance_km'),
+                    'mobility_prune_min_seed_capture': algorithm_config['effective_mobility_prune_params'].get('min_seed_capture'),
                     'optimal_candidate_limit': payload.get('optimal_candidate_limit'),
                     'optimal_population_floor_ratio': payload.get('optimal_population_floor_ratio'),
                     'optimal_mip_rel_gap': payload.get('optimal_mip_rel_gap'),
