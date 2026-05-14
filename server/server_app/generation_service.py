@@ -1,5 +1,7 @@
 import json
+import os
 import threading
+import time
 from datetime import datetime
 
 import geopandas as gpd
@@ -11,6 +13,15 @@ from patterns_loader import PatternsData, resolve_patterns_files, states_from_cb
 from popgen import gen_pop
 
 
+def _perf_timings_enabled():
+    return os.getenv('DELINEO_PERF_TIMINGS', '').lower() in {'1', 'true', 'yes', 'on'}
+
+
+def _report_perf_timing(report, label, started_at):
+    if _perf_timings_enabled():
+        report.info(f'[perf] {label}: {time.perf_counter() - started_at:.3f}s')
+
+
 class ConvenienceZoneGenerationService:
     def __init__(self, fullstack_client, generation_store):
         self.fullstack_client = fullstack_client
@@ -19,10 +30,12 @@ class ConvenienceZoneGenerationService:
     def gen_and_upload_data(self, geoids, czone_id, start_date, length, report, gdf=None,
                             patterns_file=None):
         try:
+            total_start = time.perf_counter()
             self.generation_store.update(czone_id, 'Loading patterns data...', 5)
             shared_data = None
             cbg_set = set(geoids.keys())
 
+            stage_start = time.perf_counter()
             if patterns_file:
                 shared_data = PatternsData.load([patterns_file], cbg_set=cbg_set)
             else:
@@ -32,13 +45,16 @@ class ConvenienceZoneGenerationService:
                     if resolved_files:
                         report.info(f'Auto-resolved patterns files: {resolved_files}')
                         shared_data = PatternsData.load(resolved_files, cbg_set=cbg_set)
+            _report_perf_timing(report, 'patterns load', stage_start)
 
             report.info(f'Patterns data loaded: {len(shared_data.df) if shared_data else 0} rows')
             self.generation_store.update(czone_id, 'Patterns data loaded', 20)
 
             report.info('Generating synthetic population (papdata)...')
             self.generation_store.update(czone_id, 'Generating synthetic population...', 25)
+            stage_start = time.perf_counter()
             papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data)
+            _report_perf_timing(report, 'gen_pop', stage_start)
             people_count = len(papdata.get('people', {}))
             homes_count = len(papdata.get('homes', {}))
             places_count = len(papdata.get('places', {}))
@@ -53,12 +69,14 @@ class ConvenienceZoneGenerationService:
 
             report.info('Generating movement patterns...')
             self.generation_store.update(czone_id, 'Generating movement patterns...', 50)
+            stage_start = time.perf_counter()
             patterns = gen_patterns(
                 papdata,
                 start_date,
                 length,
                 shared_data=shared_data
             )
+            _report_perf_timing(report, 'gen_patterns', stage_start)
             patterns_count = len(patterns)
             report.info(f'Generated {patterns_count} timestep patterns')
             self.generation_store.update(czone_id, f'Generated {patterns_count} movement patterns', 75)
@@ -68,6 +86,7 @@ class ConvenienceZoneGenerationService:
             report.info('Uploading data to DB API...')
             self.generation_store.update(czone_id, 'Uploading data...', 80)
             resp = self.fullstack_client.upload_patterns(czone_id, papdata, patterns)
+            _report_perf_timing(report, 'cz data generation total', total_start)
 
             if resp.ok:
                 report.info('Data uploaded successfully!')
@@ -87,6 +106,7 @@ class ConvenienceZoneGenerationService:
             self.generation_store.update(czone_id, f'Error: {str(exc)}', 0, error=True)
 
     def create_cz(self, data, report, pattern_selection, algorithm_config):
+        total_start = time.perf_counter()
         report.info(f"Generating CZ from CBG: {data['cbg']}")
         report.info(f"Target minimum population: {data['min_pop']}")
 
@@ -127,6 +147,7 @@ class ConvenienceZoneGenerationService:
             max_satellites=algorithm_config['effective_hierarchical_params'].get('max_satellites'),
             mobility_prune_min_seed_capture=algorithm_config['effective_mobility_prune_params'].get('min_seed_capture'),
         )
+        _report_perf_timing(report, 'generate_cz', total_start)
 
         cluster = list(geoids.keys())
         size = sum(list(geoids.values()))
