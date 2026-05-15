@@ -1,15 +1,24 @@
 
 import ast
+import contextlib
 import csv
 import json
+import logging
 import math
 import numpy as np
 import pandas as pd
 import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple, Optional
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+
+_PATTERNS_LOGGER = logging.getLogger(__name__)
+
+
+def _perf_timings_enabled() -> bool:
+    return os.getenv("DELINEO_PERF_TIMINGS", "").lower() in {"1", "true", "yes", "on"}
 
 
 def _parse_hour_list(val) -> List[int]:
@@ -188,37 +197,52 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
     Output format matches the original: a dict keyed by cumulative minutes,
     each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
     """
-    # Map placekey -> pap place_id
-    placekey_to_place_id: Dict[str, str] = {}
-    for pid, desc in papdata.get("places", {}).items():
-        pk = desc.get("placekey")
-        if pk:
-            placekey_to_place_id[pk] = pid
+    perf_accum: Dict[str, float] = {}
+    perf_on = _perf_timings_enabled()
 
-    # Derive stats from the shared PatternsData. If none/empty, stats is empty.
-    if shared_data is not None and not shared_data.is_empty():
-        placekey_set = set(placekey_to_place_id.keys())
-        stats_df = shared_data.for_patterns_stats(placekey_set)
-        stats = _build_stats_from_df(stats_df, placekey_to_place_id)
-    else:
-        stats = {}
+    @contextlib.contextmanager
+    def _timed(label: str):
+        if not perf_on:
+            yield
+            return
+        started = time.perf_counter()
+        try:
+            yield
+        finally:
+            perf_accum[label] = perf_accum.get(label, 0.0) + (time.perf_counter() - started)
 
-    # Pre-compute peak busyness across the entire week so we can derive a
-    # meaningful 0-1 movement probability from raw visitor counts.
-    peak_busyness = _compute_peak_busyness(stats)
+    with _timed("gen_patterns/setup_stats"):
+        # Map placekey -> pap place_id
+        placekey_to_place_id: Dict[str, str] = {}
+        for pid, desc in papdata.get("places", {}).items():
+            pk = desc.get("placekey")
+            if pk:
+                placekey_to_place_id[pk] = pid
 
-    # People state
-    # At any time, a person is either at home or at a place with a 'leave_time' scheduled.
-    # (We don't model inter-POI hopping here; that could be added by sampling again after leaving.)
-    people_state: Dict[int, Dict[str, Any]] = {}
-    for sid, info in papdata.get("people", {}).items():
-        pid = int(sid)
-        people_state[pid] = {
-            "home": str(info.get("home")),
-            "at_place": False,
-            "place_id": None,
-            "leave_time_idx": None,  # hour index when they will leave the place
-        }
+        # Derive stats from the shared PatternsData. If none/empty, stats is empty.
+        if shared_data is not None and not shared_data.is_empty():
+            placekey_set = set(placekey_to_place_id.keys())
+            stats_df = shared_data.for_patterns_stats(placekey_set)
+            stats = _build_stats_from_df(stats_df, placekey_to_place_id)
+        else:
+            stats = {}
+
+        # Pre-compute peak busyness across the entire week so we can derive a
+        # meaningful 0-1 movement probability from raw visitor counts.
+        peak_busyness = _compute_peak_busyness(stats)
+
+        # People state
+        # At any time, a person is either at home or at a place with a 'leave_time' scheduled.
+        # (We don't model inter-POI hopping here; that could be added by sampling again after leaving.)
+        people_state: Dict[int, Dict[str, Any]] = {}
+        for sid, info in papdata.get("people", {}).items():
+            pid = int(sid)
+            people_state[pid] = {
+                "home": str(info.get("home")),
+                "at_place": False,
+                "place_id": None,
+                "leave_time_idx": None,  # hour index when they will leave the place
+            }
 
     output: Dict[str, Any] = {}
 
@@ -230,70 +254,81 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         hour_of_day = current_time.hour
 
         # People who need to leave now (normal dwell time expiry)
-        for pid, st in people_state.items():
-            if st["at_place"] and st["leave_time_idx"] == hour_idx:
-                # send home
-                st["at_place"] = False
-                st["place_id"] = None
-                st["leave_time_idx"] = None
+        with _timed("gen_patterns/leave_time_expiry"):
+            for pid, st in people_state.items():
+                if st["at_place"] and st["leave_time_idx"] == hour_idx:
+                    # send home
+                    st["at_place"] = False
+                    st["place_id"] = None
+                    st["leave_time_idx"] = None
 
         # Build intensity distribution for this hour (normalized — for destination selection)
-        place_ids, raw_weights = _overall_busy_factor(stats, weekday, hour_of_day)
-        if raw_weights:
-            place_probs = np.array(raw_weights, dtype=float)
-            place_probs = place_probs / place_probs.sum()
-        else:
-            place_probs = np.array([])
+        with _timed("gen_patterns/intensity_distribution"):
+            place_ids, raw_weights = _overall_busy_factor(stats, weekday, hour_of_day)
+            if raw_weights:
+                place_probs = np.array(raw_weights, dtype=float)
+                place_probs = place_probs / place_probs.sum()
+            else:
+                place_probs = np.array([])
 
         # Compute movement probability from raw visitor counts.
         # overall_busy is a 0-1 ratio: current aggregate activity / peak activity
         # across the whole week. This properly captures "how busy is right now"
         # using absolute magnitudes rather than the normalized distribution.
-        if peak_busyness > 0:
-            overall_busy = _aggregate_busyness(stats, weekday, hour_of_day) / peak_busyness
-        else:
-            overall_busy = 0.0
+        with _timed("gen_patterns/aggregate_busyness"):
+            if peak_busyness > 0:
+                overall_busy = _aggregate_busyness(stats, weekday, hour_of_day) / peak_busyness
+            else:
+                overall_busy = 0.0
 
-        base_move_prob = min(0.35, 0.85 * overall_busy)
+            base_move_prob = min(0.35, 0.85 * overall_busy)
 
         # Decide moves for each person at home
-        for pid, st in people_state.items():
-            if st["at_place"]:
-                continue  # already out
+        with _timed("gen_patterns/mover_decision"):
+            for pid, st in people_state.items():
+                if st["at_place"]:
+                    continue  # already out
 
-            if len(place_ids) == 0:
-                continue  # nothing open/busy for this hour
+                if len(place_ids) == 0:
+                    continue  # nothing open/busy for this hour
 
-            if rng.random() < base_move_prob:
-                # pick a destination
-                choice_idx = int(rng.choice(len(place_ids), p=place_probs))
-                dest_place_id = place_ids[choice_idx]
+                if rng.random() < base_move_prob:
+                    # pick a destination
+                    choice_idx = int(rng.choice(len(place_ids), p=place_probs))
+                    dest_place_id = place_ids[choice_idx]
 
-                # dwell time from median_dwell
-                median_hours = stats[dest_place_id]["median_dwell_hours"]
-                # add a little noise around the median (triangular around [median-1, median+1])
-                lo = max(1, median_hours - 1)
-                hi = median_hours + 1
-                dwell_hours = int(rng.integers(lo, hi + 1))
+                    # dwell time from median_dwell
+                    median_hours = stats[dest_place_id]["median_dwell_hours"]
+                    # add a little noise around the median (triangular around [median-1, median+1])
+                    lo = max(1, median_hours - 1)
+                    hi = median_hours + 1
+                    dwell_hours = int(rng.integers(lo, hi + 1))
 
-                st["at_place"] = True
-                st["place_id"] = dest_place_id
-                st["leave_time_idx"] = min(duration, hour_idx + dwell_hours)
+                    st["at_place"] = True
+                    st["place_id"] = dest_place_id
+                    st["leave_time_idx"] = min(duration, hour_idx + dwell_hours)
 
         # Snapshot at the end of this hour
-        homes_map: Dict[str, List[str]] = {}
-        places_map: Dict[str, List[str]] = {}
-        for pid, st in people_state.items():
-            if st["at_place"] and st["place_id"] is not None:
-                places_map.setdefault(str(st["place_id"]), []).append(str(pid))
-            else:
-                homes_map.setdefault(str(st["home"]), []).append(str(pid))
+        with _timed("gen_patterns/snapshot_assembly"):
+            homes_map: Dict[str, List[str]] = {}
+            places_map: Dict[str, List[str]] = {}
+            for pid, st in people_state.items():
+                if st["at_place"] and st["place_id"] is not None:
+                    places_map.setdefault(str(st["place_id"]), []).append(str(pid))
+                else:
+                    homes_map.setdefault(str(st["home"]), []).append(str(pid))
 
-        # Key is minutes from start_time. hour_idx=0 processes the first hour (0:00-1:00),
-        # so we store at minute 60 to represent the state AT hour 1.
-        # Frontend interprets key "60" as "1 hour from start" which is correct.
-        current_minutes = (hour_idx + 1) * 60
-        output[str(current_minutes)] = {"homes": homes_map, "places": places_map}
+            # Key is minutes from start_time. hour_idx=0 processes the first hour (0:00-1:00),
+            # so we store at minute 60 to represent the state AT hour 1.
+            # Frontend interprets key "60" as "1 hour from start" which is correct.
+            current_minutes = (hour_idx + 1) * 60
+            output[str(current_minutes)] = {"homes": homes_map, "places": places_map}
+
+    if perf_on:
+        # Emit via print so the line is visible even when the algorithms logger
+        # configuration is changed by callers.
+        for label in sorted(perf_accum):
+            print(f"[perf] {label}: {perf_accum[label]:.3f}s", flush=True)
 
     return output
 
