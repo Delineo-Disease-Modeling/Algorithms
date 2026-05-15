@@ -4,7 +4,6 @@ from datetime import datetime
 from io import BytesIO
 
 import folium
-import geopandas as gpd
 from flask import Flask, Response as FlaskResponse, jsonify, make_response, request, send_file
 from flask_cors import cross_origin
 from jsonschema import validate
@@ -13,19 +12,16 @@ from geojsongen import get_cbg_at_point, get_cbg_geojson
 from run_report import RunReport
 from schema import gen_cz_schema
 
-from .algorithm_params import parse_czi_balanced_params, parse_czi_optimal_params, parse_seed_guard_params
 from .analysis_helpers import compute_geojson_bounds
 from .constants import (
     DATA_DIR,
     TEST_SIM_COLUMNS,
-    VALID_CLUSTER_ALGORITHMS,
 )
 from .errors import ApiError
 from .jobs import stream_events
 from .logging_utils import log_candidate_pois
 from .pattern_resolution import (
     extract_month_key,
-    list_available_months_for_state,
     months_in_range,
     validate_csv_columns,
 )
@@ -34,6 +30,7 @@ from .request_parsing import (
     optional_cbg,
     parse_cluster_algorithm_config,
     parse_json_payload,
+    parse_optional_positive_int,
     parse_test_seed_if_needed,
     require_cbg,
     resolve_pattern_selection,
@@ -279,15 +276,7 @@ def register_routes(
             pattern_selection = resolve_pattern_selection(seed_cbg, payload)
             algorithm_config = parse_cluster_algorithm_config(payload)
 
-            raw_limit = payload.get('limit')
-            parsed_limit = None
-            if raw_limit is not None:
-                try:
-                    parsed_limit = int(raw_limit)
-                except (TypeError, ValueError) as exc:
-                    raise ApiError("Invalid 'limit': expected integer", status_code=400) from exc
-                if parsed_limit <= 0:
-                    parsed_limit = None
+            parsed_limit = parse_optional_positive_int(payload.get('limit'), 'limit')
 
             result = analysis_service.compute_frontier_candidates(
                 seed_cbg,
@@ -317,15 +306,7 @@ def register_routes(
             seed_cbgs = normalize_cbg_list(payload.get('seed_cbgs', [cbg_str]), 'seed_cbgs')
             pattern_selection = resolve_pattern_selection(cbg_str, payload)
 
-            raw_limit = payload.get('limit')
-            parsed_limit = None
-            if raw_limit is not None:
-                try:
-                    parsed_limit = int(raw_limit)
-                except (TypeError, ValueError) as exc:
-                    raise ApiError("Invalid 'limit': expected integer", status_code=400) from exc
-                if parsed_limit <= 0:
-                    parsed_limit = None
+            parsed_limit = parse_optional_positive_int(payload.get('limit'), 'limit')
 
             result = analysis_service.compute_second_order_destinations(
                 cbg_str,

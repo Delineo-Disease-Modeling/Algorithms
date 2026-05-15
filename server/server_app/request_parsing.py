@@ -87,6 +87,16 @@ def normalize_cbg_list(values, field_name):
     return normalized
 
 
+def parse_optional_positive_int(raw, field_name):
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError) as exc:
+        raise ApiError(f"Invalid '{field_name}': expected integer", status_code=400) from exc
+    return value if value > 0 else None
+
+
 def resolve_pattern_selection(seed_cbg, payload):
     use_test_data = bool(payload.get('use_test_data'))
     try:
