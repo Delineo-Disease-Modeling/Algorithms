@@ -11,9 +11,16 @@ a structured `summary.json`.
 ## Usage
 
 ```
-/opt/anaconda3/envs/delineo_env/bin/python perf_benchmark.py \
+caffeinate -i -s /opt/anaconda3/envs/delineo_env/bin/python perf_benchmark.py \
   2>&1 | tee <output_root>/full.log
 ```
+
+`caffeinate -i -s` is required on macOS — without it the system may idle-sleep
+during a long run. `time.perf_counter()` and Node's `process.hrtime.bigint()`
+behave differently across sleep on macOS, which produces nonsensical sub-stage
+timings (e.g. one run reported `simulation total: 225s` but the simdata file
+was written ~27 minutes after gen_patterns finished). With `caffeinate` the
+machine stays awake and timings are physical wall-clock.
 
 Defaults: ZIP 74002, `mobility_prune` at `min_seed_capture=0.70`, `min_pop=5000`,
 168h, start 2021-04-01, `DELINEO_BENCH_SEED=0`, 1 smoke + 3 measured.
