@@ -136,7 +136,7 @@ class FrontierCandidateAnalyzer:
 
                 score = czi_after - distance_penalty_weight * distance_penalty
                 candidate_details.append({
-                    'cbg': self.self.normalize_output_cbg(candidate),
+                    'cbg': self.normalize_output_cbg(candidate),
                     'population': int(cand_pop),
                     'score': float(score),
                     'movement_to_cluster': float(in_to_cluster),
@@ -190,7 +190,7 @@ class FrontierCandidateAnalyzer:
                     seed_guard_distance_km,
                 )
                 candidate_details.append({
-                    'cbg': self.self.normalize_output_cbg(candidate),
+                    'cbg': self.normalize_output_cbg(candidate),
                     'population': int(cand_pop),
                     'score': float(movement_to_cluster),
                     'movement_to_cluster': float(movement_to_cluster),
@@ -219,7 +219,7 @@ class FrontierCandidateAnalyzer:
                     total_movement = movement_to_cluster + movement_to_outside
                     score = (movement_to_cluster / total_movement) if total_movement > 0 else 0.0
                     candidate_details.append({
-                        'cbg': self.self.normalize_output_cbg(candidate),
+                        'cbg': self.normalize_output_cbg(candidate),
                         'population': int(cand_pop),
                         'score': float(score),
                         'movement_to_cluster': float(movement_to_cluster),
@@ -228,7 +228,7 @@ class FrontierCandidateAnalyzer:
                     })
                 else:
                     candidate_details.append({
-                        'cbg': self.self.normalize_output_cbg(candidate),
+                        'cbg': self.normalize_output_cbg(candidate),
                         'population': int(cand_pop),
                         'score': float(movement_to_cluster),
                         'movement_to_cluster': float(movement_to_cluster),
