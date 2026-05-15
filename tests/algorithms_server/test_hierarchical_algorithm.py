@@ -23,7 +23,7 @@ def test_hierarchical_core_satellites_grows_local_core_then_adds_zip_satellite(m
     def fake_population(cbg, _config, _logger):
         return populations.get(cbg, 0)
 
-    monkeypatch.setattr('czcode_modules.clustering.cbg_population', fake_population)
+    monkeypatch.setattr('czcode_modules.directed_algorithms.cbg_population', fake_population)
 
     dg = nx.DiGraph()
     dg.add_node('seed_a', self_weight=30.0)

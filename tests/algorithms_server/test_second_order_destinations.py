@@ -33,9 +33,9 @@ def test_compute_second_order_destinations_ranks_zip_regions_by_seed_outflow(mon
     def fake_population(cbg, _config, _logger):
         return populations.get(cbg, 0)
 
-    monkeypatch.setattr('server_app.analysis_service.cbg_population', fake_population)
+    monkeypatch.setattr('server_app.second_order_destinations.cbg_population', fake_population)
     monkeypatch.setattr(
-        'server_app.analysis_service.get_cbg_to_zip_map',
+        'server_app.second_order_destinations.get_cbg_to_zip_map',
         lambda: {
             'seed_a': '11111',
             'seed_b': '11111',
@@ -45,7 +45,7 @@ def test_compute_second_order_destinations_ranks_zip_regions_by_seed_outflow(mon
         },
     )
     monkeypatch.setattr(
-        'server_app.analysis_service.get_zip_to_cbgs_map',
+        'server_app.second_order_destinations.get_zip_to_cbgs_map',
         lambda: {
             '11111': ['seed_a', 'seed_b'],
             '22222': ['zip2_a', 'zip2_b'],

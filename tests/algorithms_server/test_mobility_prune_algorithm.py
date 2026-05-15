@@ -22,7 +22,7 @@ def test_mobility_prune_removes_lowest_movement_loss_per_person(monkeypatch):
     def fake_population(cbg, _config, _logger):
         return populations.get(cbg, 0)
 
-    monkeypatch.setattr('czcode_modules.clustering.cbg_population', fake_population)
+    monkeypatch.setattr('czcode_modules.mobility_prune.cbg_population', fake_population)
 
     graph = nx.Graph()
     for cbg in populations:
@@ -78,7 +78,7 @@ def test_mobility_prune_does_not_disconnect_retained_non_seed_cbgs(monkeypatch):
     def fake_population(cbg, _config, _logger):
         return populations.get(cbg, 0)
 
-    monkeypatch.setattr('czcode_modules.clustering.cbg_population', fake_population)
+    monkeypatch.setattr('czcode_modules.mobility_prune.cbg_population', fake_population)
 
     graph = nx.Graph()
     for cbg in populations:
@@ -109,7 +109,7 @@ def test_mobility_prune_prunes_remote_component_after_large_envelope(monkeypatch
     def fake_population(cbg, _config, _logger):
         return populations.get(cbg, 0)
 
-    monkeypatch.setattr('czcode_modules.clustering.cbg_population', fake_population)
+    monkeypatch.setattr('czcode_modules.mobility_prune.cbg_population', fake_population)
 
     graph = nx.Graph()
     for cbg in populations:
