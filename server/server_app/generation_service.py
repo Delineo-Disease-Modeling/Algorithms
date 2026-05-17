@@ -143,7 +143,8 @@ class ConvenienceZoneGenerationService:
             'start_date': data['start_date'],
             'length': data['length'],
             'size': size,
-            'user_id': data['user_id']
+            'user_id': data.get('user_id'),
+            'guest_claim_token': data.get('guest_claim_token')
         })
 
         if not resp.ok:
@@ -220,7 +221,8 @@ class ConvenienceZoneGenerationService:
             'start_date': data.get('start_date'),
             'length': data.get('length', 168),
             'size': size,
-            'user_id': data.get('user_id')
+            'user_id': data.get('user_id'),
+            'guest_claim_token': data.get('guest_claim_token')
         })
 
         if not resp.ok:
