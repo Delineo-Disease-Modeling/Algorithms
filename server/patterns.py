@@ -231,18 +231,22 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         # meaningful 0-1 movement probability from raw visitor counts.
         peak_busyness = _compute_peak_busyness(stats)
 
-        # People state
-        # At any time, a person is either at home or at a place with a 'leave_time' scheduled.
-        # (We don't model inter-POI hopping here; that could be added by sampling again after leaving.)
-        people_state: Dict[int, Dict[str, Any]] = {}
-        for sid, info in papdata.get("people", {}).items():
-            pid = int(sid)
-            people_state[pid] = {
-                "home": str(info.get("home")),
-                "at_place": False,
-                "place_id": None,
-                "leave_time_idx": None,  # hour index when they will leave the place
-            }
+        # People state held in parallel arrays so the mover-decision hot loop
+        # can run as a batched numpy op instead of one rng.random + rng.choice
+        # + rng.integers call per person. is_home_arr is the source of truth
+        # for whether each person is at home or out; leave_time_arr holds the
+        # hour at which they'll return; dest_place_id_arr holds the destination
+        # place_id (only meaningful when at place).
+        people = list(papdata.get("people", {}).items())
+        n_people = len(people)
+        pid_str_list: List[str] = [None] * n_people  # str(int(sid))
+        home_str_list: List[str] = [None] * n_people  # str(info["home"])
+        for i, (sid, info) in enumerate(people):
+            pid_str_list[i] = str(int(sid))
+            home_str_list[i] = str(info.get("home"))
+        is_home_arr = np.ones(n_people, dtype=bool)
+        leave_time_arr = np.full(n_people, -1, dtype=np.int64)
+        dest_place_id_arr: List[Any] = [None] * n_people
 
     output: Dict[str, Any] = {}
 
@@ -253,14 +257,15 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         weekday = WEEKDAYS[current_time.weekday()]
         hour_of_day = current_time.hour
 
-        # People who need to leave now (normal dwell time expiry)
+        # People whose dwell time expires this hour return home.
         with _timed("gen_patterns/leave_time_expiry"):
-            for pid, st in people_state.items():
-                if st["at_place"] and st["leave_time_idx"] == hour_idx:
-                    # send home
-                    st["at_place"] = False
-                    st["place_id"] = None
-                    st["leave_time_idx"] = None
+            expired_mask = (leave_time_arr == hour_idx)
+            if expired_mask.any():
+                is_home_arr[expired_mask] = True
+                leave_time_arr[expired_mask] = -1
+                # dest_place_id_arr entries are not cleared on return; they
+                # are only read when is_home_arr[i] is False, so stale values
+                # are unreachable.
 
         # Build intensity distribution for this hour (normalized — for destination selection)
         with _timed("gen_patterns/intensity_distribution"):
@@ -283,40 +288,64 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
 
             base_move_prob = min(0.35, 0.85 * overall_busy)
 
-        # Decide moves for each person at home
+        # Vectorized mover decision: batch the rng draws across all people at
+        # home this hour, then apply assignments only to those who actually
+        # move. RNG draw ORDER differs from the original per-person loop, so
+        # outputs are NOT byte-identical to the pre-vectorization code; the
+        # statistical distribution is preserved (each person has the same
+        # base_move_prob; destinations are still drawn with place_probs;
+        # dwell still triangular around median-1..median+1).
         with _timed("gen_patterns/mover_decision"):
-            for pid, st in people_state.items():
-                if st["at_place"]:
-                    continue  # already out
+            home_indices = np.where(is_home_arr)[0]
+            n_home = int(home_indices.size)
+            n_places = len(place_ids)
+            if n_home > 0 and n_places > 0:
+                move_rolls = rng.random(n_home)
+                movers_mask = move_rolls < base_move_prob
+                n_movers = int(movers_mask.sum())
+                if n_movers > 0:
+                    mover_indices = home_indices[movers_mask]
+                    dest_choice_idx = rng.choice(n_places, size=n_movers, p=place_probs)
+                    dest_choice_list = dest_choice_idx.tolist()
+                    dest_place_ids_for_movers = [place_ids[c] for c in dest_choice_list]
+                    median_per_mover = np.fromiter(
+                        (stats[pid]["median_dwell_hours"] for pid in dest_place_ids_for_movers),
+                        dtype=np.int64,
+                        count=n_movers,
+                    )
+                    lo = np.maximum(1, median_per_mover - 1)
+                    hi_inclusive = median_per_mover + 1
+                    dwell_hours_arr = rng.integers(lo, hi_inclusive + 1)
+                    new_leave_time = np.minimum(duration, hour_idx + dwell_hours_arr)
 
-                if len(place_ids) == 0:
-                    continue  # nothing open/busy for this hour
-
-                if rng.random() < base_move_prob:
-                    # pick a destination
-                    choice_idx = int(rng.choice(len(place_ids), p=place_probs))
-                    dest_place_id = place_ids[choice_idx]
-
-                    # dwell time from median_dwell
-                    median_hours = stats[dest_place_id]["median_dwell_hours"]
-                    # add a little noise around the median (triangular around [median-1, median+1])
-                    lo = max(1, median_hours - 1)
-                    hi = median_hours + 1
-                    dwell_hours = int(rng.integers(lo, hi + 1))
-
-                    st["at_place"] = True
-                    st["place_id"] = dest_place_id
-                    st["leave_time_idx"] = min(duration, hour_idx + dwell_hours)
+                    is_home_arr[mover_indices] = False
+                    leave_time_arr[mover_indices] = new_leave_time
+                    for arr_idx, place_id in zip(mover_indices.tolist(), dest_place_ids_for_movers):
+                        dest_place_id_arr[arr_idx] = place_id
 
         # Snapshot at the end of this hour
         with _timed("gen_patterns/snapshot_assembly"):
             homes_map: Dict[str, List[str]] = {}
             places_map: Dict[str, List[str]] = {}
-            for pid, st in people_state.items():
-                if st["at_place"] and st["place_id"] is not None:
-                    places_map.setdefault(str(st["place_id"]), []).append(str(pid))
+            # tolist() up front turns 50k numpy bool indexing into 50k local
+            # truthiness checks, which is measurably faster in CPython.
+            is_home_list = is_home_arr.tolist()
+            for i in range(n_people):
+                pid_str = pid_str_list[i]
+                if is_home_list[i]:
+                    home_id = home_str_list[i]
+                    bucket = homes_map.get(home_id)
+                    if bucket is None:
+                        homes_map[home_id] = [pid_str]
+                    else:
+                        bucket.append(pid_str)
                 else:
-                    homes_map.setdefault(str(st["home"]), []).append(str(pid))
+                    place_id = str(dest_place_id_arr[i])
+                    bucket = places_map.get(place_id)
+                    if bucket is None:
+                        places_map[place_id] = [pid_str]
+                    else:
+                        bucket.append(pid_str)
 
             # Key is minutes from start_time. hour_idx=0 processes the first hour (0:00-1:00),
             # so we store at minute 60 to represent the state AT hour 1.
