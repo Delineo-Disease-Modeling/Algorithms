@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 from typing import Dict, List, Optional, Sequence, Tuple, Union
 
@@ -123,7 +124,8 @@ class ResidentialCache:
 
     def __init__(self, gdf, use_buildings: bool = True):
         self.use_buildings = bool(use_buildings)
-        self._rng = random.Random()
+        bench_seed = os.getenv('DELINEO_BENCH_SEED')
+        self._rng = random.Random(int(bench_seed)) if bench_seed else random.Random()
 
         self.cbg_gdf = self._normalize_cbg_gdf(gdf)
         self.metric_crs = self._pick_metric_crs(self.cbg_gdf)
@@ -238,15 +240,17 @@ class ResidentialCache:
                 west=min_lng,
                 tags=tags,
             )
-        except Exception:
+        except Exception as exc:
             LOGGER.warning(
-                "ResidentialCache: failed to fetch OSM features for bbox %.6f,%.6f,%.6f,%.6f",
+                "ResidentialCache: failed to fetch OSM features for bbox %.6f,%.6f,%.6f,%.6f (%s: %s); using fallback",
                 min_lng,
                 min_lat,
                 max_lng,
                 max_lat,
-                exc_info=True,
+                type(exc).__name__,
+                exc,
             )
+            LOGGER.debug("OSM fetch traceback:", exc_info=True)
             return self._empty_geodataframe()
 
         if features is None or len(features) == 0:

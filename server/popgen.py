@@ -748,6 +748,15 @@ def convert_data(df, cz_data, shared_data=None):
 
     return output
 
+def _apply_bench_seed():
+    seed = os.getenv('DELINEO_BENCH_SEED')
+    if seed is None or seed == '':
+        return
+    seed_int = int(seed)
+    random.seed(seed_int)
+    np.random.seed(seed_int)
+
+
 def gen_pop(cz_data, gdf=None, shared_data=None):
     """
     Generate synthetic population for a convenience zone.
@@ -760,6 +769,8 @@ def gen_pop(cz_data, gdf=None, shared_data=None):
     Returns:
         Dictionary with people, homes, and places data (papdata format)
     """
+    _apply_bench_seed()
+
     # Create data puller
     datapuller = CensusDataPuller()
 
