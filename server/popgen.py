@@ -677,6 +677,7 @@ def convert_data(df, cz_data, shared_data=None):
         'street_address',
         'postal_code',
         'polygon_wkt',
+        'wkt_area_sq_meters',
     ]
 
     if shared_data is not None and not shared_data.is_empty():
@@ -733,7 +734,26 @@ def convert_data(df, cz_data, shared_data=None):
         text = str(v).strip()
         return text or None
 
+    # Physical floor area (m^2) per POI, from SafeGraph WKT_AREA_SQ_METERS. Used
+    # downstream for area-aware Wells-Riley ventilation. Non-positive / missing
+    # values are filled with the per-category median, then the global median,
+    # then a constant (the dataset median POI is ~649 m^2). Winsorizing the long
+    # tail (e.g. a region polygon logged as one giant "POI") happens at the
+    # physics step in the simulator, not here.
+    if 'wkt_area_sq_meters' in places.columns:
+        _area_series = pd.to_numeric(places['wkt_area_sq_meters'], errors='coerce')
+        _area_series = _area_series.where(_area_series > 0)
+    else:
+        _area_series = pd.Series([float('nan')] * len(places), index=places.index)
+    _global_med_area = _area_series.median()
+    if pd.isna(_global_med_area):
+        _global_med_area = 650.0
+    _cat_med_area = _area_series.groupby(places['top_category']).median().dropna().to_dict()
+
     for i, row in places.iterrows():
+        _area = _area_series.loc[i]
+        if pd.isna(_area):
+            _area = _cat_med_area.get(row['top_category'], _global_med_area)
         output['places'][str(i)] = {
             'placekey': row['placekey'],
             'label': row['location_name'],
@@ -743,7 +763,8 @@ def convert_data(df, cz_data, shared_data=None):
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
             'street_address': _clean_optional_text(row.get('street_address')),
             'postal_code': row['postal_code'],
-            'footprint': _coerce_footprint(row.get('polygon_wkt'))
+            'footprint': _coerce_footprint(row.get('polygon_wkt')),
+            'area': float(_area),
         }
 
     return output
