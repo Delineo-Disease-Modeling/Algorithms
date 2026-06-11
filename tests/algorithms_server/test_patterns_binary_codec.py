@@ -29,18 +29,25 @@ def test_producer_binary_round_trips():
     assert dict(bp.items()) == PATTERNS
 
 
-def test_patterns_part_defaults_to_json(monkeypatch):
+def test_patterns_part_defaults_to_binary(monkeypatch):
     monkeypatch.delenv("DELINEO_PATTERNS_BINARY", raising=False)
-    name, _body, ctype = FullstackClient._patterns_part(PAPDATA, PATTERNS)
-    assert name == "patterns.json"
-    assert ctype == "text/plain"
-
-
-def test_patterns_part_emits_binary_when_flag_set(monkeypatch):
-    monkeypatch.setenv("DELINEO_PATTERNS_BINARY", "1")
     name, body, ctype = FullstackClient._patterns_part(PAPDATA, PATTERNS)
     assert name == "patterns.bin"
     assert ctype == "application/octet-stream"
     # The emitted bytes must decode back to the same patterns.
     bp = decode_patterns_binary(body.getvalue())
     assert dict(bp.items()) == PATTERNS
+
+
+def test_empty_env_value_still_defaults_to_binary(monkeypatch):
+    # docker-compose passes ${DELINEO_PATTERNS_BINARY:-} (empty) by default.
+    monkeypatch.setenv("DELINEO_PATTERNS_BINARY", "")
+    name, _body, ctype = FullstackClient._patterns_part(PAPDATA, PATTERNS)
+    assert name == "patterns.bin"
+
+
+def test_patterns_part_falls_back_to_json_when_disabled(monkeypatch):
+    monkeypatch.setenv("DELINEO_PATTERNS_BINARY", "0")
+    name, _body, ctype = FullstackClient._patterns_part(PAPDATA, PATTERNS)
+    assert name == "patterns.json"
+    assert ctype == "text/plain"

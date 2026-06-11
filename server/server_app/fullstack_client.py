@@ -6,7 +6,15 @@ import requests
 
 
 def _binary_patterns_enabled():
-    return os.getenv('DELINEO_PATTERNS_BINARY', '').lower() in {'1', 'true', 'yes', 'on'}
+    """Binary (DLNOPAT) patterns are the DEFAULT. Set DELINEO_PATTERNS_BINARY=0
+    (or false/no/off) as a kill-switch to fall back to legacy JSON.
+
+    Safe to leave on once the Simulation consumer (DLNOPAT decoder + zstandard) is
+    deployed — it auto-detects either format. See COLUMNAR_PATTERNS_DESIGN.md."""
+    val = os.getenv('DELINEO_PATTERNS_BINARY')
+    if val is None or val == '':
+        return True
+    return val.lower() in {'1', 'true', 'yes', 'on'}
 
 
 class FullstackClient:
@@ -28,9 +36,10 @@ class FullstackClient:
 
     @staticmethod
     def _patterns_part(papdata, patterns):
-        """The multipart 'patterns' part: the compact binary (DLNOPAT) format when
-        DELINEO_PATTERNS_BINARY is set, else legacy JSON. The Fullstack store sniffs
-        the magic bytes, so the filename/content-type here are only advisory."""
+        """The multipart 'patterns' part: the compact binary (DLNOPAT) format by
+        default, or legacy JSON when DELINEO_PATTERNS_BINARY is disabled. The
+        Fullstack store sniffs the magic bytes, so the filename/content-type here
+        are only advisory."""
         if _binary_patterns_enabled():
             # Lazy import so the JSON path needs neither numpy nor zstandard.
             from patterns_codec import build_arrays_from_legacy, encode_patterns_binary
