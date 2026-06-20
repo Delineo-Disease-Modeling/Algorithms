@@ -271,6 +271,16 @@ def _catchment_fraction(home_cbgs_val, cluster_cbgs: set) -> Optional[float]:
     return inside / total
 
 
+def _median_fj_fallback(fj_values) -> float:
+    """Flat per-run fallback f_j for POIs whose ``visitor_home_cbgs`` is missing
+    (``_catchment_fraction`` returned None): the median of the observed fractions,
+    or 1.0 if none were observed. Shared by ``gen_patterns`` (movement targets) and
+    ``popgen.convert_data`` (places-bundle emission) so the two derive the same f_j
+    from the same data."""
+    observed = [f for f in fj_values if f is not None]
+    return float(np.median(observed)) if observed else 1.0
+
+
 def _build_stats_from_df(df: pd.DataFrame,
                          placekey_to_place_id: Dict[str, str],
                          cluster_cbgs: Optional[set] = None) -> Dict[str, Dict[str, Any]]:
@@ -324,8 +334,7 @@ def _build_stats_from_df(df: pd.DataFrame,
         }
 
     # Fill missing f_j with the median observed fraction (flat per-run fallback).
-    observed = [s["catchment_fj"] for s in stats.values() if s["catchment_fj"] is not None]
-    fallback = float(np.median(observed)) if observed else 1.0
+    fallback = _median_fj_fallback(s["catchment_fj"] for s in stats.values())
     for s in stats.values():
         if s["catchment_fj"] is None:
             s["catchment_fj"] = fallback

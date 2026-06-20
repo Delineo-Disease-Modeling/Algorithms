@@ -19,6 +19,17 @@ except ImportError:
     RESIDENTIAL_AVAILABLE = False
     ResidentialCache = None
 
+# Catchment helpers shared with gen_patterns so the places-bundle f_j matches the
+# movement-target f_j (same definition + same per-run median fallback).
+from patterns import _catchment_fraction, _median_fj_fallback
+
+# Lower bound on the emitted per-POI catchment fraction f_j. The simulator's
+# external-FOI term scales as (1 - f_j)/f_j, which diverges as f_j -> 0, so a data
+# artifact (e.g. one in-cluster visitor out of thousands) would otherwise produce
+# absurd external pressure. 0.02 caps the ratio at 49x. See
+# docs/MOVEMENT_MODEL_REDESIGN.md §10.
+CATCHMENT_FJ_FLOOR = 0.02
+
 
 class CensusDataPuller:
     def __init__(self, api_key: str = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"):
@@ -678,6 +689,7 @@ def convert_data(df, cz_data, shared_data=None):
         'postal_code',
         'polygon_wkt',
         'wkt_area_sq_meters',
+        'visitor_home_cbgs',
     ]
 
     if shared_data is not None and not shared_data.is_empty():
@@ -750,10 +762,23 @@ def convert_data(df, cz_data, shared_data=None):
         _global_med_area = 650.0
     _cat_med_area = _area_series.groupby(places['top_category']).median().dropna().to_dict()
 
+    # Catchment fraction f_j per POI: the share of the POI's observed visitors who
+    # live inside our simulated cluster. Same definition + median fallback as
+    # gen_patterns, so the movement targets and the external-FOI term agree; the
+    # ~23% of low-traffic POIs without visitor_home_cbgs get the per-run median.
+    # Floored (CATCHMENT_FJ_FLOOR) because the simulator's external term scales as
+    # (1 - f_j)/f_j. (Behavior-inert until the simulator reads catchment_fj.)
+    _fj_fallback = _median_fj_fallback(
+        _catchment_fraction(v, cbg_set) for v in places.get('visitor_home_cbgs', pd.Series(dtype=object))
+    )
+
     for i, row in places.iterrows():
         _area = _area_series.loc[i]
         if pd.isna(_area):
             _area = _cat_med_area.get(row['top_category'], _global_med_area)
+        _fj = _catchment_fraction(row.get('visitor_home_cbgs'), cbg_set)
+        if _fj is None:
+            _fj = _fj_fallback
         output['places'][str(i)] = {
             'placekey': row['placekey'],
             'label': row['location_name'],
@@ -765,6 +790,7 @@ def convert_data(df, cz_data, shared_data=None):
             'postal_code': row['postal_code'],
             'footprint': _coerce_footprint(row.get('polygon_wkt')),
             'area': float(_area),
+            'catchment_fj': max(CATCHMENT_FJ_FLOOR, float(_fj)),
         }
 
     return output
