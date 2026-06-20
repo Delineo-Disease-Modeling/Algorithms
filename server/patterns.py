@@ -21,11 +21,32 @@ def _perf_timings_enabled() -> bool:
     return os.getenv("DELINEO_PERF_TIMINGS", "").lower() in {"1", "true", "yes", "on"}
 
 
-def _legacy_movement_enabled() -> bool:
-    """Stage 1 (docs/MOVEMENT_MODEL_REDESIGN.md) makes destination selection use
-    ABSOLUTE visit volume + an open-hours gate by default. Set
-    DELINEO_LEGACY_MOVEMENT=1 to fall back to the old self-normalized weighting."""
-    return os.getenv("DELINEO_LEGACY_MOVEMENT", "").lower() in {"1", "true", "yes", "on"}
+_PANEL_DEFAULT = 19.7   # SafeGraph panel->population factor (OK ~19.7); overridden from data
+_MONTH_DAYS = 30.0      # popularity_by_hour is a monthly device-hours total
+
+
+def _movement_scale(stats_df) -> float:
+    """Absolute occupancy scale: popularity_by_hour (monthly sample device-hours)
+    -> typical-day population occupancy = popularity * panel / days. The panel
+    factor is read from the data (normalized_visits_by_state_scaling / raw_visit
+    _counts, ~constant per state); DELINEO_MOVEMENT_SCALE overrides the whole
+    factor for calibration."""
+    override = os.getenv("DELINEO_MOVEMENT_SCALE", "")
+    if override.strip():
+        try:
+            return float(override)
+        except ValueError:
+            pass
+    panel = _PANEL_DEFAULT
+    try:
+        nsc = pd.to_numeric(stats_df.get("normalized_visits_by_state_scaling"), errors="coerce")
+        rvc = pd.to_numeric(stats_df.get("raw_visit_counts"), errors="coerce")
+        ratio = (nsc / rvc).replace([np.inf, -np.inf], np.nan).dropna()
+        if len(ratio):
+            panel = float(ratio.median())
+    except Exception:
+        pass
+    return panel / _MONTH_DAYS
 
 
 def _parse_hour_list(val) -> List[int]:
@@ -201,13 +222,57 @@ def _ceil_hours_from_minutes(m: Optional[float]) -> int:
     return max(1, int(math.ceil(m / 60.0)))
 
 
+def _parse_cbg_counts(val) -> Dict[str, float]:
+    """Parse a SafeGraph {cbg: visitor_count} field (visitor_home_cbgs) into a
+    dict keyed by zero-padded 12-digit CBG. Empty dict if missing/unparseable."""
+    if isinstance(val, dict):
+        d = val
+    elif val is None or (isinstance(val, float) and pd.isna(val)):
+        return {}
+    else:
+        try:
+            d = json.loads(val)
+            if isinstance(d, str):
+                d = json.loads(d)
+        except Exception:
+            return {}
+    if not isinstance(d, dict):
+        return {}
+    out: Dict[str, float] = {}
+    for k, v in d.items():
+        try:
+            out[str(k).strip().zfill(12)] = float(v)
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
+def _catchment_fraction(home_cbgs_val, cluster_cbgs: set) -> Optional[float]:
+    """f_j: the fraction of a POI's observed visitors whose home CBG is inside the
+    simulated population. Returns None when visitor_home_cbgs is missing/empty so
+    the caller can substitute the per-run fallback."""
+    counts = _parse_cbg_counts(home_cbgs_val)
+    total = sum(counts.values())
+    if total <= 0:
+        return None
+    inside = sum(v for cbg, v in counts.items() if cbg in cluster_cbgs)
+    return inside / total
+
+
 def _build_stats_from_df(df: pd.DataFrame,
-                         placekey_to_place_id: Dict[str, str]) -> Dict[str, Dict[str, Any]]:
+                         placekey_to_place_id: Dict[str, str],
+                         cluster_cbgs: Optional[set] = None) -> Dict[str, Dict[str, Any]]:
     """
     Build per-place stats from a DataFrame that already has the needed columns
     (placekey, median_dwell, popularity_by_hour, popularity_by_day).
     Column names must already be lowercase.
+
+    When ``cluster_cbgs`` is given, also compute each POI's catchment fraction
+    ``catchment_fj`` (Stage 2) — observed from visitor_home_cbgs where present,
+    else the median observed fraction across the zone (a per-run flat fallback;
+    the no-data POIs are low-traffic and carry ~0 weight regardless).
     """
+    cluster_cbgs = cluster_cbgs or set()
     stats: Dict[str, Dict[str, Any]] = {}
     needed = set(placekey_to_place_id.keys())
 
@@ -225,97 +290,34 @@ def _build_stats_from_df(df: pd.DataFrame,
         hour_list = _parse_hour_list(row.get("popularity_by_hour", "[]"))
         day_map = _parse_day_map(row.get("popularity_by_day", "{}"))
 
-        hour_weights = _normalize([float(x) for x in hour_list])
         day_counts = [float(day_map.get(k, 0)) for k in WEEKDAYS]
-        day_weights_list = _normalize(day_counts)
-        day_weights = {k: day_weights_list[i] for i, k in enumerate(WEEKDAYS)}
+        # Mean-normalized weekday shape (~1.0 on an average day) for the absolute
+        # occupancy target; keeps magnitude while reflecting weekday variation.
+        mean_day = (sum(day_counts) / 7.0) if day_counts else 0.0
+        if mean_day > 0:
+            day_factor = {k: day_counts[i] / mean_day for i, k in enumerate(WEEKDAYS)}
+        else:
+            day_factor = {k: 1.0 for k in WEEKDAYS}
 
         stats[place_id] = {
             "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
-            "hour_weights": hour_weights,
-            "day_weights": day_weights,
+            "day_factor": day_factor,
             "raw_hour_counts": hour_list,
-            "raw_day_counts": day_map,
-            # Stage 1: open-hours gate for absolute destination weighting.
+            # open-hours gate (hard for real hours, soft NAICS-default otherwise).
             "open_gate": _build_open_gate(
                 row.get("open_hours", None), row.get("naics_code", None)),
+            # catchment fraction f_j (None -> filled with the fallback below).
+            "catchment_fj": _catchment_fraction(
+                row.get("visitor_home_cbgs", None), cluster_cbgs),
         }
-    return stats
 
-
-def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int,
-                         use_absolute: bool = True) -> Tuple[List[str], List[float]]:
-    """
-    Build a global "intensity" distribution across places for a given weekday+hour.
-    Returns (place_ids, weights) where weights are unnormalized intensities.
-
-    Stage 1 (default, docs/MOVEMENT_MODEL_REDESIGN.md): the per-POI weight is the
-    ABSOLUTE hour-of-day occupancy ``raw_hour_counts[hour]`` (popularity_by_hour,
-    i.e. person-hours present), shaped by the normalized weekday distribution and
-    gated by open hours. Because absolute volume is preserved, a 2-visit/month POI
-    can no longer out-attract a high-traffic one during a quiet hour.
-
-    Legacy (``use_absolute=False``, ``DELINEO_LEGACY_MOVEMENT=1``): the old
-    self-normalized ``hour_weights[hour] * day_weights[weekday]`` product, which
-    discards magnitude and is the root of the over-occupancy pathology.
-    """
-    ids: List[str] = []
-    wts: List[float] = []
-    valid_hour = 0 <= hour < 24
-    for pid, s in stats.items():
-        dw = s["day_weights"].get(weekday, 0.0)
-        if dw <= 0.0:
-            continue
-        if use_absolute:
-            rc = s.get("raw_hour_counts")
-            hour_v = float(rc[hour]) if (rc is not None and valid_hour) else 0.0
-            if hour_v <= 0.0:
-                continue
-            gate_row = s.get("open_gate")
-            gate = gate_row[weekday][hour] if (gate_row and valid_hour) else 1.0
-            weight = hour_v * dw * gate
-        else:
-            hw = s["hour_weights"]
-            hour_w = hw[hour] if valid_hour else 0.0
-            weight = hour_w * dw
-        if weight > 0:
-            ids.append(pid)
-            wts.append(weight)
-    return ids, wts
-
-
-def _compute_peak_busyness(stats: Dict[str, Dict[str, Any]]) -> float:
-    """
-    Pre-compute the maximum aggregate raw activity across all 7×24 timeslots.
-    For each (weekday, hour) pair, sum raw_hour_counts[hour] * raw_day_counts[weekday]
-    across all facilities. Return the maximum such sum.
-
-    This gives us a baseline to normalize against: the busiest hour of the busiest day.
-    """
-    peak = 0.0
-    for weekday in WEEKDAYS:
-        for hour in range(24):
-            total = 0.0
-            for s in stats.values():
-                raw_h = s["raw_hour_counts"][hour]
-                raw_d = s["raw_day_counts"].get(weekday, 0)
-                total += raw_h * raw_d
-            if total > peak:
-                peak = total
-    return peak
-
-
-def _aggregate_busyness(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int) -> float:
-    """
-    Compute aggregate raw activity for a specific (weekday, hour) timeslot.
-    Sum raw_hour_counts[hour] * raw_day_counts[weekday] across all facilities.
-    """
-    total = 0.0
+    # Fill missing f_j with the median observed fraction (flat per-run fallback).
+    observed = [s["catchment_fj"] for s in stats.values() if s["catchment_fj"] is not None]
+    fallback = float(np.median(observed)) if observed else 1.0
     for s in stats.values():
-        raw_h = s["raw_hour_counts"][hour]
-        raw_d = s["raw_day_counts"].get(weekday, 0)
-        total += raw_h * raw_d
-    return total
+        if s["catchment_fj"] is None:
+            s["catchment_fj"] = fallback
+    return stats
 
 
 def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168,
@@ -356,24 +358,52 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             if pk:
                 placekey_to_place_id[pk] = pid
 
-        # Derive stats from the shared PatternsData. If none/empty, stats is empty.
-        if shared_data is not None and not shared_data.is_empty():
-            placekey_set = set(placekey_to_place_id.keys())
-            stats_df = shared_data.for_patterns_stats(placekey_set)
-            stats = _build_stats_from_df(stats_df, placekey_to_place_id)
-        else:
-            stats = {}
+        # Home CBGs of the simulated population, for Stage 2 catchment scaling.
+        cluster_cbgs = set()
+        for home in papdata.get("homes", {}).values():
+            cbg = (home.get("cbg") if isinstance(home, dict)
+                   else (home[0] if isinstance(home, (list, tuple)) and home else home))
+            if cbg is not None:
+                cluster_cbgs.add(str(cbg).strip().zfill(12))
 
-        # Pre-compute peak busyness across the entire week so we can derive a
-        # meaningful 0-1 movement probability from raw visitor counts.
-        peak_busyness = _compute_peak_busyness(stats)
+        # Movement REQUIRES SafeGraph patterns data. Fail loudly rather than
+        # silently produce a degenerate everyone-stays-home run.
+        if shared_data is None or shared_data.is_empty():
+            raise ValueError(
+                "gen_patterns requires non-empty patterns data (shared_data); "
+                "refusing to generate a movement-free run.")
+        placekey_set = set(placekey_to_place_id.keys())
+        stats_df = shared_data.for_patterns_stats(placekey_set)
+        stats = _build_stats_from_df(stats_df, placekey_to_place_id, cluster_cbgs)
+
+        # Demand-pull precompute: a stable global place ordering plus the per-POI
+        # inputs to the occupancy target, as numpy matrices so each hour's fill is
+        # a vectorized op.
+        all_place_ids: List[str] = list(stats.keys())
+        n_places_total = len(all_place_ids)
+        place_pos = {pid: i for i, pid in enumerate(all_place_ids)}
+        if n_places_total == 0:
+            raise ValueError(
+                "gen_patterns: no POIs with usable stats for this zone's placekeys; "
+                "cannot generate movement.")
+        movement_scale = _movement_scale(stats_df)
+        if not os.getenv("DELINEO_MOVEMENT_SCALE", "").strip():
+            _PATTERNS_LOGGER.warning(
+                "movement_scale=%.4f is the data-derived default (panel/days) and is "
+                "UNCALIBRATED; set DELINEO_MOVEMENT_SCALE from validation.", movement_scale)
+        pop_hour_mat = np.array([stats[p]["raw_hour_counts"] for p in all_place_ids], dtype=float)        # (P,24)
+        day_factor_mat = np.array([[stats[p]["day_factor"][wd] for wd in WEEKDAYS] for p in all_place_ids], dtype=float)  # (P,7)
+        fj_arr = np.array([stats[p].get("catchment_fj", 1.0) for p in all_place_ids], dtype=float)        # (P,)
+        gate_mat = np.array([[[stats[p]["open_gate"][wd][h] for h in range(24)] for wd in WEEKDAYS]
+                             for p in all_place_ids], dtype=float)                                        # (P,7,24)
+        dwell_arr = np.array([stats[p]["median_dwell_hours"] for p in all_place_ids], dtype=np.int64)     # (P,)
 
         # People state held in parallel arrays so the mover-decision hot loop
         # can run as a batched numpy op instead of one rng.random + rng.choice
         # + rng.integers call per person. is_home_arr is the source of truth
         # for whether each person is at home or out; leave_time_arr holds the
-        # hour at which they'll return; dest_place_id_arr holds the destination
-        # place_id (only meaningful when at place).
+        # hour at which they'll return; dest_idx_arr holds the destination's
+        # global place index (only meaningful when out).
         people = list(papdata.get("people", {}).items())
         n_people = len(people)
         pid_str_list: List[str] = [None] * n_people  # str(int(sid))
@@ -383,12 +413,11 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             home_str_list[i] = str(info.get("home"))
         is_home_arr = np.ones(n_people, dtype=bool)
         leave_time_arr = np.full(n_people, -1, dtype=np.int64)
-        dest_place_id_arr: List[Any] = [None] * n_people
+        # Destination as a global place index (-1 = home), so current occupancy
+        # is a vectorized bincount and the snapshot maps index -> place_id.
+        dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
 
     output: Dict[str, Any] = {}
-
-    # Stage 1: absolute-volume + open-hours destination weighting (default on).
-    use_absolute = not _legacy_movement_enabled()
 
     rng = np.random.default_rng(seed=42)  # deterministic but easy to change/remove
 
@@ -403,67 +432,41 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             if expired_mask.any():
                 is_home_arr[expired_mask] = True
                 leave_time_arr[expired_mask] = -1
-                # dest_place_id_arr entries are not cleared on return; they
-                # are only read when is_home_arr[i] is False, so stale values
-                # are unreachable.
+                # dest_idx_arr entries are not cleared on return; they are only
+                # read when is_home_arr[i] is False, so stale values are unreachable.
 
-        # Build the destination distribution for this hour. Stage 1 weights by
-        # absolute occupancy + open hours; legacy uses the self-normalized shape.
-        with _timed("gen_patterns/intensity_distribution"):
-            place_ids, raw_weights = _overall_busy_factor(
-                stats, weekday, hour_of_day, use_absolute=use_absolute)
-            if raw_weights:
-                place_probs = np.array(raw_weights, dtype=float)
-                place_probs = place_probs / place_probs.sum()
-            else:
-                place_probs = np.array([])
+        # Demand-pull: fill each POI to its realistic occupancy target
+        # O_j = popularity_by_hour * day_factor * f_j * open_gate * scale by topping
+        # up from the home pool. Occupancy IS the target (not a move-rate flood
+        # re-normalized), so no POI over-fills and everyone not pulled stays home.
+        with _timed("gen_patterns/demand_pull"):
+            wd_idx = WEEKDAYS.index(weekday)
+            targets = (pop_hour_mat[:, hour_of_day] * day_factor_mat[:, wd_idx]
+                       * gate_mat[:, wd_idx, hour_of_day] * fj_arr * movement_scale)
+            target_int = np.floor(targets + 0.5).astype(np.int64)
 
-        # Compute movement probability from raw visitor counts.
-        # overall_busy is a 0-1 ratio: current aggregate activity / peak activity
-        # across the whole week. This properly captures "how busy is right now"
-        # using absolute magnitudes rather than the normalized distribution.
-        with _timed("gen_patterns/aggregate_busyness"):
-            if peak_busyness > 0:
-                overall_busy = _aggregate_busyness(stats, weekday, hour_of_day) / peak_busyness
-            else:
-                overall_busy = 0.0
+            out_mask = ~is_home_arr
+            current_occ = (np.bincount(dest_idx_arr[out_mask], minlength=n_places_total)
+                           if out_mask.any() else np.zeros(n_places_total, dtype=np.int64))
+            needed = np.maximum(0, target_int - current_occ)
+            total_needed = int(needed.sum())
 
-            base_move_prob = min(0.35, 0.85 * overall_busy)
-
-        # Vectorized mover decision: batch the rng draws across all people at
-        # home this hour, then apply assignments only to those who actually
-        # move. RNG draw ORDER differs from the original per-person loop, so
-        # outputs are NOT byte-identical to the pre-vectorization code; the
-        # statistical distribution is preserved (each person has the same
-        # base_move_prob; destinations are still drawn with place_probs;
-        # dwell still triangular around median-1..median+1).
-        with _timed("gen_patterns/mover_decision"):
             home_indices = np.where(is_home_arr)[0]
             n_home = int(home_indices.size)
-            n_places = len(place_ids)
-            if n_home > 0 and n_places > 0:
-                move_rolls = rng.random(n_home)
-                movers_mask = move_rolls < base_move_prob
-                n_movers = int(movers_mask.sum())
-                if n_movers > 0:
-                    mover_indices = home_indices[movers_mask]
-                    dest_choice_idx = rng.choice(n_places, size=n_movers, p=place_probs)
-                    dest_choice_list = dest_choice_idx.tolist()
-                    dest_place_ids_for_movers = [place_ids[c] for c in dest_choice_list]
-                    median_per_mover = np.fromiter(
-                        (stats[pid]["median_dwell_hours"] for pid in dest_place_ids_for_movers),
-                        dtype=np.int64,
-                        count=n_movers,
-                    )
-                    lo = np.maximum(1, median_per_mover - 1)
-                    hi_inclusive = median_per_mover + 1
-                    dwell_hours_arr = rng.integers(lo, hi_inclusive + 1)
-                    new_leave_time = np.minimum(duration, hour_idx + dwell_hours_arr)
-
-                    is_home_arr[mover_indices] = False
-                    leave_time_arr[mover_indices] = new_leave_time
-                    for arr_idx, place_id in zip(mover_indices.tolist(), dest_place_ids_for_movers):
-                        dest_place_id_arr[arr_idx] = place_id
+            if total_needed > 0 and n_home > 0:
+                if total_needed > n_home:
+                    # More demand than residents available: fill proportionally.
+                    needed = np.floor(needed * (n_home / total_needed)).astype(np.int64)
+                    total_needed = int(needed.sum())
+                if total_needed > 0:
+                    dest_assign = np.repeat(np.arange(n_places_total), needed)
+                    movers = rng.choice(home_indices, size=total_needed, replace=False)
+                    med = dwell_arr[dest_assign]
+                    lo = np.maximum(1, med - 1)
+                    dwell_hours_arr = rng.integers(lo, med + 2)
+                    is_home_arr[movers] = False
+                    dest_idx_arr[movers] = dest_assign
+                    leave_time_arr[movers] = np.minimum(duration, hour_idx + dwell_hours_arr)
 
         # Snapshot at the end of this hour
         with _timed("gen_patterns/snapshot_assembly"):
@@ -472,6 +475,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             # tolist() up front turns 50k numpy bool indexing into 50k local
             # truthiness checks, which is measurably faster in CPython.
             is_home_list = is_home_arr.tolist()
+            dest_idx_list = dest_idx_arr.tolist()
             for i in range(n_people):
                 pid_str = pid_str_list[i]
                 if is_home_list[i]:
@@ -482,7 +486,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     else:
                         bucket.append(pid_str)
                 else:
-                    place_id = str(dest_place_id_arr[i])
+                    place_id = all_place_ids[dest_idx_list[i]]
                     bucket = places_map.get(place_id)
                     if bucket is None:
                         places_map[place_id] = [pid_str]

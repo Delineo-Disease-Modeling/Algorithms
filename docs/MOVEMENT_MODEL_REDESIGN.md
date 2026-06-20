@@ -274,6 +274,8 @@ The theory (Colizza–Vespignani's invasion threshold; Rapaport–Mimouni showin
 2. **Where `P_ext(t)` comes from** and how sensitive results are to it vs. our internal transmission parameter (which already overshoots ~4× in external validation — so movement realism may let us isolate and fix the transmission level).
 3. **No published hard threshold** exists for "what % external invalidates a closed model." Chang tolerates 3–10%; our 85% is far beyond — strong qualitative, not quantitative, grounds.
 4. **Calibration interaction** between the occupancy cap's density floor and the already‑shipped area‑aware ventilation.
+5. **`movement_scale` is the single mixing knob.** The demand‑pull architecture (§9) makes the total out‑of‑home level a linear function of one factor (`movement_scale`, default `panel/30 ≈ 0.66`). The data‑raw default puts ~80% of people out at peak — too high — so this must be calibrated against real case counts (it is the parameter behind the ~4× validation overshoot). Per‑POI occupancy is plausible at *every* scale; only the level needs tuning.
+6. **School under‑representation (FOLLOW‑UP — after the redesign).** Verified in the data: workplaces *are* in the POI set (~30% of total occupancy weight — offices, medical, retail, mfg). Schools *are* too (44 POIs) with realistic long dwell, but carry only **~1% of the weight** because SafeGraph barely sees students (children don't carry tracked phones). So the model under‑fills schools and **under‑represents school‑age daytime mixing**. Worth a dedicated pass once the movement redesign lands — e.g. boosting school POI occupancy toward enrollment rather than observed visits. (Also flagged: the airport appears as ~4 co‑located duplicate records, inflating its share — a POI‑dedup hygiene item.)
 
 ---
 
@@ -290,3 +292,16 @@ The theory (Colizza–Vespignani's invasion threshold; Rapaport–Mimouni showin
 - Sattenspiel & Dietz 1995, *Math. Biosciences* — closed↔coupled continuum. https://pubmed.ncbi.nlm.nih.gov/7606146/
 
 *Related internal docs: `MOVEMENT_MODEL_REVIEW.md` (the original scientific review), `EXTERNAL_VALIDATION_PLAN.md`.*
+
+---
+
+## 9. What we actually built (updates since §6)
+
+The implementation simplified §6's IPF‑first plan into a staged, flag‑guarded build. Each stage is verified on the real Barnsdall (czone‑108) data; the legacy model is preserved byte‑for‑byte behind `DELINEO_LEGACY_MOVEMENT=1`.
+
+- **Stage 0** — surface the redesign columns + per‑field coverage report (plumbing only). *(committed)*
+- **Stage 1** — destinations weighted by **absolute occupancy** (`popularity_by_hour`) + **open‑hours gate**, replacing the self‑normalized shape. Fooshee 1,210 → 0. *(committed)*
+- **Stage 2** — **catchment scaling** `f_j` from `visitor_home_cbgs` (observed where present, flat median fallback for the ~23% low‑traffic POIs without it; gravity fallback was measured unnecessary — those POIs carry 0.06% of weight).
+- **Stage 3 — demand‑pull (the key correction).** Catchment as a *weight multiplier* in the old supply‑push loop was measured to **redistribute** over‑occupancy, not remove it (the airport's lost share ballooned onto local POIs; a hotel hit 1.03 ppl/m²). Root cause: a global move‑rate pushed a fixed flood of people out, re‑normalized — so reducing one POI inflated others, and dwell double‑counted on long‑stay POIs. The fix is **demand‑pull**: each POI is filled to its absolute occupancy target `popularity_by_hour × day_factor × f_j × open_gate × movement_scale`, topped up from the home pool, with everyone not pulled staying home. Result on real data: **0 density violations at every scale**, airport 8,309 → 1,236, Fooshee 0.
+
+**The occupancy cap (§6 Layer A) is therefore demoted to an optional backstop**, not a primary fix — demand‑pull bounds occupancy at the source, and the cap never binds (measured). The remaining open item is **`movement_scale` calibration** (§7.5) and the **external‑FOI term** (§6 Layer C), still to come.
