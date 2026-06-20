@@ -30,10 +30,18 @@ def _stats_with_late_night_activity():
 def test_busy_helpers_include_late_night_hours():
     stats = _stats_with_late_night_activity()
 
+    # Stage 1 default: ABSOLUTE weight = raw_hour_counts[23] * day_weight * gate
+    # (no open_gate on this hand-built stats -> gate defaults to 1.0).
     place_ids, weights = _overall_busy_factor(stats, "Monday", 23)
-
     assert place_ids == ["place-1"]
-    assert weights == [1.0]
+    assert weights == [50.0]
+
+    # Legacy path: self-normalized hour_weights[23] * day_weights["Monday"].
+    legacy_ids, legacy_weights = _overall_busy_factor(
+        stats, "Monday", 23, use_absolute=False)
+    assert legacy_ids == ["place-1"]
+    assert legacy_weights == [1.0]
+
     assert _aggregate_busyness(stats, "Monday", 23) == 50
     assert _compute_peak_busyness(stats) == 50
 

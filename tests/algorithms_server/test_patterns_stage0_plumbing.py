@@ -39,8 +39,11 @@ REDESIGN_FIELDS = {
 }
 
 # gen_patterns output hash on the fixture below, captured from origin/main
-# (pre-redesign). Stage 0 is plumbing-only and MUST keep this identical.
-GOLDEN_HASH = "fe83aa1a904fad76b1d785f52eb7bb1dca6de0a844c0264d4874a62d32b4a2fe"
+# (pre-redesign). Stage 0 plumbing keeps this identical; Stage 1 changes the
+# DEFAULT path, so this golden now pins the LEGACY (DELINEO_LEGACY_MOVEMENT=1)
+# fallback for rollback safety. The Stage 1 default golden lives in
+# test_patterns_stage1_absolute_weighting.py.
+PRE_REDESIGN_GOLDEN = "fe83aa1a904fad76b1d785f52eb7bb1dca6de0a844c0264d4874a62d32b4a2fe"
 
 
 def _build_shared():
@@ -96,11 +99,14 @@ def test_field_coverage_reports_expected_fields():
     assert PatternsData(pd.DataFrame()).field_coverage() == {c: 0.0 for c in COVERAGE_FIELDS}
 
 
-def test_gen_patterns_output_unchanged_golden():
+def test_legacy_flag_reproduces_pre_redesign_golden(monkeypatch):
+    """With DELINEO_LEGACY_MOVEMENT=1, movement must be byte-identical to the
+    pre-redesign model — the rollback guarantee for the staged rollout."""
+    monkeypatch.setenv("DELINEO_LEGACY_MOVEMENT", "1")
     out = gen_patterns(_build_papdata(), datetime(2021, 1, 4, 0), duration=48,
                        shared_data=_build_shared())
     digest = hashlib.sha256(json.dumps(out, sort_keys=True).encode()).hexdigest()
-    assert digest == GOLDEN_HASH, (
-        "gen_patterns output changed — Stage 0 must be behavior-neutral. If a "
-        "later stage intentionally changed movement, regenerate GOLDEN_HASH."
+    assert digest == PRE_REDESIGN_GOLDEN, (
+        "legacy movement diverged from the pre-redesign golden — the "
+        "DELINEO_LEGACY_MOVEMENT kill switch must preserve old behavior exactly."
     )

@@ -21,6 +21,13 @@ def _perf_timings_enabled() -> bool:
     return os.getenv("DELINEO_PERF_TIMINGS", "").lower() in {"1", "true", "yes", "on"}
 
 
+def _legacy_movement_enabled() -> bool:
+    """Stage 1 (docs/MOVEMENT_MODEL_REDESIGN.md) makes destination selection use
+    ABSOLUTE visit volume + an open-hours gate by default. Set
+    DELINEO_LEGACY_MOVEMENT=1 to fall back to the old self-normalized weighting."""
+    return os.getenv("DELINEO_LEGACY_MOVEMENT", "").lower() in {"1", "true", "yes", "on"}
+
+
 def _parse_hour_list(val) -> List[int]:
     """
     popularity_by_hour is either already a list or a string like "[0,1,...,24 items]".
@@ -64,6 +71,110 @@ def _parse_day_map(val) -> Dict[str, int]:
     for k in WEEKDAYS:
         out.setdefault(k, 0)
     return out
+
+
+_DAY_ABBR = {"Mon": "Monday", "Tue": "Tuesday", "Wed": "Wednesday",
+             "Thu": "Thursday", "Fri": "Friday", "Sat": "Saturday", "Sun": "Sunday"}
+
+# Fallback open windows by 2-digit NAICS sector (open_hour inclusive,
+# close_hour exclusive, local time), used only when a POI has no open_hours of
+# its own. Deliberately broad; these are guesses, so they gate SOFTLY (_OPEN_EPS)
+# rather than hard-zeroing.
+_NAICS_DEFAULT_HOURS = {
+    "44": (8, 21), "45": (8, 21),                  # retail
+    "72": (6, 23),                                 # accommodation & food service
+    "71": (9, 22),                                 # arts, entertainment, recreation
+    "61": (7, 18),                                 # educational services
+    "62": (7, 18),                                 # health care
+    "81": (8, 18),                                 # other services
+    "92": (8, 17),                                 # public administration
+    "51": (8, 18), "52": (8, 18), "53": (8, 18),
+    "54": (8, 18), "55": (8, 18), "56": (8, 18),   # info/finance/realestate/prof/admin
+    "23": (7, 17),                                 # construction
+    "31": (6, 18), "32": (6, 18), "33": (6, 18),   # manufacturing
+}
+_OPEN_EPS = 1e-3   # weight multiplier for hours gated CLOSED by a NAICS default
+
+
+def _parse_clock(s) -> Optional[float]:
+    """'8:00' -> 8.0, '17:30' -> 17.5, '24:00' -> 24.0. None if unparseable."""
+    try:
+        s = str(s).strip()
+        if not s:
+            return None
+        hh, _, mm = s.partition(":")
+        return int(hh) + (int(mm) / 60.0 if mm else 0.0)
+    except Exception:
+        return None
+
+
+def _open_hours_to_sets(val) -> Optional[Dict[str, set]]:
+    """Parse SafeGraph open_hours into {weekday_full: set(open hour-of-day ints)}.
+    Returns None when the field is missing or unparseable (caller then falls back
+    to a NAICS default or to no gating)."""
+    if isinstance(val, dict):
+        d = val
+    elif val is None or (isinstance(val, float) and pd.isna(val)):
+        return None
+    else:
+        try:
+            d = json.loads(val)
+            if isinstance(d, str):
+                d = json.loads(d)
+        except Exception:
+            return None
+    if not isinstance(d, dict) or not d:
+        return None
+    out: Dict[str, set] = {}
+    for abbr, intervals in d.items():
+        wd = _DAY_ABBR.get(str(abbr)[:3].title())
+        if wd is None or not isinstance(intervals, list):
+            continue
+        hours: set = set()
+        for iv in intervals:
+            if not (isinstance(iv, (list, tuple)) and len(iv) == 2):
+                continue
+            o = _parse_clock(iv[0])
+            c = _parse_clock(iv[1])
+            if o is None or c is None:
+                continue
+            if c == o:                       # e.g. 0:00-0:00 == open all day
+                hours.update(range(24))
+                continue
+            spans = [(o, c)] if c > o else [(o, 24.0), (0.0, c)]   # wrap past midnight
+            for a, b in spans:
+                for h in range(24):
+                    if a < h + 1 and b > h:  # interval overlaps the clock-hour [h, h+1)
+                        hours.add(h)
+        if hours:
+            out[wd] = hours
+    return out or None
+
+
+def _build_open_gate(open_hours_val, naics_code) -> Dict[str, List[float]]:
+    """Per-(weekday, hour) weight multiplier for the destination kernel.
+
+    - POI has real open_hours  -> HARD gate (closed hours = 0.0); the data is
+      authoritative, so a 3am dentist "visit" becomes impossible.
+    - else, NAICS-default window -> SOFT gate (closed hours = _OPEN_EPS); the
+      window is a guess, so we damp rather than forbid.
+    - else (no hours, unknown sector) -> no gating (all 1.0).
+    """
+    parsed = _open_hours_to_sets(open_hours_val)
+    if parsed is not None:
+        return {wd: [1.0 if h in parsed.get(wd, set()) else 0.0 for h in range(24)]
+                for wd in WEEKDAYS}
+    sector = None
+    if naics_code is not None:
+        ns = str(naics_code).strip()
+        if ns and ns.lower() != "nan":
+            sector = ns[:2]
+    window = _NAICS_DEFAULT_HOURS.get(sector) if sector else None
+    if window is None:
+        return {wd: [1.0] * 24 for wd in WEEKDAYS}
+    lo, hi = window
+    row = [1.0 if lo <= h < hi else _OPEN_EPS for h in range(24)]
+    return {wd: list(row) for wd in WEEKDAYS}
 
 
 def _safe_int(x, default=0) -> int:
@@ -125,22 +236,48 @@ def _build_stats_from_df(df: pd.DataFrame,
             "day_weights": day_weights,
             "raw_hour_counts": hour_list,
             "raw_day_counts": day_map,
+            # Stage 1: open-hours gate for absolute destination weighting.
+            "open_gate": _build_open_gate(
+                row.get("open_hours", None), row.get("naics_code", None)),
         }
     return stats
 
 
-def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int) -> Tuple[List[str], List[float]]:
+def _overall_busy_factor(stats: Dict[str, Dict[str, Any]], weekday: str, hour: int,
+                         use_absolute: bool = True) -> Tuple[List[str], List[float]]:
     """
     Build a global "intensity" distribution across places for a given weekday+hour.
     Returns (place_ids, weights) where weights are unnormalized intensities.
+
+    Stage 1 (default, docs/MOVEMENT_MODEL_REDESIGN.md): the per-POI weight is the
+    ABSOLUTE hour-of-day occupancy ``raw_hour_counts[hour]`` (popularity_by_hour,
+    i.e. person-hours present), shaped by the normalized weekday distribution and
+    gated by open hours. Because absolute volume is preserved, a 2-visit/month POI
+    can no longer out-attract a high-traffic one during a quiet hour.
+
+    Legacy (``use_absolute=False``, ``DELINEO_LEGACY_MOVEMENT=1``): the old
+    self-normalized ``hour_weights[hour] * day_weights[weekday]`` product, which
+    discards magnitude and is the root of the over-occupancy pathology.
     """
     ids: List[str] = []
     wts: List[float] = []
+    valid_hour = 0 <= hour < 24
     for pid, s in stats.items():
-        hw = s["hour_weights"]
         dw = s["day_weights"].get(weekday, 0.0)
-        hour_w = hw[hour] if 0 <= hour < 24 else 0.0
-        weight = hour_w * dw
+        if dw <= 0.0:
+            continue
+        if use_absolute:
+            rc = s.get("raw_hour_counts")
+            hour_v = float(rc[hour]) if (rc is not None and valid_hour) else 0.0
+            if hour_v <= 0.0:
+                continue
+            gate_row = s.get("open_gate")
+            gate = gate_row[weekday][hour] if (gate_row and valid_hour) else 1.0
+            weight = hour_v * dw * gate
+        else:
+            hw = s["hour_weights"]
+            hour_w = hw[hour] if valid_hour else 0.0
+            weight = hour_w * dw
         if weight > 0:
             ids.append(pid)
             wts.append(weight)
@@ -250,6 +387,9 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
 
     output: Dict[str, Any] = {}
 
+    # Stage 1: absolute-volume + open-hours destination weighting (default on).
+    use_absolute = not _legacy_movement_enabled()
+
     rng = np.random.default_rng(seed=42)  # deterministic but easy to change/remove
 
     for hour_idx in range(duration):
@@ -267,9 +407,11 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 # are only read when is_home_arr[i] is False, so stale values
                 # are unreachable.
 
-        # Build intensity distribution for this hour (normalized — for destination selection)
+        # Build the destination distribution for this hour. Stage 1 weights by
+        # absolute occupancy + open hours; legacy uses the self-normalized shape.
         with _timed("gen_patterns/intensity_distribution"):
-            place_ids, raw_weights = _overall_busy_factor(stats, weekday, hour_of_day)
+            place_ids, raw_weights = _overall_busy_factor(
+                stats, weekday, hour_of_day, use_absolute=use_absolute)
             if raw_weights:
                 place_probs = np.array(raw_weights, dtype=float)
                 place_probs = place_probs / place_probs.sum()
