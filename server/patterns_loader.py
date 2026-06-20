@@ -14,7 +14,7 @@ to lowercase so downstream code works unchanged.
 import os
 import logging
 import pandas as pd
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -26,12 +26,37 @@ _PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
 # CZ clustering:  poi_cbg, visitor_daytime_cbgs, postal_code
 # Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, street_address, postal_code, polygon_wkt, wkt_area_sq_meters
 # Patterns gen:   placekey, median_dwell, popularity_by_hour, popularity_by_day
+# Movement redesign (docs/MOVEMENT_MODEL_REDESIGN.md): absolute visit volume,
+#   observed home-CBG catchment, open hours, category. Stage 0 only LOADS these
+#   so they are reachable downstream; gen_patterns does not consume them yet.
 ALL_NEEDED_COLUMNS = [
     'poi_cbg', 'visitor_daytime_cbgs', 'postal_code',
     'placekey', 'location_name', 'top_category', 'latitude', 'longitude',
     'street_address',
     'polygon_wkt', 'wkt_area_sq_meters',
     'median_dwell', 'popularity_by_hour', 'popularity_by_day',
+    # movement redesign — surfaced in Stage 0, used in later stages:
+    'raw_visit_counts', 'raw_visitor_counts', 'normalized_visits_by_state_scaling',
+    'visitor_home_cbgs', 'open_hours', 'naics_code',
+    'visits_by_day', 'bucketed_dwell_times',
+]
+
+# Columns handed to gen_patterns via for_patterns_stats(). The first four are
+# the only ones gen_patterns consumes today; the rest are carried through for
+# the staged movement redesign (Stage 0 = plumbing only, no behavior change).
+PATTERNS_STATS_COLUMNS = [
+    'placekey', 'median_dwell', 'popularity_by_hour', 'popularity_by_day',
+    'raw_visit_counts', 'raw_visitor_counts', 'normalized_visits_by_state_scaling',
+    'visitor_home_cbgs', 'open_hours', 'naics_code', 'poi_cbg',
+    'latitude', 'longitude', 'bucketed_dwell_times', 'visits_by_day',
+]
+
+# Fields whose presence the staged redesign depends on. Logged once per load so
+# every run records how much of movement will be observed vs synthesized.
+COVERAGE_FIELDS = [
+    'popularity_by_hour', 'popularity_by_day', 'median_dwell',
+    'raw_visit_counts', 'normalized_visits_by_state_scaling',
+    'visitor_home_cbgs', 'open_hours', 'wkt_area_sq_meters', 'naics_code',
 ]
 
 # FIPS code -> state abbreviation (50 states + DC + territories)
@@ -224,7 +249,14 @@ class PatternsData:
             df = pd.DataFrame(columns=[c.lower() for c in ALL_NEEDED_COLUMNS])
 
         logger.info(f"Loaded {len(df)} pattern rows total")
-        return cls(df)
+        instance = cls(df)
+        if not instance.is_empty():
+            cov = instance.field_coverage()
+            logger.info(
+                "Patterns field coverage (% of POIs with data): "
+                + ", ".join(f"{k}={v}%" for k, v in cov.items())
+            )
+        return instance
 
     @property
     def df(self) -> pd.DataFrame:
@@ -262,11 +294,36 @@ class PatternsData:
                 .drop_duplicates(subset=['placekey'])
                 .reset_index(drop=True))
 
+    def field_coverage(self) -> Dict[str, float]:
+        """Percentage of rows with a non-empty value for each redesign-relevant
+        field (COVERAGE_FIELDS). The Stage 0 verification artifact: it records
+        how much of movement can be observed-from-data vs synthesized, without
+        changing any behavior."""
+        if self.is_empty():
+            return {c: 0.0 for c in COVERAGE_FIELDS}
+        out: Dict[str, float] = {}
+        for col in COVERAGE_FIELDS:
+            if col not in self._df.columns:
+                out[col] = 0.0
+                continue
+            s = self._df[col]
+            if s.dtype == object:
+                empty = s.isna() | s.astype(str).str.strip().isin(
+                    ['', '[]', '{}', 'nan', 'None'])
+            else:
+                empty = s.isna()
+            out[col] = round(100.0 * float((~empty).mean()), 1)
+        return out
+
     def for_patterns_stats(self, placekeys: Set[str]) -> pd.DataFrame:
-        """SafeGraph stats for patterns generation."""
-        cols = [c for c in ['placekey', 'median_dwell',
-                            'popularity_by_hour', 'popularity_by_day']
-                if c in self._df.columns]
+        """SafeGraph stats for patterns generation.
+
+        Stage 0 widens this projection (PATTERNS_STATS_COLUMNS) to also surface
+        the movement-redesign inputs — absolute visit volume, observed home-CBG
+        catchment, open hours, category. gen_patterns still consumes only the
+        legacy four columns; the extras are carried through unused until the
+        later redesign stages (docs/MOVEMENT_MODEL_REDESIGN.md)."""
+        cols = [c for c in PATTERNS_STATS_COLUMNS if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()
         mask = self._df['placekey'].isin(placekeys)
