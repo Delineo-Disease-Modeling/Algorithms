@@ -305,3 +305,51 @@ The implementation simplified §6's IPF‑first plan into a staged build, verifi
 - **Stage 3 — demand‑pull (the key correction).** Catchment as a *weight multiplier* in the old supply‑push loop was measured to **redistribute** over‑occupancy, not remove it (the airport's lost share ballooned onto local POIs; a hotel hit 1.03 ppl/m²). Root cause: a global move‑rate pushed a fixed flood of people out, re‑normalized — so reducing one POI inflated others, and dwell double‑counted on long‑stay POIs. The fix is **demand‑pull**: each POI is filled to its absolute occupancy target `popularity_by_hour × day_factor × f_j × open_gate × movement_scale`, topped up from the home pool, with everyone not pulled staying home. Result on real data: **0 density violations at every scale**, airport 8,309 → 1,236, Fooshee 0.
 
 **The occupancy cap (§6 Layer A) is therefore demoted to an optional backstop**, not a primary fix — demand‑pull bounds occupancy at the source, and the cap never binds (measured). The remaining open item is **`movement_scale` calibration** (§7.5) and the **external‑FOI term** (§6 Layer C), still to come.
+
+---
+
+## 10. External‑FOI term (Layer C) — v1 implementation decisions
+
+This section pins the concrete v1 build of §6 Layer C, decided 2026‑06‑20. It is **cross‑repo** (Algorithms emits one datum; Simulation's Wells‑Riley kernel consumes it) and **flag‑gated, default off** — so it lands bit‑identical to the current golden run until deliberately turned on.
+
+### The key simplification: only `f_j` crosses the repo boundary
+
+The internal occupancy demand‑pull already fills each POI to `(popularity_by_hour × day_factor × gate × movement_scale) × f_j`. The external headcount is the same quantity with the complement, so:
+
+```
+external_occupancy_j(h)  =  internal_occupancy_j(h) × (1 − f_j)/f_j
+```
+
+The simulator **already has the realized internal occupancy** of every room each timestep (it's the placed‑agent count). So the *only* new per‑POI datum Algorithms must ship is **`f_j` itself** (one float, riding in the places bundle next to `area`) — **not** a 7×24 occupancy curve. This auto‑inherits open‑hours, day‑factor and demand‑pull capping for free.
+
+### Where it enters the kernel
+
+In `Simulation/simulator/runner.py:_vectorized_transmission` (the default‑on engine), each room already gets `room_W` = summed emission of the *internal* infectors present, and `mean_quanta = base_quanta[loc] × room_W × intake`. The external term is **an added emission weight on `room_W`**:
+
+```
+W_external[loc] = n_internal[loc] × (1 − f_j)/f_j × P_ext(t) × ext_emit_factor
+room_W_total    = room_W_internal + W_external
+```
+
+External visitors act as additional **well‑mixed infectors** — strictly **one‑way**: never in `pstate`, never drawn as susceptibles, never rendered as dots. **Households get `W_external = 0`** (no strangers at home). `f_j` is **floored (~0.02)** so data‑artifact tiny‑`f_j` POIs don't explode `(1 − f_j)/f_j`. The same term is mirrored into the pairwise / aggregate transmission paths. The pairwise CAT kernel, `q`, `p`, `t`, and the area‑aware `Q` are all untouched — only `n` (effective infector count) grows.
+
+### `P_ext(t)` — exogenous scalar (v1), NOT the sim's own prevalence
+
+`P_ext(t)` is the probability a given external visitor is infectious. **v1 = a single exogenous config scalar `external_prevalence`, default 0** (so the term is inert until calibrated); it can grow into a time series / county‑case curve later.
+
+It is **deliberately NOT tied to the simulation's own internal prevalence**, because doing so:
+1. **re‑closes the system** — asserts the outside 85% perfectly mirror our 15%, adding no open‑system realism (just a bigger closed population);
+2. **creates a feedback loop** — internal outbreak ↑ → external pressure ↑ → internal ↑ faster (double‑counts our own infected as the world's);
+3. **cold‑starts at ~0** — at t=0 internal prevalence ≈ seed ≈ 0, so import does nothing exactly when it matters most (e.g. a quiet town whose airport, `f_j`≈0.09, still sees infected travelers).
+   Plus: calibration against real case data needs `P_ext` to be an *exogenous input you control*, not a function of the prevalence you're predicting. (Mirroring is only a last‑resort proxy when no external data exists at all.)
+
+### Seeding interaction — keep the t=0 seed for v1
+
+Seed and external term are two answers to "how does infection enter the cluster?" — the seed is the **initial condition** (already here), the external term is **ongoing flux** (keeps arriving); they overlap only in representing *importation*, and Citron et al. warn that running both at full strength **over‑seeds**. **v1 keeps the existing t=0 seed unchanged** (non‑breaking; with `external_prevalence=0` the term is inert anyway). When calibrating, dial the seed down if it visibly over‑seeds.
+
+### Staged build
+
+- **S1 (Algorithms)** — emit `f_j` per POI in `convert_data`'s places metadata, reusing `_catchment_fraction`; clamp to a ~0.02 floor. *(Gate: places bundle carries `catchment_fj`; off‑path unchanged.)*
+- **S2 (Simulation)** — parse `f_j` in `world.py:parse_facility`; precompute `ext_ratio_per_loc` (`(1−f_j)/f_j`, 0 for households); add `W_external` into `_vectorized_transmission` + the pairwise/aggregate paths, behind an `external_foi` flag default **off**. *(Gate: flag off ⇒ golden run bit‑identical.)*
+- **S3** — wire `P_ext(t)` (config scalar `external_prevalence`, default 0) + optional `ext_emit_factor`.
+- **S4** — validate (off = golden; on, with `external_prevalence>0`, prevalence rises sanely and a closed‑vs‑background‑FOI ablation — §6 "decisive experiment" — moves the outbreak threshold), then calibrate `external_prevalence` + `movement_scale` together against the validation harness.
