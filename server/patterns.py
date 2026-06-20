@@ -10,7 +10,7 @@ import pandas as pd
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Dict, Any, List, Optional
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
@@ -172,19 +172,9 @@ def _open_hours_to_sets(val) -> Optional[Dict[str, set]]:
     return out or None
 
 
-def _build_open_gate(open_hours_val, naics_code) -> Dict[str, List[float]]:
-    """Per-(weekday, hour) weight multiplier for the destination kernel.
-
-    - POI has real open_hours  -> HARD gate (closed hours = 0.0); the data is
-      authoritative, so a 3am dentist "visit" becomes impossible.
-    - else, NAICS-default window -> SOFT gate (closed hours = _OPEN_EPS); the
-      window is a guess, so we damp rather than forbid.
-    - else (no hours, unknown sector) -> no gating (all 1.0).
-    """
-    parsed = _open_hours_to_sets(open_hours_val)
-    if parsed is not None:
-        return {wd: [1.0 if h in parsed.get(wd, set()) else 0.0 for h in range(24)]
-                for wd in WEEKDAYS}
+def _naics_default_row(naics_code) -> List[float]:
+    """A soft per-hour gate row from the NAICS-default open window (1.0 inside,
+    _OPEN_EPS outside), or all-1.0 (ungated) when the sector is unknown."""
     sector = None
     if naics_code is not None:
         ns = str(naics_code).strip()
@@ -192,10 +182,32 @@ def _build_open_gate(open_hours_val, naics_code) -> Dict[str, List[float]]:
             sector = ns[:2]
     window = _NAICS_DEFAULT_HOURS.get(sector) if sector else None
     if window is None:
-        return {wd: [1.0] * 24 for wd in WEEKDAYS}
+        return [1.0] * 24
     lo, hi = window
-    row = [1.0 if lo <= h < hi else _OPEN_EPS for h in range(24)]
-    return {wd: list(row) for wd in WEEKDAYS}
+    return [1.0 if lo <= h < hi else _OPEN_EPS for h in range(24)]
+
+
+def _build_open_gate(open_hours_val, naics_code) -> Dict[str, List[float]]:
+    """Per-(weekday, hour) weight multiplier for the destination kernel.
+
+    - A weekday LISTED in open_hours -> HARD gate (closed hours = 0.0); the data
+      is authoritative for that day, so a 3am dentist "visit" becomes impossible.
+    - A weekday NOT listed (SafeGraph often lists only some days) -> fall back to
+      the NAICS-default SOFT window, NOT a hard zero. day_factor already suppresses
+      genuinely-closed days via popularity_by_day, so an unlisted day must not be
+      conflated with "closed all day" (that would silently delete the POI on days
+      the data merely omits).
+    - No open_hours at all -> the NAICS-default soft row for every day.
+    """
+    default_row = _naics_default_row(naics_code)
+    parsed = _open_hours_to_sets(open_hours_val)
+    if parsed is None:
+        return {wd: list(default_row) for wd in WEEKDAYS}
+    return {
+        wd: ([1.0 if h in parsed[wd] else 0.0 for h in range(24)]
+             if wd in parsed else list(default_row))
+        for wd in WEEKDAYS
+    }
 
 
 def _safe_int(x, default=0) -> int:
@@ -381,7 +393,6 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         # a vectorized op.
         all_place_ids: List[str] = list(stats.keys())
         n_places_total = len(all_place_ids)
-        place_pos = {pid: i for i, pid in enumerate(all_place_ids)}
         if n_places_total == 0:
             raise ValueError(
                 "gen_patterns: no POIs with usable stats for this zone's placekeys; "
@@ -506,16 +517,3 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             print(f"[perf] {label}: {perf_accum[label]:.3f}s", flush=True)
 
     return output
-
-
-if __name__ == "__main__":
-    # Example manual run when used as a script
-    with open("./output/papdata.json", "r") as f:
-        pap = json.load(f)
-        
-    patterns = gen_patterns(pap, datetime.now(), 168)
-    
-    with open("patterns_out.json", "w") as f:
-        json.dump(patterns, f, indent=2)
-    
-    print("Exported patterns_out.json")

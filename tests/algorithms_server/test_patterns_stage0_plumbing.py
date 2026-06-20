@@ -16,6 +16,9 @@ import pandas as pd
 _SERVER = Path(__file__).resolve().parents[2] / "server"
 if str(_SERVER) not in sys.path:
     sys.path.insert(0, str(_SERVER))
+# Evict any patterns_loader the shared conftest cached from a different checkout.
+for _m in ("patterns", "patterns_loader"):
+    sys.modules.pop(_m, None)
 
 from patterns_loader import (  # noqa: E402
     ALL_NEEDED_COLUMNS,

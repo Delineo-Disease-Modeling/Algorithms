@@ -50,7 +50,7 @@ Imagine you're handing out a town's daily errands to shops. Instead of asking *"
 
 ### In detail
 
-Each hour, the model gives every POI a weight and sends movers in proportion to it. The weight ([`patterns.py` `_overall_busy_factor`](Algorithms/server/patterns.py)) is:
+Each hour, the *old* model gave every POI a weight and sent movers in proportion to it (this function, `_overall_busy_factor`, was removed in §9's rewrite). The weight was:
 
 ```
 weight(POI, hour, weekday) = hour_share[hour] × day_share[weekday]
@@ -297,7 +297,7 @@ The theory (Colizza–Vespignani's invasion threshold; Rapaport–Mimouni showin
 
 ## 9. What we actually built (updates since §6)
 
-The implementation simplified §6's IPF‑first plan into a staged, flag‑guarded build. Each stage is verified on the real Barnsdall (czone‑108) data; the legacy model is preserved byte‑for‑byte behind `DELINEO_LEGACY_MOVEMENT=1`.
+The implementation simplified §6's IPF‑first plan into a staged build, verified on the real Barnsdall (czone‑108) data. The legacy supply‑push model — and the `DELINEO_LEGACY_MOVEMENT` / `DELINEO_CATCHMENT` / `DELINEO_DEMAND_PULL` flags — was **removed entirely**; demand‑pull is the only model, and missing/empty patterns data now **raises `ValueError`** (`patterns.py`) rather than silently producing a movement‑free run. There is no rollback flag.
 
 - **Stage 0** — surface the redesign columns + per‑field coverage report (plumbing only). *(committed)*
 - **Stage 1** — destinations weighted by **absolute occupancy** (`popularity_by_hour`) + **open‑hours gate**, replacing the self‑normalized shape. Fooshee 1,210 → 0. *(committed)*

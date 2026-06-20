@@ -16,6 +16,11 @@ import pytest
 _SERVER = Path(__file__).resolve().parents[2] / "server"
 if str(_SERVER) not in sys.path:
     sys.path.insert(0, str(_SERVER))
+# The shared conftest may have cached patterns/patterns_loader from a different
+# checkout (it hardcodes the main Algorithms/server path); evict so the imports
+# below resolve to THIS worktree's server dir.
+for _m in ("patterns", "patterns_loader"):
+    sys.modules.pop(_m, None)
 
 from patterns import (  # noqa: E402
     _build_open_gate,
@@ -85,6 +90,26 @@ def test_missing_patterns_data_fails_loudly():
 
     with pytest.raises(ValueError):
         gen_patterns(pap, datetime(2021, 1, 4, 0), duration=1, shared_data=_Empty())
+
+
+def test_zone_with_no_matching_pois_fails_loudly():
+    # non-empty patterns data, but no POI whose placekey matches the zone's places
+    shared = _shared([_poi("other", [10] * 24)])
+    pap = _papdata(["unmatched-pk"])
+    with pytest.raises(ValueError):
+        gen_patterns(pap, datetime(2021, 1, 4, 0), duration=1, shared_data=shared)
+
+
+# --- a night-active, open-at-night POI is filled at night ---------------------
+
+def test_night_active_poi_fills_at_night(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    h = [0] * 24
+    h[22] = h[23] = 120                          # busy late at night
+    shared = _shared([_poi("late", h, open_hours={a: [["0:00", "24:00"]] for a in ABBR})])
+    out = gen_patterns(_papdata(["late"]), datetime(2021, 1, 4, 22),  # start 10pm
+                       duration=2, shared_data=shared)
+    assert _peak_occ(out).get("0", 0) > 50
 
 
 # --- absolute volume: a 2-visit noise POI stays ~empty, a busy one fills ------
@@ -157,10 +182,15 @@ def test_deterministic_and_bounded(monkeypatch):
 # --- helpers ------------------------------------------------------------------
 
 def test_open_gate_hard_vs_soft():
-    hard = _build_open_gate(json.dumps({"Mon": [["8:00", "17:00"]]}), "445110")
-    assert hard["Monday"][10] == 1.0 and hard["Monday"][3] == 0.0   # real hours -> hard 0
-    soft = _build_open_gate(None, "445110")                          # no hours, retail default
-    assert soft["Monday"][10] == 1.0 and 0.0 < soft["Monday"][3] < 0.01  # default -> soft eps
+    gate = _build_open_gate(json.dumps({"Mon": [["8:00", "17:00"]]}), "445110")
+    # LISTED day -> hard gate (3am impossible)
+    assert gate["Monday"][10] == 1.0 and gate["Monday"][3] == 0.0
+    # UNLISTED day (Tuesday) -> NAICS-default soft, NOT a hard zero (don't delete
+    # the POI on a day SafeGraph merely omitted; day_factor handles real closures)
+    assert gate["Tuesday"][10] == 1.0 and gate["Tuesday"][3] > 0.0
+    # no open_hours at all -> NAICS-default soft row for every day
+    soft = _build_open_gate(None, "445110")
+    assert soft["Monday"][10] == 1.0 and 0.0 < soft["Monday"][3] < 0.01
 
 
 def test_catchment_fraction():
