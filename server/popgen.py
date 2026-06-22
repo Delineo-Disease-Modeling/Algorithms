@@ -30,16 +30,22 @@ from patterns import _catchment_fraction, _median_fj_fallback
 # docs/MOVEMENT_MODEL_REDESIGN.md §10.
 CATCHMENT_FJ_FLOOR = 0.02
 
+# Census API key. The committed literal is a free, rate-limited Census key that
+# also lives in git history; prefer setting the CENSUS_API_KEY env var and rotate
+# the literal out when convenient.
+CENSUS_API_KEY_DEFAULT = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
+
 
 class CensusDataPuller:
-    def __init__(self, api_key: str = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize the CensusDataPuller with the Census API key.
-        
+
         Args:
-            api_key: Census API key. Defaults to the one in your original code.
+            api_key: Census API key. If omitted, falls back to the CENSUS_API_KEY
+                environment variable, then to CENSUS_API_KEY_DEFAULT.
         """
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("CENSUS_API_KEY") or CENSUS_API_KEY_DEFAULT
         self.detailed_base_url = "https://api.census.gov/data/2023/acs/acs1"
         self.profile_base_url = "https://api.census.gov/data/2023/acs/acs5/profile"
         
@@ -295,8 +301,12 @@ class CensusDataPuller:
             return relevant_data
             
         except Exception as e:
-            print(f"Error: {e}")
-            return {}
+            # Fail loud: gen_pop is the only caller, and an empty census dict
+            # silently produces a degenerate population (wrong/zero households)
+            # downstream. Surface the failure instead of returning {} — matches the
+            # fail-loud posture in patterns.py.
+            print(f"ERROR: Census data fetch failed: {e}")
+            raise
 
 @dataclass
 
@@ -431,6 +441,28 @@ class SyntheticPopulationGenerator:
             'num_nonrelatives': has_nonrelatives
         }
     
+    @staticmethod
+    def _relative_type_weights(county_data) -> List[float]:
+        """Sampling weights for a household ``relative``'s type.
+
+        Returns weights aligned to ``['parent', 'sibling', 'grandchild',
+        'other_relative']``. The ``parent`` bucket combines parents and
+        parents-in-law. Weights are raw Census relative counts; ``random.choices``
+        normalizes them internally, so they need not sum to 1.
+
+        Note: this previously had an operator-precedence bug
+        (``parent + parent_in_law / total``) that added the raw ``parent`` count
+        (hundreds–thousands) unnormalized while the other buckets were fractions
+        in ``[0, 1]`` — so the parent bucket won almost every draw and siblings,
+        grandchildren and other relatives were effectively never sampled.
+        """
+        return [
+            county_data["parent"] + county_data["parent-in-law"],  # parent (incl. in-law)
+            county_data["brother_or_sister"],                      # sibling
+            county_data["grandchild"],                             # grandchild
+            county_data["other_relative"],                         # other_relative
+        ]
+
     def generate_household(self, county_data, county_code: str, cbg: str) -> List[Person]:
         """Generate all members of a single household."""
         household_id = self.next_household_id
@@ -504,16 +536,13 @@ class SyntheticPopulationGenerator:
         for _ in range(household_composition['num_relatives']):
             relative_gender = 'M' if random.random() < 0.5 else 'F'
             
-            # Decide which type of relative
-            # TODO: The son-in-law and daughter-in-law categories imply adult children in the home
-                # Revise this to better reflect the actual distribution of relatives
-            tot_other_relatives = county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]
+            # Decide which type of relative.
+            # TODO: The son-in-law and daughter-in-law categories imply adult children
+            # in the home; revise this to better reflect the actual distribution of
+            # relatives (they are currently folded into none of the four buckets).
             relative_type = random.choices(
                 ['parent', 'sibling', 'grandchild', 'other_relative'],
-                weights=[county_data["parent"]+county_data["parent-in-law"]/tot_other_relatives # parent
-                        , county_data["brother_or_sister"]/tot_other_relatives # sibling
-                        , county_data["grandchild"]/tot_other_relatives # grandchild
-                        , county_data["other_relative"]/tot_other_relatives] # other_relative
+                weights=self._relative_type_weights(county_data),
             )[0]
             
             relative = Person(
@@ -845,8 +874,10 @@ def gen_pop(cz_data, gdf=None, shared_data=None):
         print("\nPopulation Validation:")
         for key, value in validation_results.items():
             print(f"{key}: {value}")
-    except:
-        print("\nERROR: COULD NOT VALIDATE POPULATION\n")
+    except Exception as e:
+        # Validation is diagnostic (prints stats), so don't make it fatal — but
+        # surface the real error instead of swallowing it under a bare except.
+        print(f"\nERROR: COULD NOT VALIDATE POPULATION: {e}\n")
 
     # Save the population to CSV
     population = generator.save_population(population)
@@ -860,5 +891,6 @@ if __name__ == '__main__':
         
         with open(r'./output/papdata.json', 'w') as f:
             json.dump(papdata, f)
-    except:
-        print('ERROR: Could not generated papdata.json')
+    except Exception as e:
+        print(f'ERROR: could not generate papdata.json: {e}')
+        raise
