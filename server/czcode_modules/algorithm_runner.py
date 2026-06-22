@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 
 from .graph import GraphBuilder
-from server_app.seed_regions import get_cbg_to_zip_map, get_zip_to_cbgs_map
 
 
 VALID_ALGORITHMS = (
@@ -12,11 +11,10 @@ VALID_ALGORITHMS = (
     'greedy_weight_seed_guard',
     'greedy_ratio',
     'greedy_ttwa',
-    'hierarchical_core_satellites',
     'mobility_prune',
 )
 
-SEED_REGION_ALGORITHMS = {'hierarchical_core_satellites', 'mobility_prune'}
+SEED_REGION_ALGORITHMS = {'mobility_prune'}
 
 
 TRACE_NOTES = {
@@ -24,17 +22,13 @@ TRACE_NOTES = {
         "czi_optimal_cap is solved as a global optimization and does not have a "
         "single greedy add-one expansion sequence."
     ),
-    'hierarchical_core_satellites': (
-        "Trace steps show local core growth. ZIP-level satellite selection is "
-        "applied after the local core stabilizes."
-    ),
     'mobility_prune': (
         "Trace steps show bounded mobility-envelope growth followed by reverse "
         "pruning. CBGs are removed by lowest movement loss per resident removed."
     ),
 }
 
-TRACE_METADATA_ALGORITHMS = {'hierarchical_core_satellites', 'mobility_prune'}
+TRACE_METADATA_ALGORITHMS = {'mobility_prune'}
 
 
 @dataclass
@@ -118,7 +112,6 @@ class AlgorithmRunner:
             'greedy_weight_seed_guard': self._run_greedy_weight_seed_guard,
             'greedy_ratio': self._run_greedy_ratio,
             'greedy_ttwa': self._run_greedy_ttwa,
-            'hierarchical_core_satellites': self._run_hierarchical_core_satellites,
             'mobility_prune': self._run_mobility_prune,
         }
 
@@ -235,31 +228,6 @@ class AlgorithmRunner:
         return self.clustering_algo.greedy_ttwa(
             digraph,
             self.config.core_cbg,
-            self.config.min_cluster_pop,
-            **kwargs
-        )
-
-    def _run_hierarchical_core_satellites(self, normalized_seed_cbgs, trace_steps, params):
-        digraph = self._directed_graph()
-        kwargs = {
-            'cbg_to_zip': get_cbg_to_zip_map(),
-            'zip_to_cbgs': get_zip_to_cbgs_map(),
-            'cbg_centers': self.cbg_centers,
-        }
-        if params.get('local_radius_km') is not None:
-            kwargs['local_radius_km'] = float(params['local_radius_km'])
-        if params.get('core_containment_threshold') is not None:
-            kwargs['core_containment_threshold'] = float(params['core_containment_threshold'])
-        if params.get('core_improvement_epsilon') is not None:
-            kwargs['core_improvement_epsilon'] = float(params['core_improvement_epsilon'])
-        if params.get('satellite_flow_threshold') is not None:
-            kwargs['satellite_flow_threshold'] = float(params['satellite_flow_threshold'])
-        if params.get('max_satellites') is not None:
-            kwargs['max_satellites'] = int(params['max_satellites'])
-        self._add_trace_collector(kwargs, trace_steps)
-        return self.clustering_algo.hierarchical_core_satellites(
-            digraph,
-            normalized_seed_cbgs,
             self.config.min_cluster_pop,
             **kwargs
         )

@@ -108,8 +108,6 @@ def register_routes(
                 payload.update({k: v for k, v in algorithm_config['optimal_params'].items() if v is not None})
             elif algorithm_config['algorithm'] == 'greedy_weight_seed_guard':
                 payload.update({k: v for k, v in algorithm_config['seed_guard_params'].items() if v is not None})
-            elif algorithm_config['algorithm'] == 'hierarchical_core_satellites':
-                payload.update({k: v for k, v in algorithm_config['hierarchical_params'].items() if v is not None})
 
             try:
                 validate(instance=payload, schema=gen_cz_schema)
