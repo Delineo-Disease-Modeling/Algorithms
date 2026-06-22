@@ -431,6 +431,28 @@ class SyntheticPopulationGenerator:
             'num_nonrelatives': has_nonrelatives
         }
     
+    @staticmethod
+    def _relative_type_weights(county_data) -> List[float]:
+        """Sampling weights for a household ``relative``'s type.
+
+        Returns weights aligned to ``['parent', 'sibling', 'grandchild',
+        'other_relative']``. The ``parent`` bucket combines parents and
+        parents-in-law. Weights are raw Census relative counts; ``random.choices``
+        normalizes them internally, so they need not sum to 1.
+
+        Note: this previously had an operator-precedence bug
+        (``parent + parent_in_law / total``) that added the raw ``parent`` count
+        (hundreds–thousands) unnormalized while the other buckets were fractions
+        in ``[0, 1]`` — so the parent bucket won almost every draw and siblings,
+        grandchildren and other relatives were effectively never sampled.
+        """
+        return [
+            county_data["parent"] + county_data["parent-in-law"],  # parent (incl. in-law)
+            county_data["brother_or_sister"],                      # sibling
+            county_data["grandchild"],                             # grandchild
+            county_data["other_relative"],                         # other_relative
+        ]
+
     def generate_household(self, county_data, county_code: str, cbg: str) -> List[Person]:
         """Generate all members of a single household."""
         household_id = self.next_household_id
@@ -504,16 +526,13 @@ class SyntheticPopulationGenerator:
         for _ in range(household_composition['num_relatives']):
             relative_gender = 'M' if random.random() < 0.5 else 'F'
             
-            # Decide which type of relative
-            # TODO: The son-in-law and daughter-in-law categories imply adult children in the home
-                # Revise this to better reflect the actual distribution of relatives
-            tot_other_relatives = county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]
+            # Decide which type of relative.
+            # TODO: The son-in-law and daughter-in-law categories imply adult children
+            # in the home; revise this to better reflect the actual distribution of
+            # relatives (they are currently folded into none of the four buckets).
             relative_type = random.choices(
                 ['parent', 'sibling', 'grandchild', 'other_relative'],
-                weights=[county_data["parent"]+county_data["parent-in-law"]/tot_other_relatives # parent
-                        , county_data["brother_or_sister"]/tot_other_relatives # sibling
-                        , county_data["grandchild"]/tot_other_relatives # grandchild
-                        , county_data["other_relative"]/tot_other_relatives] # other_relative
+                weights=self._relative_type_weights(county_data),
             )[0]
             
             relative = Person(
