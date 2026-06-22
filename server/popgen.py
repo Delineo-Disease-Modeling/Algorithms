@@ -30,16 +30,22 @@ from patterns import _catchment_fraction, _median_fj_fallback
 # docs/MOVEMENT_MODEL_REDESIGN.md §10.
 CATCHMENT_FJ_FLOOR = 0.02
 
+# Census API key. The committed literal is a free, rate-limited Census key that
+# also lives in git history; prefer setting the CENSUS_API_KEY env var and rotate
+# the literal out when convenient.
+CENSUS_API_KEY_DEFAULT = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
+
 
 class CensusDataPuller:
-    def __init__(self, api_key: str = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"):
+    def __init__(self, api_key: Optional[str] = None):
         """
         Initialize the CensusDataPuller with the Census API key.
-        
+
         Args:
-            api_key: Census API key. Defaults to the one in your original code.
+            api_key: Census API key. If omitted, falls back to the CENSUS_API_KEY
+                environment variable, then to CENSUS_API_KEY_DEFAULT.
         """
-        self.api_key = api_key
+        self.api_key = api_key or os.environ.get("CENSUS_API_KEY") or CENSUS_API_KEY_DEFAULT
         self.detailed_base_url = "https://api.census.gov/data/2023/acs/acs1"
         self.profile_base_url = "https://api.census.gov/data/2023/acs/acs5/profile"
         
@@ -295,8 +301,12 @@ class CensusDataPuller:
             return relevant_data
             
         except Exception as e:
-            print(f"Error: {e}")
-            return {}
+            # Fail loud: gen_pop is the only caller, and an empty census dict
+            # silently produces a degenerate population (wrong/zero households)
+            # downstream. Surface the failure instead of returning {} — matches the
+            # fail-loud posture in patterns.py.
+            print(f"ERROR: Census data fetch failed: {e}")
+            raise
 
 @dataclass
 
@@ -864,8 +874,10 @@ def gen_pop(cz_data, gdf=None, shared_data=None):
         print("\nPopulation Validation:")
         for key, value in validation_results.items():
             print(f"{key}: {value}")
-    except:
-        print("\nERROR: COULD NOT VALIDATE POPULATION\n")
+    except Exception as e:
+        # Validation is diagnostic (prints stats), so don't make it fatal — but
+        # surface the real error instead of swallowing it under a bare except.
+        print(f"\nERROR: COULD NOT VALIDATE POPULATION: {e}\n")
 
     # Save the population to CSV
     population = generator.save_population(population)
@@ -879,5 +891,6 @@ if __name__ == '__main__':
         
         with open(r'./output/papdata.json', 'w') as f:
             json.dump(papdata, f)
-    except:
-        print('ERROR: Could not generated papdata.json')
+    except Exception as e:
+        print(f'ERROR: could not generate papdata.json: {e}')
+        raise
