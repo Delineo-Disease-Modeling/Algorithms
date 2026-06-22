@@ -140,11 +140,6 @@ class ConvenienceZoneGenerationService:
             optimal_max_iters=algorithm_config['optimal_params'].get('optimal_max_iters'),
             seed_guard_distance_km=algorithm_config['seed_guard_params'].get('seed_guard_distance_km'),
             seed_cbgs=data.get('seed_cbgs'),
-            local_radius_km=algorithm_config['effective_hierarchical_params'].get('local_radius_km'),
-            core_containment_threshold=algorithm_config['effective_hierarchical_params'].get('core_containment_threshold'),
-            core_improvement_epsilon=algorithm_config['effective_hierarchical_params'].get('core_improvement_epsilon'),
-            satellite_flow_threshold=algorithm_config['effective_hierarchical_params'].get('satellite_flow_threshold'),
-            max_satellites=algorithm_config['effective_hierarchical_params'].get('max_satellites'),
             mobility_prune_min_seed_capture=algorithm_config['effective_mobility_prune_params'].get('min_seed_capture'),
         )
         _report_perf_timing(report, 'generate_cz', total_start)

@@ -33,7 +33,7 @@ class PreviewClusteringService:
 
     def cluster_cbgs(self, cbg, min_pop, patterns_file=None, patterns_folder=None, month=None,
                      algorithm='czi_balanced', czi_params=None, optimal_params=None,
-                     seed_guard_params=None, ttwa_params=None, hierarchical_params=None,
+                     seed_guard_params=None, ttwa_params=None,
                      mobility_prune_params=None,
                      seed_cbgs=None,
                      include_trace=False, progress_callback=None):
@@ -41,7 +41,6 @@ class PreviewClusteringService:
         optimal_params = optimal_params or {}
         seed_guard_params = seed_guard_params or {}
         ttwa_params = ttwa_params or {}
-        hierarchical_params = hierarchical_params or {}
         mobility_prune_params = mobility_prune_params or {}
         result = generate_cz(
             cbg,
@@ -59,11 +58,6 @@ class PreviewClusteringService:
             optimal_max_iters=optimal_params.get('optimal_max_iters'),
             seed_guard_distance_km=seed_guard_params.get('seed_guard_distance_km'),
             seed_cbgs=seed_cbgs,
-            local_radius_km=hierarchical_params.get('local_radius_km'),
-            core_containment_threshold=hierarchical_params.get('core_containment_threshold'),
-            core_improvement_epsilon=hierarchical_params.get('core_improvement_epsilon'),
-            satellite_flow_threshold=hierarchical_params.get('satellite_flow_threshold'),
-            max_satellites=hierarchical_params.get('max_satellites'),
             mobility_prune_min_seed_capture=mobility_prune_params.get('min_seed_capture'),
             containment_threshold=ttwa_params.get('containment_threshold'),
             include_trace=include_trace,
@@ -100,7 +94,6 @@ class PreviewClusteringService:
                     optimal_params=algorithm_config['effective_optimal_params'],
                     seed_guard_params=algorithm_config['effective_seed_guard_params'],
                     ttwa_params=algorithm_config['effective_ttwa_params'],
-                    hierarchical_params=algorithm_config['effective_hierarchical_params'],
                     mobility_prune_params=algorithm_config['effective_mobility_prune_params'],
                     seed_cbgs=seed_cbgs,
                     include_trace=include_trace,

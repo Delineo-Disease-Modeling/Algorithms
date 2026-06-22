@@ -219,13 +219,11 @@ def parse_cluster_algorithm_config(payload):
         'seed_guard_params': seed_guard_params,
         'ttwa_params': ttwa_params,
         'mobility_prune_params': mobility_prune_params,
-        'hierarchical_params': {},
         'effective_czi_params': effective_czi_params,
         'effective_optimal_params': effective_optimal_params,
         'effective_seed_guard_params': effective_seed_guard_params,
         'effective_ttwa_params': effective_ttwa_params,
         'effective_mobility_prune_params': effective_mobility_prune_params,
-        'effective_hierarchical_params': {},
     }
 
 

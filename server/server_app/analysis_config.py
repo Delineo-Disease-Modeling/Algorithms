@@ -27,7 +27,6 @@ EFFECTIVE_PARAM_KEYS_BY_ALGORITHM = {
     'czi_optimal_cap': 'effective_optimal_params',
     'greedy_weight_seed_guard': 'effective_seed_guard_params',
     'greedy_ttwa': 'effective_ttwa_params',
-    'hierarchical_core_satellites': 'effective_hierarchical_params',
     'mobility_prune': 'effective_mobility_prune_params',
 }
 

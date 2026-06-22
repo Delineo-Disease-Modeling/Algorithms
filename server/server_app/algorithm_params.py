@@ -140,48 +140,6 @@ def parse_mobility_prune_params(payload):
     }, None
 
 
-def parse_hierarchical_params(payload):
-    payload = payload or {}
-
-    local_radius_km, err = _parse_float(
-        payload, 'local_radius_km', min_value=1.0, max_value=250.0, strictly_positive=True
-    )
-    if err:
-        return None, err
-
-    core_containment_threshold, err = _parse_float(
-        payload, 'core_containment_threshold', min_value=0.0, max_value=1.0
-    )
-    if err:
-        return None, err
-
-    core_improvement_epsilon, err = _parse_float(
-        payload, 'core_improvement_epsilon', min_value=0.0, max_value=0.25
-    )
-    if err:
-        return None, err
-
-    satellite_flow_threshold, err = _parse_float(
-        payload, 'satellite_flow_threshold', min_value=0.0, max_value=1.0
-    )
-    if err:
-        return None, err
-
-    max_satellites, err = _parse_int(
-        payload, 'max_satellites', min_value=0, max_value=25
-    )
-    if err:
-        return None, err
-
-    return {
-        'local_radius_km': local_radius_km,
-        'core_containment_threshold': core_containment_threshold,
-        'core_improvement_epsilon': core_improvement_epsilon,
-        'satellite_flow_threshold': satellite_flow_threshold,
-        'max_satellites': max_satellites,
-    }, None
-
-
 def parse_czi_optimal_params(payload):
     payload = payload or {}
 
