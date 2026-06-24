@@ -3,14 +3,9 @@ import random
 import os
 import numpy as np
 import pandas as pd
-from typing import List, Dict, Any, Optional, Union, Tuple
+from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
-import requests
 from czcode import generate_cz
-try:
-    from shapely import wkt as shapely_wkt
-except ImportError:
-    shapely_wkt = None
 
 try:
     from residential import ResidentialCache
@@ -19,297 +14,19 @@ except ImportError:
     RESIDENTIAL_AVAILABLE = False
     ResidentialCache = None
 
-# Catchment helpers shared with gen_patterns so the places-bundle f_j matches the
-# movement-target f_j (same definition + same per-run median fallback).
-from patterns import _catchment_fraction, _median_fj_fallback
+# The Census ACS client and the DataFrame -> papdata conversion live in their own
+# modules now; re-exported here so existing call sites and tests can keep doing
+# `from popgen import CensusDataPuller / convert_data / CENSUS_API_KEY_DEFAULT /
+# CATCHMENT_FJ_FLOOR`.
+from census_data import CensusDataPuller, CENSUS_API_KEY_DEFAULT  # noqa: F401
+from papdata_convert import convert_data, CATCHMENT_FJ_FLOOR  # noqa: F401
+# Re-exported so `popgen._catchment_fraction` / `popgen._median_fj_fallback`
+# stay the documented single access point for the shared f_j helpers (their f_j
+# definition must match gen_patterns' movement targets).
+from patterns import _catchment_fraction, _median_fj_fallback  # noqa: F401
 
-# Lower bound on the emitted per-POI catchment fraction f_j. The simulator's
-# external-FOI term scales as (1 - f_j)/f_j, which diverges as f_j -> 0, so a data
-# artifact (e.g. one in-cluster visitor out of thousands) would otherwise produce
-# absurd external pressure. 0.02 caps the ratio at 49x. See
-# docs/MOVEMENT_MODEL_REDESIGN.md §10.
-CATCHMENT_FJ_FLOOR = 0.02
-
-# Census API key. The committed literal is a free, rate-limited Census key that
-# also lives in git history; prefer setting the CENSUS_API_KEY env var and rotate
-# the literal out when convenient.
-CENSUS_API_KEY_DEFAULT = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
-
-
-class CensusDataPuller:
-    def __init__(self, api_key: Optional[str] = None):
-        """
-        Initialize the CensusDataPuller with the Census API key.
-
-        Args:
-            api_key: Census API key. If omitted, falls back to the CENSUS_API_KEY
-                environment variable, then to CENSUS_API_KEY_DEFAULT.
-        """
-        self.api_key = api_key or os.environ.get("CENSUS_API_KEY") or CENSUS_API_KEY_DEFAULT
-        self.detailed_base_url = "https://api.census.gov/data/2023/acs/acs1"
-        self.profile_base_url = "https://api.census.gov/data/2023/acs/acs5/profile"
-        
-        # Variables to retrieve for base profile data
-        self.variables_base = {
-            "total_households": "DP02_0001E",
-            "pop_in_households": "DP02_0018E",
-            "avg_household_size": "DP02_0016E",
-            "avg_family_size": "DP02_0017E"
-        }
-        
-        # Variables to retrieve from detailed tables
-        self.variables_detailed = {
-            # From B11001
-            "total_households": "B11001_001E",
-            # From B11003
-            "total_family_households": "B11003_001E",
-            "with_children_under_18": "B11003_002E",
-            "married_with_children": "B11003_003E",
-            "single_mother_with_children": "B11003_004E",
-            "single_father_with_children": "B11003_005E",
-            # From B11016
-            "size_2": "B11016_003E",
-            "size_3": "B11016_004E",
-            "size_4": "B11016_005E",
-            "size_5": "B11016_006E",
-            "size_6": "B11016_007E",
-            "size_7_plus": "B11016_008E",
-            # From B11017
-            "multigenerational_households": "B11017_002E",
-            # From B09019
-            "total_population": "B09019_001E",
-            "family_households": "B09019_002E",
-            "householders": "B09019_003E",
-            "male_householders": "B09019_004E",
-            "male_hh_living_alone": "B09019_005E",
-            "male_hh_not_living_alone": "B09019_006E",
-            "female_householders": "B09019_007E",
-            "female_hh_living_alone": "B09019_008E",
-            "female_hh_not_living_alone": "B09019_009E",
-            "opposite-sex spouse": "B09019_010E",
-            "same-sex spouse": "B09019_011E",
-            "opposite-sex unmarried_partner": "B09019_012E",
-            "same-sex unmarried_partner": "B09019_013E", 
-            "child": "B09019_014E",
-            "biological child": "B09019_015E",
-            "adopted_child": "B09019_016E",
-            "stepchild": "B09019_017E",
-            "grandchild": "B09019_018E",
-            "brother_or_sister": "B09019_019E",
-            "parent": "B09019_020E",
-            "parent-in-law": "B09019_021E",
-            "son-in-law or daughter-in-law": "B09019_022E",
-            "other_relative": "B09019_023E",
-            "foster child": "B09019_024E",
-            "other_nonrelatives": "B09019_025E",
-            "in_group_quarters": "B09019_026E",
-        }
-        
-        # Field dictionary for mapping API field names to readable names
-        self.field_dict = {v: k for k, v in self.variables_detailed.items()}
-    
-    @staticmethod
-    def safe_int(value: Union[str, int, float, None]) -> Optional[int]:
-        """
-        Helper function to safely convert a value to integer.
-        
-        Args:
-            value: Value to convert to integer
-            
-        Returns:
-            Integer value or None if conversion fails
-        """
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return None
-    
-    def fetch_census_data(self, base_url: str, variables: Dict[str, str], 
-                         state_fips: str, county_fips: str = "*") -> List[List[str]]:
-        """
-        Fetch data from Census API for specified variables.
-        
-        Args:
-            base_url: Census API base URL
-            variables: Dictionary of variable names and codes
-            state_fips: State FIPS code
-            county_fips: County FIPS code or "*" for all counties
-            
-        Returns:
-            JSON response as a list of lists
-        """
-        if county_fips is None:
-            params = {
-                "get": "NAME," + ",".join(variables.values()),
-                "for": f"state:{state_fips}",
-                "key": self.api_key
-            }
-        else:
-            params = {
-                "get": "NAME," + ",".join(variables.values()),
-                "for": f"county:{county_fips}",
-                "in": f"state:{state_fips}",
-                "key": self.api_key
-            }
-        
-        response = requests.get(base_url, params=params)
-        if response.status_code == 200:
-            return response.json()
-        else:
-            raise Exception(f"Error fetching data: {response.status_code} - {response.text}")
-    
-    def process_profile_data(self, raw_data: List[List[str]], 
-                            variables: Dict[str, str]) -> Dict[str, Dict[str, Union[str, int, float]]]:
-        """
-        Process profile data from Census API.
-        
-        Args:
-            raw_data: Raw data from Census API
-            variables: Dictionary of variable names and codes
-            
-        Returns:
-            Processed data as a dictionary
-        """
-        headers = raw_data[0]
-        rows = raw_data[1:]
-
-        formatted_data = {}
-        for row in rows:
-            county_name = row[headers.index("NAME")]
-            county_code = row[headers.index("county")]
-
-            formatted_data[county_code] = {
-                "county_name": county_name,
-                "total_households": self.safe_int(row[headers.index(variables["total_households"])]),
-                "pop_in_households": self.safe_int(row[headers.index(variables["pop_in_households"])]),
-                "avg_household_size": float(row[headers.index(variables["avg_household_size"])]),
-                "avg_family_size": float(row[headers.index(variables["avg_family_size"])])
-            }
-
-        return formatted_data
-    
-    def merge_datasets(self, counties_dict: Dict[str, Dict], 
-                      data_lists: List[List[str]], 
-                      field_dict: Dict[str, str]) -> Dict[str, Dict]:
-        """
-        Merge base profile data with detailed data.
-        
-        Args:
-            counties_dict: Dictionary of county data
-            data_lists: List of data rows from Census API
-            field_dict: Dictionary mapping API field names to readable names
-            
-        Returns:
-            Merged dataset
-        """
-        # Extract headers from the first list
-        counties_list = list(counties_dict.keys())
-        headers = data_lists[0]
-        
-        # Process each data row (starting from index 1)
-        for data_row in data_lists[1:]:
-            # Get the county code from the last element of the data row
-            county_code = data_row[-1]
-            # Remove county_code from counties_list
-            counties_list = [i for i in counties_list if i != county_code]
-            
-            # Check if this county exists in the counties dictionary
-            if county_code in counties_dict:
-                # Process each field in the data row
-                for i in range(1, len(headers) - 2):  # Skip 'NAME' and state/county at the end
-                    field_name = field_dict.get(headers[i], headers[i])
-                    field_value = data_row[i]
-                    
-                    # Convert to integer if the value is a numeric string
-                    if field_value and field_value.isdigit():
-                        field_value = int(field_value)
-                    
-                    # Add the field to the county dictionary
-                    counties_dict[county_code][field_name] = field_value
-        
-        # Impute missing data for counties not in the detailed data
-        for county_code in counties_list:
-            # County population as a percent of state population
-            ratio = counties_dict[county_code]["pop_in_households"] / counties_dict["000"]["pop_in_households"] 
-            data_row = data_lists[1]
-            for i in range(1, len(headers) - 2):  # Skip 'NAME' and state/county at the end
-                field_name = field_dict.get(headers[i], headers[i])
-                field_value = data_row[i]
-                
-                # Convert to integer if the value is a numeric string
-                if field_value and field_value.isdigit():
-                    field_value = int(np.round(int(field_value)*ratio, 0))
-                
-                # Add the field to the county dictionary
-                counties_dict[county_code][field_name] = field_value
-
-        return counties_dict
-    
-    def pull_counties_census_data(self, state_fips: str, county_fips: List[str], 
-                                 output_file: Optional[str] = None) -> Dict[str, Dict]:
-        """
-        Pull census data for specified counties.
-        
-        Args:
-            state_fips: State FIPS code
-            county_fips: List of county FIPS codes
-            output_file: Path to output file (optional)
-            
-        Returns:
-            Dictionary of census data for each county
-        """
-        print("Pulling census data...")
-        try:
-            # Fetch base profile data for state and counties
-            base_state_data = self.fetch_census_data(self.profile_base_url, self.variables_base, state_fips, county_fips=None)
-            base_raw_data = self.fetch_census_data(self.profile_base_url, self.variables_base, state_fips)
-            base_data = base_state_data + base_raw_data
-            del base_data[2]  # Delete duplicate label row
-            
-            # Add dummy county code '000' to the state-wide data
-            base_data[0].append("county")
-            base_data[1].append("000")
-            
-            # Process base profile data
-            base_data = self.process_profile_data(base_data, self.variables_base)
-            
-            # Fetch detailed data for state and counties
-            state_data = self.fetch_census_data(self.detailed_base_url, self.variables_detailed, state_fips, county_fips=None)
-            raw_data = self.fetch_census_data(self.detailed_base_url, self.variables_detailed, state_fips)
-            census_data = state_data + raw_data
-            del census_data[2]  # Delete duplicate label row
-            
-            # Add dummy county code '000' to the state-wide data
-            census_data[1].append("000")
-            
-            # Merge datasets
-            census_data = self.merge_datasets(base_data, census_data, self.field_dict)
-
-            # Filter for only the rows with COUNTY FIP in the COUNTY_FIPS list
-            relevant_data = {k: v for k, v in census_data.items() if k in county_fips}
-            
-            # Add the state data to relevant_data and make key "000" the first element
-            relevant_data["000"] = census_data["000"]
-            relevant_data = {"000": relevant_data["000"], **{k: v for k, v in relevant_data.items() if k != "000"}}
-
-            # Save to JSON if output file is specified
-            if output_file:
-                with open(output_file, "w") as json_file:
-                    json.dump(relevant_data, json_file, indent=4)
-                print(f"Census data saved to {output_file}")
-            
-            return relevant_data
-            
-        except Exception as e:
-            # Fail loud: gen_pop is the only caller, and an empty census dict
-            # silently produces a degenerate population (wrong/zero households)
-            # downstream. Surface the failure instead of returning {} — matches the
-            # fail-loud posture in patterns.py.
-            print(f"ERROR: Census data fetch failed: {e}")
-            raise
 
 @dataclass
-
 class Person:
     person_id: int
     household_id: int
@@ -324,7 +41,7 @@ class Person:
 class SyntheticPopulationGenerator:
     def __init__(self, census_data: dict, cz_data: dict, gdf=None):
         """Initialize with input census data.
-        
+
         Args:
             census_data: Census demographic data by county
             cz_data: Convenience zone data (CBG -> population mapping)
@@ -336,7 +53,7 @@ class SyntheticPopulationGenerator:
         # Set up counters for IDs
         self.next_person_id = 1
         self.next_household_id = 1
-        
+
         # Initialize residential cache for sampling home locations
         self.residential_cache = None
         if RESIDENTIAL_AVAILABLE and gdf is not None:
@@ -344,7 +61,7 @@ class SyntheticPopulationGenerator:
             print("Residential cache initialized - homes will be placed in residential areas")
         else:
             print("Residential sampling unavailable - homes will not have coordinates")
-        
+
         # Age distributions (simplified)
         # TODO: Create a function to derive age distributions from additional census data
         self.age_distributions = {
@@ -368,10 +85,10 @@ class SyntheticPopulationGenerator:
     def determine_household_composition(self, county_code: str) -> Dict[str, int]:
         """Determine the composition of a household based on census data."""
         county_data = self.census_data[county_code]
-        
+
         # Determine if it's a family household
         is_family = random.random() < (county_data["total_family_households"] / county_data["total_households"])
-        
+
         # Determine household size based on distribution
         size_distribution = []
         size_counts = 0
@@ -380,7 +97,7 @@ class SyntheticPopulationGenerator:
             if size_key in county_data:
                 size_distribution.append((i, county_data[size_key]))
                 size_counts += county_data[size_key]
-        
+
         # If we don't have size distribution data, use average household size
         if size_counts == 0:
             avg_size = county_data["avg_household_size"]
@@ -388,29 +105,29 @@ class SyntheticPopulationGenerator:
         else:
             size_probs = [count/size_counts for _, count in size_distribution]
             household_size = np.random.choice([size for size, _ in size_distribution], p=size_probs)
-        
+
         # Determine gender of household head
         head_is_male = random.random() < (county_data["male_householders"] / county_data["householders"])
-        
+
         # Calculate probabilities for different household types
         has_partner = False
         has_children = 0
         has_relatives = 0
         has_nonrelatives = 0
-        
+
         if is_family:
             # Family households
             percent_married = (county_data["opposite-sex spouse"] + county_data["same-sex spouse"]) / county_data["family_households"]
             if random.random() < percent_married:  # Most family households have a partner
                 has_partner = True
                 household_size -= 1  # Account for partner
-            
+
             # Determine if has children and how many
             if random.random() < (county_data.get("with_children_under_18", 0) / max(1, county_data.get("total_family_households", 1))):
                 child_count = min(household_size - 1, np.random.geometric(p=0.5))
                 has_children = child_count
                 household_size -= child_count
-            
+
             # Determine if has other relatives and how many
             if household_size > 1:
                 percent_other_relatives = (county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]) / county_data["family_households"]
@@ -418,7 +135,7 @@ class SyntheticPopulationGenerator:
                 relative_count = min(household_size - 1, np.random.poisson(1))
                 has_relatives = relative_count
                 household_size -= relative_count
-            
+
             # Remaining slots are for non-relatives
             has_nonrelatives = max(0, household_size - 1)  # -1 for the head
         else:
@@ -428,11 +145,11 @@ class SyntheticPopulationGenerator:
             if random.random() < percent_unmarried:  # Some non-family households have unmarried partners
                 has_partner = True
                 household_size -= 1
-            
+
             # Non-family households don't have children by definition
             # Remaining slots are for non-relatives
             has_nonrelatives = max(0, household_size - 1)  # -1 for the head
-        
+
         return {
             'head_gender': 'M' if head_is_male else 'F',
             'has_partner': has_partner,
@@ -440,7 +157,7 @@ class SyntheticPopulationGenerator:
             'num_relatives': has_relatives,
             'num_nonrelatives': has_nonrelatives
         }
-    
+
     @staticmethod
     def _relative_type_weights(county_data) -> List[float]:
         """Sampling weights for a household ``relative``'s type.
@@ -467,15 +184,15 @@ class SyntheticPopulationGenerator:
         """Generate all members of a single household."""
         household_id = self.next_household_id
         self.next_household_id += 1
-        
+
         household_composition = self.determine_household_composition(county_code)
         household_members = []
-        
+
         # Sample household location from residential areas
         household_lat, household_lon = None, None
         if self.residential_cache is not None:
             household_lat, household_lon = self.residential_cache.sample_home_location(cbg)
-        
+
         # Create household head
         head_gender = household_composition['head_gender']
         head = Person(
@@ -491,15 +208,15 @@ class SyntheticPopulationGenerator:
         )
         self.next_person_id += 1
         household_members.append(head)
-        
+
         # Add partner if present
         if household_composition['has_partner']:
             partner_gender = 'F' if head_gender == 'M' else 'M'
             # Same-sex couples exist too
             percent_ss_couples = (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"]) / (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"] + county_data["opposite-sex unmarried_partner"] + county_data["opposite-sex spouse"])
-            if random.random() < percent_ss_couples: 
+            if random.random() < percent_ss_couples:
                 partner_gender = head_gender
-                
+
             partner = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
@@ -513,11 +230,11 @@ class SyntheticPopulationGenerator:
             )
             self.next_person_id += 1
             household_members.append(partner)
-        
+
         # TODO: For all non-head members and partners, determine gender via additional census data
         # Add children
         for _ in range(household_composition['num_children']):
-            child_gender = 'M' if random.random() < 0.5 else 'F'  
+            child_gender = 'M' if random.random() < 0.5 else 'F'
             child = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
@@ -531,11 +248,11 @@ class SyntheticPopulationGenerator:
             )
             self.next_person_id += 1
             household_members.append(child)
-        
+
         # Add relatives
         for _ in range(household_composition['num_relatives']):
             relative_gender = 'M' if random.random() < 0.5 else 'F'
-            
+
             # Decide which type of relative.
             # TODO: The son-in-law and daughter-in-law categories imply adult children
             # in the home; revise this to better reflect the actual distribution of
@@ -544,7 +261,7 @@ class SyntheticPopulationGenerator:
                 ['parent', 'sibling', 'grandchild', 'other_relative'],
                 weights=self._relative_type_weights(county_data),
             )[0]
-            
+
             relative = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
@@ -558,12 +275,12 @@ class SyntheticPopulationGenerator:
             )
             self.next_person_id += 1
             household_members.append(relative)
-        
+
         # Add non-relatives
         for _ in range(household_composition['num_nonrelatives']):
             nonrel_gender = 'M' if random.random() < 0.5 else 'F'
             nonrel_type = 'foster_child' if random.random() < 0.1 else 'non_relative'
-            
+
             nonrel = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
@@ -577,17 +294,17 @@ class SyntheticPopulationGenerator:
             )
             self.next_person_id += 1
             household_members.append(nonrel)
-        
+
         return household_members
-    
+
     def generate_county_population(self, county_code: str, target_households: int = None, cz_population: int = 0) -> List[Person]:
         """Generate a synthetic population for a specific county."""
         county_data = self.census_data[county_code]
-        
+
         # If target_households is not specified, use a fraction of the actual number
         if target_households is None:
             target_households = min(10000, county_data["total_households"] // 10)
-        
+
         # Create households for each cbg in the county
         population = []
         county_cbgs = self.cz_data; county_cbgs = [i for i in county_cbgs if i[2:5] == county_code]
@@ -599,38 +316,38 @@ class SyntheticPopulationGenerator:
             for _ in range(cbg_households):
                 household = self.generate_household(county_data, county_code, cbg)
                 population.extend(household)
-            
+
         return population
-    
+
     def generate_full_population(self, sample_factor: float = 0.01) -> List[Person]:
         """Generate a synthetic population for all counties in the census data."""
         population = []
-        
+
         for county_code, county_data in self.census_data.items():
             if county_code == "000":  # Skip the state-wide entry
                 continue
             # Calculate the total estimated population for the cbgs (for this county) in the convenience zone by summing the population estimates for the corresponding cbgs
             county_cbgs = self.cz_data; county_cbgs = [i for i in county_cbgs if i[2:5] == county_code]
             county_pop = [self.cz_data[i] for i in county_cbgs]
-            cz_population = sum(county_pop)    
+            cz_population = sum(county_pop)
             sample_factor = cz_population / county_data["total_population"]
             target_households = int(county_data["total_households"] * sample_factor)
             county_population = self.generate_county_population(county_code, target_households, cz_population)
             population.extend(county_population)
             print("Generated", len(county_population), "people in", target_households, "households for county", county_code, "(", str(np.round(100*sample_factor, 2)), "% of population)")
         return population
-    
+
     def validate_population(self, population: List[Person]) -> Dict[str, Any]:
         """Run validation checks on the generated population."""
         population_df = pd.DataFrame([vars(p) for p in population])
-        
+
         # Household size distribution
         household_sizes = population_df.groupby('household_id').size()
         avg_household_size = household_sizes.mean()
-        
+
         # Gender distribution
         gender_dist = population_df['gender'].value_counts(normalize=True).to_dict()
-        
+
         # Age distribution
         age_stats = {
             'mean': population_df['age'].mean(),
@@ -638,10 +355,10 @@ class SyntheticPopulationGenerator:
             'min': population_df['age'].min(),
             'max': population_df['age'].max()
         }
-        
+
         # Relationship distribution
         relation_dist = population_df['relate_head'].value_counts(normalize=True).to_dict()
-        
+
         return {
             'total_people': len(population),
             'total_households': len(household_sizes),
@@ -650,7 +367,7 @@ class SyntheticPopulationGenerator:
             'age_statistics': age_stats,
             'relationship_distribution': relation_dist
         }
-    
+
     def save_population(self, population: List[Person]):
         """Save the generated population to a CSV file."""
         population_df = pd.DataFrame([vars(p) for p in population])
@@ -658,171 +375,6 @@ class SyntheticPopulationGenerator:
         #print(f"Population saved to {output_path}")
         return population_df
 
-
-def convert_data(df, cz_data, shared_data=None):
-    """
-    Convert data frame with person and household information into a specific dictionary format.
-
-    Args:
-        df: DataFrame with person/household data
-        cz_data: Dictionary mapping CBG IDs to population counts
-        shared_data: Pre-loaded PatternsData used to derive the places dict.
-            If None/empty, the output will contain zero places.
-    """
-    # Initialize output dictionary
-    output = {
-        "people": {},
-        "homes": {},
-        "places": {}
-    }
-
-    # Create mappings
-    # For sex: M -> 0, F -> 1
-    sex_mapping = {"M": 0, "F": 1}
-
-    # Process each row in the dataframe
-    for index, row in df.iterrows():
-        person_id = str(row['person_id'])
-        household_id = str(row['household_id'])
-
-        # Add person to people dictionary
-        output["people"][person_id] = {
-            "sex": sex_mapping.get(row['gender']),
-            "age": row['age'],
-            "home": household_id
-        }
-
-        # Add or update household in homes dictionary
-        if household_id not in output["homes"]:
-            home_data = {
-                "cbg": row['cbg'],
-                "members": 1
-            }
-            # Add coordinates if available
-            if pd.notna(row.get('household_lat')) and pd.notna(row.get('household_lon')):
-                home_data["latitude"] = row['household_lat']
-                home_data["longitude"] = row['household_lon']
-            output["homes"][household_id] = home_data
-        else:
-            output["homes"][household_id]["members"] += 1
-
-    # Get places from the patterns data
-    cbgs = list(cz_data.keys())
-    cbg_set = set(cbgs)
-    metadata_cols = [
-        'location_name',
-        'top_category',
-        'latitude',
-        'longitude',
-        'street_address',
-        'postal_code',
-        'polygon_wkt',
-        'wkt_area_sq_meters',
-        'visitor_home_cbgs',
-    ]
-
-    if shared_data is not None and not shared_data.is_empty():
-        placekeys = shared_data.get_placekeys_for_cbgs(cbg_set)
-        places = shared_data.for_popgen_places(placekeys)
-    else:
-        places = pd.DataFrame(columns=['placekey'] + metadata_cols)
-
-    for col in metadata_cols:
-        if col not in places.columns:
-            places[col] = None
-
-    def _coerce_coord(v):
-        """Force lat/lon into a float or None.
-
-        pd.read_csv infers the column dtype from the file contents: a single
-        non-numeric cell (empty string, "NA", stray text) promotes the whole
-        column to object and every cell comes back as a str. The frontend
-        map uses Number.isFinite which is strict and rejects strings, so we
-        normalize to float here.
-        """
-        if v is None:
-            return None
-        try:
-            f = float(v)
-        except (TypeError, ValueError):
-            return None
-        if f != f:  # NaN
-            return None
-        return f
-
-    def _coerce_footprint(raw):
-        if shapely_wkt is None or raw is None:
-            return None
-        text = str(raw).strip()
-        if not text:
-            return None
-        try:
-            geom = shapely_wkt.loads(text)
-        except Exception:
-            return None
-        if geom is None or geom.is_empty:
-            return None
-        if geom.geom_type not in ('Polygon', 'MultiPolygon'):
-            return None
-        try:
-            return geom.__geo_interface__
-        except Exception:
-            return None
-
-    def _clean_optional_text(v):
-        if pd.isna(v):
-            return None
-        text = str(v).strip()
-        return text or None
-
-    # Physical floor area (m^2) per POI, from SafeGraph WKT_AREA_SQ_METERS. Used
-    # downstream for area-aware Wells-Riley ventilation. Non-positive / missing
-    # values are filled with the per-category median, then the global median,
-    # then a constant (the dataset median POI is ~649 m^2). Winsorizing the long
-    # tail (e.g. a region polygon logged as one giant "POI") happens at the
-    # physics step in the simulator, not here.
-    if 'wkt_area_sq_meters' in places.columns:
-        _area_series = pd.to_numeric(places['wkt_area_sq_meters'], errors='coerce')
-        _area_series = _area_series.where(_area_series > 0)
-    else:
-        _area_series = pd.Series([float('nan')] * len(places), index=places.index)
-    _global_med_area = _area_series.median()
-    if pd.isna(_global_med_area):
-        _global_med_area = 650.0
-    _cat_med_area = _area_series.groupby(places['top_category']).median().dropna().to_dict()
-
-    # Catchment fraction f_j per POI: the share of the POI's observed visitors who
-    # live inside our simulated cluster. Same definition + median fallback as
-    # gen_patterns, so the movement targets and the external-FOI term agree; the
-    # ~23% of low-traffic POIs without visitor_home_cbgs get the per-run median.
-    # Floored (CATCHMENT_FJ_FLOOR) because the simulator's external term scales as
-    # (1 - f_j)/f_j. (Behavior-inert until the simulator reads catchment_fj.)
-    _fj_fallback = _median_fj_fallback(
-        _catchment_fraction(v, cbg_set) for v in places.get('visitor_home_cbgs', pd.Series(dtype=object))
-    )
-
-    for i, row in places.iterrows():
-        _area = _area_series.loc[i]
-        if pd.isna(_area):
-            _area = _cat_med_area.get(row['top_category'], _global_med_area)
-        _fj = _catchment_fraction(row.get('visitor_home_cbgs'), cbg_set)
-        if _fj is None:
-            _fj = _fj_fallback
-        output['places'][str(i)] = {
-            'placekey': row['placekey'],
-            'label': row['location_name'],
-            'latitude': _coerce_coord(row['latitude']),
-            'longitude': _coerce_coord(row['longitude']),
-            # Sometimes this is empty
-            'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
-            'street_address': _clean_optional_text(row.get('street_address')),
-            'postal_code': row['postal_code'],
-            'footprint': _coerce_footprint(row.get('polygon_wkt')),
-            'area': float(_area),
-            'catchment_fj': max(CATCHMENT_FJ_FLOOR, float(_fj)),
-        }
-
-    return output
 
 def _apply_bench_seed():
     seed = os.getenv('DELINEO_BENCH_SEED')
@@ -888,7 +440,7 @@ if __name__ == '__main__':
     try:
         geoids, _ = generate_cz('240430006012', 10_0000)
         papdata = gen_pop(geoids)
-        
+
         with open(r'./output/papdata.json', 'w') as f:
             json.dump(papdata, f)
     except Exception as e:
