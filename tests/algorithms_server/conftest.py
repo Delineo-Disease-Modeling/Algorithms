@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 
-SERVER_DIR = Path('/Users/ryad/Code/delineo/Algorithms/server')
+SERVER_DIR = Path(__file__).resolve().parents[2] / "server"
 
 if str(SERVER_DIR) not in sys.path:
     sys.path.insert(0, str(SERVER_DIR))
