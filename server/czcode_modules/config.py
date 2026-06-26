@@ -81,24 +81,17 @@ class Config:
                     if os.path.exists(path):
                         return path
 
-            from patterns_loader import _available_months_for_state, closest_month
-            for state in state_candidates:
-                available = _available_months_for_state(state, search_root)
-                nearest = closest_month(month_key, available)
-                if nearest and nearest != month_key:
-                    stem = f"{nearest}-{state}"
-                    for ext in exts:
-                        path = os.path.join(search_root, state, f"{stem}{ext}")
-                        if os.path.exists(path):
-                            import logging
-                            logging.getLogger('cbg_clustering').info(
-                                f"No data for {month_key}, using closest month: {nearest}"
-                            )
-                            return path
-
+        # No exact-month file: fail loudly. Do NOT fall back to the closest
+        # available month — a silent wrong-month substitution corrupts results.
         states_msg = ", ".join(state_candidates) if month_key and state_candidates else "unknown state"
+        from patterns_loader import _available_months_for_state
+        avail_msg = "; ".join(
+            f"{s}: {', '.join(_available_months_for_state(s, search_root)) or 'none'}"
+            for s in state_candidates
+        ) or "none"
         raise FileNotFoundError(
             f"No patterns file found for month '{month_key}' "
             f"under {search_root} for {states_msg}. "
+            f"Available months -> {avail_msg}. "
             "Expected files like '<DATA>/patterns/<STATE>/YYYY-MM-<STATE>.parquet'."
         )

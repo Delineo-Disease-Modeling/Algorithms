@@ -110,24 +110,6 @@ def _available_months_for_state(state: str, base_dir: str) -> List[str]:
     return sorted(months)
 
 
-def closest_month(requested: str, available: List[str]) -> Optional[str]:
-    """
-    Return the available month closest to the requested month.
-    If equidistant, prefers the earlier month.
-    """
-    if not available:
-        return None
-    if requested in available:
-        return requested
-    # Parse to comparable (year, month) tuples
-    def _ym(mk):
-        parts = mk.split('-')
-        return int(parts[0]) * 12 + int(parts[1])
-    req = _ym(requested)
-    best = min(available, key=lambda m: (abs(_ym(m) - req), _ym(m)))
-    return best
-
-
 def resolve_patterns_files(states: List[str], start_date: datetime,
                            base_dir: str = None) -> List[str]:
     """
@@ -163,22 +145,16 @@ def resolve_patterns_files(states: List[str], start_date: datetime,
         if found:
             continue
 
-        # Fall back to closest available month within the same state
+        # No exact-month file for this state: fail loudly. Silently substituting
+        # the closest available month yields a wrong-month result that corrupts
+        # downstream mobility with no error (see patterns-provisioning notes).
         available = _available_months_for_state(state_upper, base_dir)
-        nearest = closest_month(month_key, available)
-        if nearest and nearest != month_key:
-            nstem = f'{nearest}-{state_upper}'
-            for ext in _PATTERN_EXTS:
-                path = os.path.join(base_dir, state_upper, f'{nstem}{ext}')
-                if os.path.exists(path):
-                    logger.info(f"No exact match for {state_upper}/{month_key}, "
-                                f"using closest available month: {nearest}")
-                    files.append(path)
-                    found = True
-                    break
-
-        if not found:
-            logger.warning(f"No patterns file found for state={state_upper} month={month_key}")
+        avail_msg = ", ".join(available) if available else "none"
+        raise FileNotFoundError(
+            f"No patterns file for state={state_upper} month={month_key}. "
+            f"Available months for {state_upper}: {avail_msg}. "
+            f"Expected '{os.path.join(base_dir, state_upper, stem)}.parquet'."
+        )
 
     return files
 

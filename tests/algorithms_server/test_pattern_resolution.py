@@ -1,3 +1,5 @@
+import pytest
+
 from server_app import pattern_resolution
 
 
@@ -8,7 +10,7 @@ def test_extract_month_key_handles_plain_and_iso_dates():
     assert pattern_resolution.extract_month_key('not-a-date') is None
 
 
-def test_resolve_patterns_file_for_request_prefers_exact_then_closest_then_latest(tmp_path, monkeypatch):
+def test_resolve_patterns_file_for_request_exact_or_raise_then_latest_default(tmp_path, monkeypatch):
     data_dir = tmp_path / 'data'
     md_dir = data_dir / 'patterns' / 'MD'
     md_dir.mkdir(parents=True)
@@ -30,13 +32,16 @@ def test_resolve_patterns_file_for_request_prefers_exact_then_closest_then_lates
     assert exact_source == 'monthly'
     assert exact_month == '2021-05'
 
-    closest_path, _, closest_month = pattern_resolution.resolve_patterns_file_for_request(
-        '240010001001',
-        start_date_raw='2021-04-12',
-        use_test_data=False,
-    )
-    assert closest_path == str(earlier)
-    assert closest_month == '2021-03'
+    # A requested month with no exact file must FAIL LOUDLY, not silently fall
+    # back to the closest available month (2021-03 here) — that would corrupt
+    # the simulation's mobility with no error. `earlier`/`later` exist on disk to
+    # prove the resolver refuses to substitute them.
+    with pytest.raises(ValueError):
+        pattern_resolution.resolve_patterns_file_for_request(
+            '240010001001',
+            start_date_raw='2021-04-12',
+            use_test_data=False,
+        )
 
     latest_path, _, latest_month = pattern_resolution.resolve_patterns_file_for_request(
         '240010001001',

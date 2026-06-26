@@ -112,25 +112,22 @@ def resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_da
             if resolved_month:
                 patterns_month = resolved_month
         else:
+            # No exact-month file: fail loudly instead of snapping to the closest
+            # available month (a silent wrong-month substitution corrupts results).
             state_fips = str(seed_cbg)[:2]
             state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
             available = list_available_months_for_state(seed_cbg)
-            if available:
-                from patterns_loader import closest_month
-                nearest = closest_month(requested_month, available)
-                if nearest:
-                    monthly_file = resolve_monthly_patterns_file(seed_cbg, nearest)
-                    if monthly_file:
-                        patterns_file = monthly_file
-                        patterns_month = nearest
-            if not patterns_file:
-                if state_abbr:
-                    raise ValueError(
-                        f"No monthly patterns files found for state {state_abbr} (requested month '{requested_month}')."
-                    )
+            avail_msg = ", ".join(available) if available else "none"
+            if state_abbr:
                 raise ValueError(
-                    f"No monthly patterns file found for requested month '{requested_month}'."
+                    f"No monthly patterns file for state {state_abbr} month '{requested_month}'. "
+                    f"Available months for {state_abbr}: {avail_msg}. "
+                    f"Expected '{DATA_DIR}/patterns/{state_abbr}/{requested_month}-{state_abbr}.parquet'."
                 )
+            raise ValueError(
+                f"No monthly patterns file for requested month '{requested_month}' "
+                f"(seed_cbg {seed_cbg} did not map to a known state; available: {avail_msg})."
+            )
 
     if not patterns_file and not requested_month:
         state_fips = str(seed_cbg)[:2]
