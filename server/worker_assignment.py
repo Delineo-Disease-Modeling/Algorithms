@@ -1,8 +1,8 @@
-"""Persistent v1 worker assignment for synthetic residents.
+"""Persistent v1 activity anchors for synthetic residents.
 
-This deliberately does not generate a full activity schedule. It only annotates
-papdata people with stable employment/workplace metadata so later movement work
-can use persistent anchors without re-solving employment.
+This deliberately does not generate a complete activity schedule. It annotates
+papdata people with stable work/school metadata so movement generation can use
+persistent anchors without re-solving those assignments each run.
 """
 import json
 import os
@@ -17,6 +17,14 @@ EMPLOYMENT_PROB_18_64_DEFAULT = 0.65
 EMPLOYMENT_PROB_65_PLUS_DEFAULT = 0.10
 MIN_WORKPLACE_AREA_M2 = 50.0
 MAX_WORKPLACE_AREA_M2 = 2000.0
+EXTERNAL_WORKPLACE_LABEL = "Out of Zone Work"
+EXTERNAL_WORKPLACE_TYPE = "out_of_zone_work"
+EXTERNAL_SCHOOL_LABEL = "Out of Zone School"
+EXTERNAL_SCHOOL_TYPE = "out_of_zone_school"
+STUDENT_MIN_AGE = 5
+STUDENT_MAX_AGE = 17
+SCHOOL_NAICS_CODES = {"611110"}
+SCHOOL_TOP_CATEGORIES = {"elementary and secondary schools"}
 
 
 def _env_float(name: str, default: float) -> float:
@@ -102,12 +110,195 @@ def _place_area_weights(places: Dict[str, Dict[str, Any]]) -> tuple[list[str], l
     for place_id, place in places.items():
         if not isinstance(place, dict):
             continue
+        if place.get("external_location_type"):
+            continue
         weight = effective_workplace_area_weight(place.get("area"))
         if weight <= 0:
             continue
         place_ids.append(str(place_id))
         weights.append(float(weight))
     return place_ids, weights
+
+
+def _next_place_id(places: Dict[str, Dict[str, Any]]) -> str:
+    numeric_ids = []
+    for place_id in places:
+        try:
+            numeric_ids.append(int(place_id))
+        except (TypeError, ValueError):
+            continue
+    external_id = str((max(numeric_ids) + 1) if numeric_ids else len(places))
+    while external_id in places:
+        external_id = str(int(external_id) + 1)
+    return external_id
+
+
+def _ensure_external_location(
+    papdata: Dict[str, Any],
+    external_location_type: str,
+    label: str,
+    id_key: str,
+) -> str:
+    places = papdata.setdefault("places", {})
+    for place_id, place in places.items():
+        if isinstance(place, dict) and place.get("external_location_type") == external_location_type:
+            papdata[id_key] = str(place_id)
+            return str(place_id)
+
+    external_id = _next_place_id(places)
+    places[external_id] = {
+        "placekey": None,
+        "label": label,
+        "cbg": None,
+        "latitude": None,
+        "longitude": None,
+        "top_category": "External",
+        "street_address": None,
+        "postal_code": None,
+        "naics_code": None,
+        "footprint": None,
+        "area": None,
+        "catchment_fj": None,
+        "external_location_type": external_location_type,
+    }
+    papdata[id_key] = external_id
+    return external_id
+
+
+def ensure_external_workplace(papdata: Dict[str, Any]) -> Optional[str]:
+    """Ensure the synthetic off-map workplace exists when needed."""
+    people = papdata.get("people", {})
+    has_out_of_zone_worker = any(
+        isinstance(person, dict) and person.get("work_location_type") == "out_of_zone"
+        for person in people.values()
+    )
+    if not has_out_of_zone_worker:
+        return None
+    return _ensure_external_location(
+        papdata,
+        EXTERNAL_WORKPLACE_TYPE,
+        EXTERNAL_WORKPLACE_LABEL,
+        "external_workplace_id",
+    )
+
+
+def ensure_external_school(papdata: Dict[str, Any]) -> Optional[str]:
+    """Ensure the synthetic off-map school exists when needed."""
+    people = papdata.get("people", {})
+    has_out_of_zone_student = any(
+        isinstance(person, dict) and person.get("school_location_type") == "out_of_zone"
+        for person in people.values()
+    )
+    if not has_out_of_zone_student:
+        return None
+    return _ensure_external_location(
+        papdata,
+        EXTERNAL_SCHOOL_TYPE,
+        EXTERNAL_SCHOOL_LABEL,
+        "external_school_id",
+    )
+
+
+def ensure_external_locations(papdata: Dict[str, Any]) -> Dict[str, Optional[str]]:
+    return {
+        "workplace": ensure_external_workplace(papdata),
+        "school": ensure_external_school(papdata),
+    }
+
+
+def _normalize_naics(value: Any) -> str:
+    if value is None:
+        return ""
+    text = str(value).strip()
+    if not text or text.lower() == "nan":
+        return ""
+    if text.endswith(".0"):
+        text = text[:-2]
+    return "".join(ch for ch in text if ch.isdigit())
+
+
+def _is_school_place(place: Dict[str, Any]) -> bool:
+    if place.get("external_location_type"):
+        return False
+    naics = _normalize_naics(place.get("naics_code"))
+    if naics in SCHOOL_NAICS_CODES:
+        return True
+    category = str(place.get("top_category") or "").strip().lower()
+    return category in SCHOOL_TOP_CATEGORIES
+
+
+def _school_area_weights(places: Dict[str, Dict[str, Any]]) -> tuple[list[str], list[float]]:
+    school_ids: list[str] = []
+    weights: list[float] = []
+    for place_id, place in places.items():
+        if not isinstance(place, dict) or not _is_school_place(place):
+            continue
+        weight = effective_workplace_area_weight(place.get("area"))
+        if weight <= 0:
+            continue
+        school_ids.append(str(place_id))
+        weights.append(float(weight))
+    return school_ids, weights
+
+
+def assign_students(papdata: Dict[str, Any]) -> Dict[str, Any]:
+    """Annotate school-age residents with persistent v1 school assignments."""
+    people = papdata.get("people", {})
+    places = papdata.get("places", {})
+    school_ids, school_weights = _school_area_weights(places)
+    summary = {
+        "version": "v1_school_area_weighted",
+        "student_min_age": STUDENT_MIN_AGE,
+        "student_max_age": STUDENT_MAX_AGE,
+        "eligible_school_poi_count": len(school_ids),
+        "student_count": 0,
+        "in_zone_student_count": 0,
+        "out_of_zone_student_count": 0,
+        "non_student_count": 0,
+        "school_poi_count": 0,
+    }
+    students_by_school: Dict[str, int] = {}
+
+    for person in people.values():
+        age = person.get("age") if isinstance(person, dict) else None
+        age_int = _coerce_age(age)
+        if age_int is None or age_int < STUDENT_MIN_AGE or age_int > STUDENT_MAX_AGE:
+            if isinstance(person, dict):
+                person["is_student"] = False
+                person["school_location_type"] = "none"
+                person["school_poi"] = None
+            summary["non_student_count"] += 1
+            continue
+
+        person["is_student"] = True
+        summary["student_count"] += 1
+        if school_ids:
+            school_poi = random.choices(school_ids, weights=school_weights, k=1)[0]
+            person["school_location_type"] = "poi"
+            person["school_poi"] = school_poi
+            summary["in_zone_student_count"] += 1
+            students_by_school[school_poi] = students_by_school.get(school_poi, 0) + 1
+        else:
+            person["school_location_type"] = "out_of_zone"
+            person["school_poi"] = None
+            summary["out_of_zone_student_count"] += 1
+
+    summary["school_poi_count"] = len(students_by_school)
+    if students_by_school:
+        counts = sorted(students_by_school.values())
+        summary["students_per_school_poi"] = {
+            "min": counts[0],
+            "median": counts[len(counts) // 2],
+            "max": counts[-1],
+        }
+    else:
+        summary["students_per_school_poi"] = {
+            "min": 0,
+            "median": 0,
+            "max": 0,
+        }
+    papdata["school_assignment"] = summary
+    return summary
 
 
 def assign_workers(
@@ -117,10 +308,9 @@ def assign_workers(
     """Annotate papdata people with persistent v1 work assignments.
 
     Employment is age-probability based. In-zone workers are assigned to exactly
-    one persistent POI, sampled by capped POI area. Out-of-zone workers are only
-    annotated; movement scheduling deliberately does not send them to a synthetic
-    facility yet because Simulation currently treats every facility as a normal
-    transmission location.
+    one persistent POI, sampled by capped POI area. Out-of-zone workers are
+    annotated here and later routed to the synthetic external-work placeholder
+    by movement generation.
     """
     people = papdata.get("people", {})
     places = papdata.get("places", {})

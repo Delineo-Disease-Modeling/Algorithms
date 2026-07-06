@@ -263,7 +263,7 @@ class PatternsData:
         emit per-POI f_j into the places bundle for the external-FOI term)."""
         cols = [c for c in ['placekey', 'location_name', 'top_category',
                             'latitude', 'longitude', 'street_address', 'postal_code', 'polygon_wkt',
-                            'wkt_area_sq_meters', 'visitor_home_cbgs', 'poi_cbg']
+                            'wkt_area_sq_meters', 'visitor_home_cbgs', 'poi_cbg', 'naics_code']
                 if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()

@@ -16,7 +16,7 @@ except ImportError:
 # Catchment helpers shared with gen_patterns so the places-bundle f_j matches the
 # movement-target f_j (same definition + same per-run median fallback).
 from patterns import _catchment_fraction, _median_fj_fallback
-from worker_assignment import assign_workers
+from worker_assignment import assign_students, assign_workers, ensure_external_locations
 
 # Lower bound on the emitted per-POI catchment fraction f_j. The simulator's
 # external-FOI term scales as (1 - f_j)/f_j, which diverges as f_j -> 0, so a data
@@ -92,6 +92,7 @@ def convert_data(df, cz_data, shared_data=None, home_origin_capture=None):
         'polygon_wkt',
         'wkt_area_sq_meters',
         'visitor_home_cbgs',
+        'naics_code',
     ]
 
     if shared_data is not None and not shared_data.is_empty():
@@ -191,11 +192,14 @@ def convert_data(df, cz_data, shared_data=None, home_origin_capture=None):
             'top_category': 'None' if pd.isna(row['top_category']) else row['top_category'],
             'street_address': _clean_optional_text(row.get('street_address')),
             'postal_code': row['postal_code'],
+            'naics_code': _clean_optional_text(row.get('naics_code')),
             'footprint': _coerce_footprint(row.get('polygon_wkt')),
             'area': float(_area),
             'catchment_fj': max(CATCHMENT_FJ_FLOOR, float(_fj)),
         }
 
     assign_workers(output, home_origin_capture=home_origin_capture)
+    assign_students(output)
+    ensure_external_locations(output)
 
     return output

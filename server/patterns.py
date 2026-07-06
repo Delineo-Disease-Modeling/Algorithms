@@ -12,6 +12,8 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
+from worker_assignment import ensure_external_locations
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
 _PATTERNS_LOGGER = logging.getLogger(__name__)
@@ -26,6 +28,9 @@ _MONTH_DAYS = 30.0      # popularity_by_hour is a monthly device-hours total
 _WORK_START_HOUR = 9
 _WORK_END_HOUR = 17
 _WORK_WEEKDAYS = {0, 1, 2, 3, 4}
+_SCHOOL_START_HOUR = 8
+_SCHOOL_END_HOUR = 15
+_SCHOOL_WEEKDAYS = {0, 1, 2, 3, 4}
 
 
 def _movement_scale(stats_df) -> float:
@@ -57,6 +62,23 @@ def _is_default_work_time(snapshot_time: datetime) -> bool:
         snapshot_time.weekday() in _WORK_WEEKDAYS
         and _WORK_START_HOUR <= snapshot_time.hour < _WORK_END_HOUR
     )
+
+
+def _is_default_school_time(snapshot_time: datetime) -> bool:
+    return (
+        snapshot_time.weekday() in _SCHOOL_WEEKDAYS
+        and _SCHOOL_START_HOUR <= snapshot_time.hour < _SCHOOL_END_HOUR
+    )
+
+
+def _static_external_stats() -> Dict[str, Any]:
+    return {
+        "median_dwell_hours": 8,
+        "day_factor": {wd: 1.0 for wd in WEEKDAYS},
+        "raw_hour_counts": [0] * 24,
+        "open_gate": {wd: [1.0] * 24 for wd in WEEKDAYS},
+        "catchment_fj": 1.0,
+    }
 
 
 def _parse_hour_list(val) -> List[int]:
@@ -382,6 +404,10 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             perf_accum[label] = perf_accum.get(label, 0.0) + (time.perf_counter() - started)
 
     with _timed("gen_patterns/setup_stats"):
+        external_location_ids = ensure_external_locations(papdata)
+        external_workplace_id = external_location_ids.get("workplace")
+        external_school_id = external_location_ids.get("school")
+
         # Map placekey -> pap place_id
         placekey_to_place_id: Dict[str, str] = {}
         for pid, desc in papdata.get("places", {}).items():
@@ -416,6 +442,11 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             raise ValueError(
                 "gen_patterns: no POIs with usable stats for this zone's placekeys; "
                 "cannot generate movement.")
+        for external_place_id in (external_workplace_id, external_school_id):
+            if external_place_id is not None and external_place_id not in all_place_ids:
+                all_place_ids.append(str(external_place_id))
+                stats[str(external_place_id)] = _static_external_stats()
+        n_places_total = len(all_place_ids)
         movement_scale = _movement_scale(stats_df)
         if not os.getenv("DELINEO_MOVEMENT_SCALE", "").strip():
             _PATTERNS_LOGGER.warning(
@@ -442,7 +473,10 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         for i, (sid, info) in enumerate(people):
             pid_str_list[i] = str(int(sid))
             home_str_list[i] = str(info.get("home"))
-            if isinstance(info, dict) and info.get("is_worker") is True:
+            if (
+                isinstance(info, dict)
+                and (info.get("is_worker") is True or info.get("is_student") is True)
+            ):
                 demand_pull_eligible_arr[i] = False
         is_home_arr = np.ones(n_people, dtype=bool)
         leave_time_arr = np.full(n_people, -1, dtype=np.int64)
@@ -451,16 +485,33 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
         place_id_to_idx = {place_id: idx for idx, place_id in enumerate(all_place_ids)}
         worker_dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
+        student_dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
         for i, (_, info) in enumerate(people):
-            if not isinstance(info, dict) or info.get("work_location_type") != "poi":
+            if not isinstance(info, dict):
                 continue
-            work_poi = info.get("work_poi")
-            if work_poi is None:
+            if info.get("work_location_type") == "poi":
+                work_place = info.get("work_poi")
+            elif info.get("work_location_type") == "out_of_zone":
+                work_place = external_workplace_id
+            else:
+                work_place = None
+            if work_place is not None:
+                work_idx = place_id_to_idx.get(str(work_place))
+                if work_idx is not None:
+                    worker_dest_idx_arr[i] = work_idx
+            if info.get("school_location_type") == "poi":
+                school_place = info.get("school_poi")
+            elif info.get("school_location_type") == "out_of_zone":
+                school_place = external_school_id
+            else:
+                school_place = None
+            if school_place is None:
                 continue
-            work_idx = place_id_to_idx.get(str(work_poi))
-            if work_idx is not None:
-                worker_dest_idx_arr[i] = work_idx
+            school_idx = place_id_to_idx.get(str(school_place))
+            if school_idx is not None:
+                student_dest_idx_arr[i] = school_idx
         at_work_arr = np.zeros(n_people, dtype=bool)
+        at_school_arr = np.zeros(n_people, dtype=bool)
 
     output: Dict[str, Any] = {}
 
@@ -499,6 +550,23 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                         is_home_arr[leaving_work_mask] = True
                         leave_time_arr[leaving_work_mask] = -1
                         at_work_arr[leaving_work_mask] = False
+
+        with _timed("gen_patterns/school_schedule"):
+            if student_dest_idx_arr.size:
+                should_attend_school = _is_default_school_time(snapshot_time)
+                student_mask = student_dest_idx_arr >= 0
+                if should_attend_school:
+                    scheduled_mask = student_mask
+                    is_home_arr[scheduled_mask] = False
+                    dest_idx_arr[scheduled_mask] = student_dest_idx_arr[scheduled_mask]
+                    leave_time_arr[scheduled_mask] = -1
+                    at_school_arr[scheduled_mask] = True
+                else:
+                    leaving_school_mask = at_school_arr & student_mask
+                    if leaving_school_mask.any():
+                        is_home_arr[leaving_school_mask] = True
+                        leave_time_arr[leaving_school_mask] = -1
+                        at_school_arr[leaving_school_mask] = False
 
         # Demand-pull: fill each POI to its realistic occupancy target
         # O_j = popularity_by_hour * day_factor * f_j * open_gate * scale by topping

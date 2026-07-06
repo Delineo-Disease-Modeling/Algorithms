@@ -202,7 +202,9 @@ def test_assigned_worker_goes_to_work_poi_on_weekday(monkeypatch):
     assert _location_of(out["540"], "0") == ("places", "0")
     assert _location_of(out["960"], "0") == ("places", "0")
     assert _location_of(out["1020"], "0") == ("homes", "home-0")
-    assert _location_of(out["540"], "1") == ("homes", "home-0")
+    assert _location_of(out["540"], "1") == ("places", "2")
+    assert pap["places"]["2"]["label"] == "Out of Zone Work"
+    assert pap["places"]["2"]["external_location_type"] == "out_of_zone_work"
 
 
 def test_assigned_worker_is_not_pulled_to_after_work_random_poi(monkeypatch):
@@ -228,6 +230,43 @@ def test_assigned_worker_is_not_pulled_to_after_work_random_poi(monkeypatch):
     assert _location_of(out["960"], "0") == ("places", "0")
     assert _location_of(out["1020"], "0") == ("homes", "home-0")
     assert _location_of(out["1080"], "0") == ("homes", "home-0")
+
+
+# --- students use their persistent assigned school ---------------------------
+
+def test_assigned_student_goes_to_school_on_weekday(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    school_h = [0] * 24
+    other_h = [0] * 24
+    other_h[14] = 100
+    other_h[15] = 100
+    pap = _papdata(["school", "other"], n_people=2, n_homes=1)
+    pap["people"]["0"].update({
+        "is_student": True,
+        "school_location_type": "poi",
+        "school_poi": "0",
+    })
+    pap["people"]["1"].update({
+        "is_student": True,
+        "school_location_type": "out_of_zone",
+        "school_poi": None,
+    })
+    shared = _shared([
+        _poi("school", school_h, naics="611110", open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", other_h, open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, 0), 16, shared_data=shared)
+
+    assert _location_of(out["420"], "0") == ("homes", "home-0")
+    assert _location_of(out["480"], "0") == ("places", "0")
+    assert _location_of(out["840"], "0") == ("places", "0")
+    assert _location_of(out["900"], "0") == ("homes", "home-0")
+    assert _location_of(out["960"], "0") == ("homes", "home-0")
+
+    assert _location_of(out["480"], "1") == ("places", "2")
+    assert pap["places"]["2"]["label"] == "Out of Zone School"
+    assert pap["places"]["2"]["external_location_type"] == "out_of_zone_school"
 
 
 # --- determinism + bounded occupancy (no dwell-driven ballooning) -------------
