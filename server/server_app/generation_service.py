@@ -11,6 +11,7 @@ from geojsongen import get_cbg_geojson
 from patterns import gen_patterns
 from patterns_loader import PatternsData, resolve_patterns_files, states_from_cbgs
 from popgen import gen_pop
+from worker_assignment import load_home_origin_capture
 
 
 def _perf_timings_enabled():
@@ -34,10 +35,12 @@ class ConvenienceZoneGenerationService:
             self.generation_store.update(czone_id, 'Loading patterns data...', 5)
             shared_data = None
             cbg_set = set(geoids.keys())
+            resolved_files = []
 
             stage_start = time.perf_counter()
             if patterns_file:
-                shared_data = PatternsData.load([patterns_file], cbg_set=cbg_set)
+                resolved_files = [patterns_file]
+                shared_data = PatternsData.load(resolved_files, cbg_set=cbg_set)
             else:
                 states = states_from_cbgs(list(cbg_set))
                 if states:
@@ -50,10 +53,32 @@ class ConvenienceZoneGenerationService:
             report.info(f'Patterns data loaded: {len(shared_data.df) if shared_data else 0} rows')
             self.generation_store.update(czone_id, 'Patterns data loaded', 20)
 
+            report.info('Computing resident home-origin movement capture...')
+            stage_start = time.perf_counter()
+            home_origin_capture = (
+                load_home_origin_capture(resolved_files, cbg_set, source_cbgs=cbg_set)
+                if resolved_files
+                else None
+            )
+            _report_perf_timing(report, 'home_origin_capture', stage_start)
+            if home_origin_capture:
+                avg_capture = sum(home_origin_capture.values()) / len(home_origin_capture)
+                report.info(
+                    f'Home-origin capture computed for {len(home_origin_capture)} CBGs '
+                    f'(mean p_inside={avg_capture:.3f})'
+                )
+            else:
+                report.info('Home-origin capture unavailable; worker assignment will use fallback')
+
             report.info('Generating synthetic population (papdata)...')
             self.generation_store.update(czone_id, 'Generating synthetic population...', 25)
             stage_start = time.perf_counter()
-            papdata = gen_pop(geoids, gdf=gdf, shared_data=shared_data)
+            papdata = gen_pop(
+                geoids,
+                gdf=gdf,
+                shared_data=shared_data,
+                home_origin_capture=home_origin_capture,
+            )
             _report_perf_timing(report, 'gen_pop', stage_start)
             people_count = len(papdata.get('people', {}))
             homes_count = len(papdata.get('homes', {}))

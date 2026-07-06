@@ -55,6 +55,13 @@ class CensusDataPuller:
             "size_5": "B11016_006E",
             "size_6": "B11016_007E",
             "size_7_plus": "B11016_008E",
+            "nonfamily_size_1": "B11016_010E",
+            "nonfamily_size_2": "B11016_011E",
+            "nonfamily_size_3": "B11016_012E",
+            "nonfamily_size_4": "B11016_013E",
+            "nonfamily_size_5": "B11016_014E",
+            "nonfamily_size_6": "B11016_015E",
+            "nonfamily_size_7_plus": "B11016_016E",
             # From B11017
             "multigenerational_households": "B11017_002E",
             # From B09019

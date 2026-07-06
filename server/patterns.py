@@ -23,6 +23,9 @@ def _perf_timings_enabled() -> bool:
 
 _PANEL_DEFAULT = 19.7   # SafeGraph panel->population factor (OK ~19.7); overridden from data
 _MONTH_DAYS = 30.0      # popularity_by_hour is a monthly device-hours total
+_WORK_START_HOUR = 9
+_WORK_END_HOUR = 17
+_WORK_WEEKDAYS = {0, 1, 2, 3, 4}
 
 
 def _movement_scale(stats_df) -> float:
@@ -47,6 +50,13 @@ def _movement_scale(stats_df) -> float:
     except Exception:
         pass
     return panel / _MONTH_DAYS
+
+
+def _is_default_work_time(snapshot_time: datetime) -> bool:
+    return (
+        snapshot_time.weekday() in _WORK_WEEKDAYS
+        and _WORK_START_HOUR <= snapshot_time.hour < _WORK_END_HOUR
+    )
 
 
 def _parse_hour_list(val) -> List[int]:
@@ -428,14 +438,29 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         n_people = len(people)
         pid_str_list: List[str] = [None] * n_people  # str(int(sid))
         home_str_list: List[str] = [None] * n_people  # str(info["home"])
+        demand_pull_eligible_arr = np.ones(n_people, dtype=bool)
         for i, (sid, info) in enumerate(people):
             pid_str_list[i] = str(int(sid))
             home_str_list[i] = str(info.get("home"))
+            if isinstance(info, dict) and info.get("is_worker") is True:
+                demand_pull_eligible_arr[i] = False
         is_home_arr = np.ones(n_people, dtype=bool)
         leave_time_arr = np.full(n_people, -1, dtype=np.int64)
         # Destination as a global place index (-1 = home), so current occupancy
         # is a vectorized bincount and the snapshot maps index -> place_id.
         dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
+        place_id_to_idx = {place_id: idx for idx, place_id in enumerate(all_place_ids)}
+        worker_dest_idx_arr = np.full(n_people, -1, dtype=np.int64)
+        for i, (_, info) in enumerate(people):
+            if not isinstance(info, dict) or info.get("work_location_type") != "poi":
+                continue
+            work_poi = info.get("work_poi")
+            if work_poi is None:
+                continue
+            work_idx = place_id_to_idx.get(str(work_poi))
+            if work_idx is not None:
+                worker_dest_idx_arr[i] = work_idx
+        at_work_arr = np.zeros(n_people, dtype=bool)
 
     output: Dict[str, Any] = {}
 
@@ -443,6 +468,9 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
 
     for hour_idx in range(duration):
         current_time = start_time + timedelta(hours=hour_idx)
+        # Snapshots are emitted at the end of the processed hour. Base the work
+        # block on that timestamp so the movement tracker displays 09:00-17:00.
+        snapshot_time = current_time + timedelta(hours=1)
         weekday = WEEKDAYS[current_time.weekday()]
         hour_of_day = current_time.hour
 
@@ -454,6 +482,23 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 leave_time_arr[expired_mask] = -1
                 # dest_idx_arr entries are not cleared on return; they are only
                 # read when is_home_arr[i] is False, so stale values are unreachable.
+
+        with _timed("gen_patterns/work_schedule"):
+            if worker_dest_idx_arr.size:
+                should_work = _is_default_work_time(snapshot_time)
+                worker_mask = worker_dest_idx_arr >= 0
+                if should_work:
+                    scheduled_mask = worker_mask
+                    is_home_arr[scheduled_mask] = False
+                    dest_idx_arr[scheduled_mask] = worker_dest_idx_arr[scheduled_mask]
+                    leave_time_arr[scheduled_mask] = -1
+                    at_work_arr[scheduled_mask] = True
+                else:
+                    leaving_work_mask = at_work_arr & worker_mask
+                    if leaving_work_mask.any():
+                        is_home_arr[leaving_work_mask] = True
+                        leave_time_arr[leaving_work_mask] = -1
+                        at_work_arr[leaving_work_mask] = False
 
         # Demand-pull: fill each POI to its realistic occupancy target
         # O_j = popularity_by_hour * day_factor * f_j * open_gate * scale by topping
@@ -471,7 +516,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             needed = np.maximum(0, target_int - current_occ)
             total_needed = int(needed.sum())
 
-            home_indices = np.where(is_home_arr)[0]
+            home_indices = np.where(is_home_arr & demand_pull_eligible_arr)[0]
             n_home = int(home_indices.size)
             if total_needed > 0 and n_home > 0:
                 if total_needed > n_home:

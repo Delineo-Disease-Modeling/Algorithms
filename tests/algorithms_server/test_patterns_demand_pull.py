@@ -74,6 +74,17 @@ def _peak_occ(out):
     return peak
 
 
+def _location_of(snapshot, person_id):
+    person_id = str(person_id)
+    for home_id, people in snapshot.get("homes", {}).items():
+        if person_id in [str(pid) for pid in people]:
+            return "homes", home_id
+    for place_id, people in snapshot.get("places", {}).items():
+        if person_id in [str(pid) for pid in people]:
+            return "places", place_id
+    return "unknown", "unknown"
+
+
 # --- fail loudly, no silent fallback ----------------------------------------
 
 def test_missing_patterns_data_fails_loudly():
@@ -160,6 +171,63 @@ def test_catchment_downscales_external_poi(monkeypatch):
                        duration=24, shared_data=shared)
     peak = _peak_occ(out)
     assert peak.get("0", 0) > 5 * peak.get("1", 1)   # local >> external
+
+
+# --- workers use their persistent assigned workplace -------------------------
+
+def test_assigned_worker_goes_to_work_poi_on_weekday(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    h = [0] * 24
+    pap = _papdata(["work", "other"], n_people=3, n_homes=1)
+    pap["people"]["0"].update({
+        "is_worker": True,
+        "work_location_type": "poi",
+        "work_poi": "0",
+        "work_p_inside": 1.0,
+    })
+    pap["people"]["1"].update({
+        "is_worker": True,
+        "work_location_type": "out_of_zone",
+        "work_poi": None,
+        "work_p_inside": 0.0,
+    })
+    shared = _shared([
+        _poi("work", h, open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", h, open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, 0), 24, shared_data=shared)
+
+    assert _location_of(out["480"], "0") == ("homes", "home-0")
+    assert _location_of(out["540"], "0") == ("places", "0")
+    assert _location_of(out["960"], "0") == ("places", "0")
+    assert _location_of(out["1020"], "0") == ("homes", "home-0")
+    assert _location_of(out["540"], "1") == ("homes", "home-0")
+
+
+def test_assigned_worker_is_not_pulled_to_after_work_random_poi(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    work_h = [0] * 24
+    other_h = [0] * 24
+    other_h[16] = 100
+    other_h[17] = 100
+    pap = _papdata(["work", "other"], n_people=1, n_homes=1)
+    pap["people"]["0"].update({
+        "is_worker": True,
+        "work_location_type": "poi",
+        "work_poi": "0",
+        "work_p_inside": 1.0,
+    })
+    shared = _shared([
+        _poi("work", work_h, open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", other_h, open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, 0), 18, shared_data=shared)
+
+    assert _location_of(out["960"], "0") == ("places", "0")
+    assert _location_of(out["1020"], "0") == ("homes", "home-0")
+    assert _location_of(out["1080"], "0") == ("homes", "home-0")
 
 
 # --- determinism + bounded occupancy (no dwell-driven ballooning) -------------

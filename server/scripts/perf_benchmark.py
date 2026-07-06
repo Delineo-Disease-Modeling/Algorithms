@@ -194,6 +194,7 @@ def run_once(label: str, index: int, output_root: Path, args) -> dict[str, Any]:
     from patterns import gen_patterns
     from patterns_loader import PatternsData
     from popgen import gen_pop
+    from worker_assignment import load_home_origin_capture
     from simulator.runner import SimulationRunner
 
     run_dir = output_root / f"{index:02d}-{label}"
@@ -229,9 +230,18 @@ def run_once(label: str, index: int, output_root: Path, args) -> dict[str, Any]:
         "patterns load",
         lambda: PatternsData.load([str(PATTERNS_FILE)], cbg_set=cbg_set),
     )
+    home_origin_capture, capture_seconds = timed(
+        "home_origin_capture",
+        lambda: load_home_origin_capture([str(PATTERNS_FILE)], cbg_set, source_cbgs=cbg_set),
+    )
     papdata, gen_pop_seconds = timed(
         "gen_pop",
-        lambda: gen_pop(geoids, gdf=gdf, shared_data=shared_data),
+        lambda: gen_pop(
+            geoids,
+            gdf=gdf,
+            shared_data=shared_data,
+            home_origin_capture=home_origin_capture,
+        ),
     )
     patterns, gen_patterns_seconds = timed(
         "gen_patterns",
@@ -323,6 +333,7 @@ def run_once(label: str, index: int, output_root: Path, args) -> dict[str, Any]:
         "timings": {
             "generate_cz": generate_cz_seconds,
             "patterns_load": patterns_load_seconds,
+            "home_origin_capture": capture_seconds,
             "gen_pop": gen_pop_seconds,
             "gen_patterns": gen_patterns_seconds,
             "simulation": simulation_seconds,

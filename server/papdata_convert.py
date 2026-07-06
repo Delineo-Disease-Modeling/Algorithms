@@ -16,6 +16,7 @@ except ImportError:
 # Catchment helpers shared with gen_patterns so the places-bundle f_j matches the
 # movement-target f_j (same definition + same per-run median fallback).
 from patterns import _catchment_fraction, _median_fj_fallback
+from worker_assignment import assign_workers
 
 # Lower bound on the emitted per-POI catchment fraction f_j. The simulator's
 # external-FOI term scales as (1 - f_j)/f_j, which diverges as f_j -> 0, so a data
@@ -25,7 +26,7 @@ from patterns import _catchment_fraction, _median_fj_fallback
 CATCHMENT_FJ_FLOOR = 0.02
 
 
-def convert_data(df, cz_data, shared_data=None):
+def convert_data(df, cz_data, shared_data=None, home_origin_capture=None):
     """
     Convert data frame with person and household information into a specific dictionary format.
 
@@ -34,6 +35,9 @@ def convert_data(df, cz_data, shared_data=None):
         cz_data: Dictionary mapping CBG IDs to population counts
         shared_data: Pre-loaded PatternsData used to derive the places dict.
             If None/empty, the output will contain zero places.
+        home_origin_capture: Optional CBG -> p_inside map computed from full
+            SafeGraph visitor_home_cbgs rows. Used for v1 persistent worker
+            inside/outside assignment.
     """
     # Initialize output dictionary
     output = {
@@ -50,18 +54,20 @@ def convert_data(df, cz_data, shared_data=None):
     for index, row in df.iterrows():
         person_id = str(row['person_id'])
         household_id = str(row['household_id'])
+        home_cbg = str(row['cbg'])
 
         # Add person to people dictionary
         output["people"][person_id] = {
             "sex": sex_mapping.get(row['gender']),
             "age": row['age'],
-            "home": household_id
+            "home": household_id,
+            "home_cbg": home_cbg
         }
 
         # Add or update household in homes dictionary
         if household_id not in output["homes"]:
             home_data = {
-                "cbg": row['cbg'],
+                "cbg": home_cbg,
                 "members": 1
             }
             # Add coordinates if available
@@ -82,6 +88,7 @@ def convert_data(df, cz_data, shared_data=None):
         'longitude',
         'street_address',
         'postal_code',
+        'poi_cbg',
         'polygon_wkt',
         'wkt_area_sq_meters',
         'visitor_home_cbgs',
@@ -177,6 +184,7 @@ def convert_data(df, cz_data, shared_data=None):
         output['places'][str(i)] = {
             'placekey': row['placekey'],
             'label': row['location_name'],
+            'cbg': str(row['poi_cbg']).strip().zfill(12) if not pd.isna(row.get('poi_cbg')) else None,
             'latitude': _coerce_coord(row['latitude']),
             'longitude': _coerce_coord(row['longitude']),
             # Sometimes this is empty
@@ -187,5 +195,7 @@ def convert_data(df, cz_data, shared_data=None):
             'area': float(_area),
             'catchment_fj': max(CATCHMENT_FJ_FLOOR, float(_fj)),
         }
+
+    assign_workers(output, home_origin_capture=home_origin_capture)
 
     return output

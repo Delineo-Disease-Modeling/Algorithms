@@ -19,6 +19,7 @@ except ImportError:
 # `from popgen import CensusDataPuller / convert_data / CENSUS_API_KEY_DEFAULT /
 # CATCHMENT_FJ_FLOOR`.
 from census_data import CensusDataPuller, CENSUS_API_KEY_DEFAULT  # noqa: F401
+from cbg_demographics import CbgSexAgeSampler
 from papdata_convert import convert_data, CATCHMENT_FJ_FLOOR  # noqa: F401
 # Re-exported so `popgen._catchment_fraction` / `popgen._median_fj_fallback`
 # stay the documented single access point for the shared f_j helpers (their f_j
@@ -62,8 +63,15 @@ class SyntheticPopulationGenerator:
         else:
             print("Residential sampling unavailable - homes will not have coordinates")
 
+        self.cbg_sex_age_sampler = CbgSexAgeSampler.load_default(cz_data.keys())
+        if self.cbg_sex_age_sampler is not None:
+            print(f"CBG sex-age demographics loaded from {self.cbg_sex_age_sampler.source_path}")
+        else:
+            print("CBG sex-age demographics unavailable - using role-based age/sex fallback")
+
         # Age distributions (simplified)
-        # TODO: Create a function to derive age distributions from additional census data
+        # Used as a fallback when CBG-level B01001 sex-by-age data is unavailable
+        # or has no matching count for a role's age range.
         self.age_distributions = {
             'householder': {'mean': 50, 'std': 15, 'min': 18, 'max': 95},
             'spouse_partner': {'mean': 48, 'std': 15, 'min': 18, 'max': 95},
@@ -82,55 +90,134 @@ class SyntheticPopulationGenerator:
         age = int(np.random.normal(dist['mean'], dist['std']))
         return max(min(age, dist['max']), dist['min'])  # Clamp to min/max
 
+    def generate_demographics(self, cbg: str, role: str, gender: Optional[str] = None) -> tuple[str, int]:
+        """Generate sex and age for a person in ``cbg``.
+
+        Prefer CBG-level B01001 sex-by-age counts, filtered to the role's existing
+        plausible age range. When no CBG row / matching bucket exists, fall back to
+        the legacy role-age normal distribution and a supplied or random sex.
+        """
+        dist = self.age_distributions.get(role, self.age_distributions['non_relative'])
+        if self.cbg_sex_age_sampler is not None:
+            sampled = self.cbg_sex_age_sampler.sample(
+                cbg,
+                int(dist['min']),
+                int(dist['max']),
+                sex=gender,
+            )
+            if sampled is not None:
+                return sampled
+        if gender is None:
+            gender = 'M' if random.random() < 0.5 else 'F'
+        return gender, self.generate_age(role)
+
+    @staticmethod
+    def _positive_count(county_data: Dict[str, Any], key: str) -> int:
+        try:
+            return max(0, int(county_data.get(key, 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @classmethod
+    def _household_size_distribution(cls, county_data: Dict[str, Any], is_family: bool) -> List[tuple[int, int]]:
+        if is_family:
+            size_keys = [
+                (2, 'size_2'),
+                (3, 'size_3'),
+                (4, 'size_4'),
+                (5, 'size_5'),
+                (6, 'size_6'),
+                (7, 'size_7_plus'),
+            ]
+        else:
+            size_keys = [
+                (1, 'nonfamily_size_1'),
+                (2, 'nonfamily_size_2'),
+                (3, 'nonfamily_size_3'),
+                (4, 'nonfamily_size_4'),
+                (5, 'nonfamily_size_5'),
+                (6, 'nonfamily_size_6'),
+                (7, 'nonfamily_size_7_plus'),
+            ]
+        return [
+            (size, count)
+            for size, key in size_keys
+            if (count := cls._positive_count(county_data, key)) > 0
+        ]
+
+    @classmethod
+    def _sample_household_size(cls, county_data: Dict[str, Any], is_family: bool) -> int:
+        size_distribution = cls._household_size_distribution(county_data, is_family)
+        if not size_distribution:
+            avg_size = float(county_data.get("avg_household_size") or 1)
+            household_size = max(1, int(np.random.normal(avg_size, 1)))
+            return max(2, household_size) if is_family else household_size
+
+        sizes = [size for size, _ in size_distribution]
+        weights = [count for _, count in size_distribution]
+        size_probs = [count / sum(weights) for count in weights]
+        return int(np.random.choice(sizes, p=size_probs))
+
+    @classmethod
+    def _sample_head_gender(cls, county_data: Dict[str, Any], is_family: bool, household_size: int) -> str:
+        if not is_family and household_size == 1:
+            male_alone = cls._positive_count(county_data, "male_hh_living_alone")
+            female_alone = cls._positive_count(county_data, "female_hh_living_alone")
+            living_alone = male_alone + female_alone
+            if living_alone > 0:
+                return 'M' if random.random() < (male_alone / living_alone) else 'F'
+
+        householders = cls._positive_count(county_data, "householders")
+        male_householders = cls._positive_count(county_data, "male_householders")
+        if householders <= 0:
+            return 'M' if random.random() < 0.5 else 'F'
+        return 'M' if random.random() < (male_householders / householders) else 'F'
+
     def determine_household_composition(self, county_code: str) -> Dict[str, int]:
         """Determine the composition of a household based on census data."""
         county_data = self.census_data[county_code]
 
         # Determine if it's a family household
-        is_family = random.random() < (county_data["total_family_households"] / county_data["total_households"])
+        total_households = max(1, self._positive_count(county_data, "total_households"))
+        family_households = min(
+            total_households,
+            self._positive_count(county_data, "total_family_households"),
+        )
+        is_family = random.random() < (family_households / total_households)
 
-        # Determine household size based on distribution
-        size_distribution = []
-        size_counts = 0
-        for i in range(2, 8):  # Sizes 2 through 7+
-            size_key = f"size_{i}" if i < 7 else "size_7_plus"
-            if size_key in county_data:
-                size_distribution.append((i, county_data[size_key]))
-                size_counts += county_data[size_key]
-
-        # If we don't have size distribution data, use average household size
-        if size_counts == 0:
-            avg_size = county_data["avg_household_size"]
-            household_size = max(1, int(np.random.normal(avg_size, 1)))
-        else:
-            size_probs = [count/size_counts for _, count in size_distribution]
-            household_size = np.random.choice([size for size, _ in size_distribution], p=size_probs)
-
-        # Determine gender of household head
-        head_is_male = random.random() < (county_data["male_householders"] / county_data["householders"])
+        # Determine household size from the matching B11016 family/nonfamily
+        # distribution. This includes 1-person nonfamily households.
+        household_size = self._sample_household_size(county_data, is_family)
 
         # Calculate probabilities for different household types
         has_partner = False
         has_children = 0
         has_relatives = 0
         has_nonrelatives = 0
+        head_gender = self._sample_head_gender(county_data, is_family, household_size)
 
         if is_family:
             # Family households
-            percent_married = (county_data["opposite-sex spouse"] + county_data["same-sex spouse"]) / county_data["family_households"]
+            percent_married = (
+                (self._positive_count(county_data, "opposite-sex spouse")
+                 + self._positive_count(county_data, "same-sex spouse"))
+                / max(1, self._positive_count(county_data, "family_households"))
+            )
             if random.random() < percent_married:  # Most family households have a partner
                 has_partner = True
                 household_size -= 1  # Account for partner
 
             # Determine if has children and how many
-            if random.random() < (county_data.get("with_children_under_18", 0) / max(1, county_data.get("total_family_households", 1))):
+            if random.random() < (
+                self._positive_count(county_data, "with_children_under_18")
+                / max(1, self._positive_count(county_data, "total_family_households"))
+            ):
                 child_count = min(household_size - 1, np.random.geometric(p=0.5))
                 has_children = child_count
                 household_size -= child_count
 
             # Determine if has other relatives and how many
             if household_size > 1:
-                percent_other_relatives = (county_data["brother_or_sister"] + county_data["parent"] + county_data["parent-in-law"] + county_data["son-in-law or daughter-in-law"] + county_data["other_relative"]) / county_data["family_households"]
                 # TODO: Use percent_other_relatives to determine number of relatives
                 relative_count = min(household_size - 1, np.random.poisson(1))
                 has_relatives = relative_count
@@ -140,9 +227,13 @@ class SyntheticPopulationGenerator:
             has_nonrelatives = max(0, household_size - 1)  # -1 for the head
         else:
             # Non-family households
-            non_family_households = county_data["total_households"] - county_data["total_family_households"]
-            percent_unmarried = (county_data["opposite-sex unmarried_partner"] + county_data["same-sex unmarried_partner"]) / non_family_households
-            if random.random() < percent_unmarried:  # Some non-family households have unmarried partners
+            non_family_households = max(0, total_households - family_households)
+            percent_unmarried = (
+                (self._positive_count(county_data, "opposite-sex unmarried_partner")
+                 + self._positive_count(county_data, "same-sex unmarried_partner"))
+                / max(1, non_family_households)
+            )
+            if household_size > 1 and random.random() < percent_unmarried:  # Some non-family households have unmarried partners
                 has_partner = True
                 household_size -= 1
 
@@ -151,7 +242,7 @@ class SyntheticPopulationGenerator:
             has_nonrelatives = max(0, household_size - 1)  # -1 for the head
 
         return {
-            'head_gender': 'M' if head_is_male else 'F',
+            'head_gender': head_gender,
             'has_partner': has_partner,
             'num_children': has_children,
             'num_relatives': has_relatives,
@@ -195,13 +286,14 @@ class SyntheticPopulationGenerator:
 
         # Create household head
         head_gender = household_composition['head_gender']
+        head_gender, head_age = self.generate_demographics(cbg, 'householder', gender=head_gender)
         head = Person(
             person_id=self.next_person_id,
             household_id=household_id,
             county_code=county_code,
             cbg=cbg,
             gender=head_gender,
-            age=self.generate_age('householder'),
+            age=head_age,
             relate_head=1,  # 1: head
             household_lat=household_lat,
             household_lon=household_lon
@@ -216,6 +308,8 @@ class SyntheticPopulationGenerator:
             percent_ss_couples = (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"]) / (county_data["same-sex spouse"] + county_data["same-sex unmarried_partner"] + county_data["opposite-sex unmarried_partner"] + county_data["opposite-sex spouse"])
             if random.random() < percent_ss_couples:
                 partner_gender = head_gender
+            partner_gender, partner_age = self.generate_demographics(
+                cbg, 'spouse_partner', gender=partner_gender)
 
             partner = Person(
                 person_id=self.next_person_id,
@@ -223,7 +317,7 @@ class SyntheticPopulationGenerator:
                 county_code=county_code,
                 cbg=cbg,
                 gender=partner_gender,
-                age=self.generate_age('spouse_partner'),
+                age=partner_age,
                 relate_head=2,  # 2: partner
                 household_lat=household_lat,
                 household_lon=household_lon
@@ -231,17 +325,16 @@ class SyntheticPopulationGenerator:
             self.next_person_id += 1
             household_members.append(partner)
 
-        # TODO: For all non-head members and partners, determine gender via additional census data
         # Add children
         for _ in range(household_composition['num_children']):
-            child_gender = 'M' if random.random() < 0.5 else 'F'
+            child_gender, child_age = self.generate_demographics(cbg, 'child')
             child = Person(
                 person_id=self.next_person_id,
                 household_id=household_id,
                 county_code=county_code,
                 cbg=cbg,
                 gender=child_gender,
-                age=self.generate_age('child'),
+                age=child_age,
                 relate_head=3,  # 3: child
                 household_lat=household_lat,
                 household_lon=household_lon
@@ -251,8 +344,6 @@ class SyntheticPopulationGenerator:
 
         # Add relatives
         for _ in range(household_composition['num_relatives']):
-            relative_gender = 'M' if random.random() < 0.5 else 'F'
-
             # Decide which type of relative.
             # TODO: The son-in-law and daughter-in-law categories imply adult children
             # in the home; revise this to better reflect the actual distribution of
@@ -261,6 +352,7 @@ class SyntheticPopulationGenerator:
                 ['parent', 'sibling', 'grandchild', 'other_relative'],
                 weights=self._relative_type_weights(county_data),
             )[0]
+            relative_gender, relative_age = self.generate_demographics(cbg, relative_type)
 
             relative = Person(
                 person_id=self.next_person_id,
@@ -268,7 +360,7 @@ class SyntheticPopulationGenerator:
                 county_code=county_code,
                 cbg=cbg,
                 gender=relative_gender,
-                age=self.generate_age(relative_type),
+                age=relative_age,
                 relate_head=4,  # 4: relative
                 household_lat=household_lat,
                 household_lon=household_lon
@@ -278,8 +370,8 @@ class SyntheticPopulationGenerator:
 
         # Add non-relatives
         for _ in range(household_composition['num_nonrelatives']):
-            nonrel_gender = 'M' if random.random() < 0.5 else 'F'
             nonrel_type = 'foster_child' if random.random() < 0.1 else 'non_relative'
+            nonrel_gender, nonrel_age = self.generate_demographics(cbg, nonrel_type)
 
             nonrel = Person(
                 person_id=self.next_person_id,
@@ -287,7 +379,7 @@ class SyntheticPopulationGenerator:
                 county_code=county_code,
                 cbg=cbg,
                 gender=nonrel_gender,
-                age=self.generate_age(nonrel_type),
+                age=nonrel_age,
                 relate_head=5,  # 5: non-relative
                 household_lat=household_lat,
                 household_lon=household_lon
@@ -385,7 +477,7 @@ def _apply_bench_seed():
     np.random.seed(seed_int)
 
 
-def gen_pop(cz_data, gdf=None, shared_data=None):
+def gen_pop(cz_data, gdf=None, shared_data=None, home_origin_capture=None):
     """
     Generate synthetic population for a convenience zone.
 
@@ -393,6 +485,8 @@ def gen_pop(cz_data, gdf=None, shared_data=None):
         cz_data: Dictionary mapping CBG IDs to population counts
         gdf: Optional GeoDataFrame with CBG geometries for residential area sampling
         shared_data: Pre-loaded PatternsData used to derive the places dict.
+        home_origin_capture: Optional CBG -> p_inside map used for persistent
+            worker inside/outside assignment.
 
     Returns:
         Dictionary with people, homes, and places data (papdata format)
@@ -434,7 +528,12 @@ def gen_pop(cz_data, gdf=None, shared_data=None):
     # Save the population to CSV
     population = generator.save_population(population)
 
-    return convert_data(population, cz_data, shared_data=shared_data)
+    return convert_data(
+        population,
+        cz_data,
+        shared_data=shared_data,
+        home_origin_capture=home_origin_capture,
+    )
 
 if __name__ == '__main__':
     try:
