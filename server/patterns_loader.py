@@ -42,8 +42,8 @@ ALL_NEEDED_COLUMNS = [
 ]
 
 # Columns handed to gen_patterns via for_patterns_stats(). The first four are
-# the only ones gen_patterns consumes today; the rest are carried through for
-# the staged movement redesign (Stage 0 = plumbing only, no behavior change).
+# the baseline movement fields. The rest support demand scaling, catchment, and
+# open-hours gating; bucketed dwell is carried for later distribution sampling.
 PATTERNS_STATS_COLUMNS = [
     'placekey', 'median_dwell', 'popularity_by_hour', 'popularity_by_day',
     'raw_visit_counts', 'raw_visitor_counts', 'normalized_visits_by_state_scaling',
@@ -296,11 +296,9 @@ class PatternsData:
     def for_patterns_stats(self, placekeys: Set[str]) -> pd.DataFrame:
         """SafeGraph stats for patterns generation.
 
-        Stage 0 widens this projection (PATTERNS_STATS_COLUMNS) to also surface
-        the movement-redesign inputs — absolute visit volume, observed home-CBG
-        catchment, open hours, category. gen_patterns still consumes only the
-        legacy four columns; the extras are carried through unused until the
-        later redesign stages (docs/MOVEMENT_MODEL_REDESIGN.md)."""
+        This projection also carries movement-redesign inputs: absolute visit
+        volume, observed home-CBG catchment, open hours, NAICS, and bucketed
+        dwell for future distribution sampling."""
         cols = [c for c in PATTERNS_STATS_COLUMNS if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()

@@ -207,7 +207,7 @@ def test_assigned_worker_goes_to_work_poi_on_weekday(monkeypatch):
     assert pap["places"]["2"]["external_location_type"] == "out_of_zone_work"
 
 
-def test_assigned_worker_is_not_pulled_to_after_work_random_poi(monkeypatch):
+def test_assigned_worker_can_be_pulled_to_after_work_random_poi(monkeypatch):
     monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
     work_h = [0] * 24
     other_h = [0] * 24
@@ -228,8 +228,8 @@ def test_assigned_worker_is_not_pulled_to_after_work_random_poi(monkeypatch):
     out = gen_patterns(pap, datetime(2021, 1, 4, 0), 18, shared_data=shared)
 
     assert _location_of(out["960"], "0") == ("places", "0")
-    assert _location_of(out["1020"], "0") == ("homes", "home-0")
-    assert _location_of(out["1080"], "0") == ("homes", "home-0")
+    assert _location_of(out["1020"], "0") == ("places", "1")
+    assert _location_of(out["1080"], "0") == ("places", "1")
 
 
 # --- students use their persistent assigned school ---------------------------
@@ -261,8 +261,8 @@ def test_assigned_student_goes_to_school_on_weekday(monkeypatch):
     assert _location_of(out["420"], "0") == ("homes", "home-0")
     assert _location_of(out["480"], "0") == ("places", "0")
     assert _location_of(out["840"], "0") == ("places", "0")
-    assert _location_of(out["900"], "0") == ("homes", "home-0")
-    assert _location_of(out["960"], "0") == ("homes", "home-0")
+    assert _location_of(out["900"], "0") == ("places", "1")
+    assert _location_of(out["960"], "0") == ("places", "1")
 
     assert _location_of(out["480"], "1") == ("places", "2")
     assert pap["places"]["2"]["label"] == "Out of Zone School"

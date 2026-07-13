@@ -7,6 +7,8 @@ from common_geo import STATE_FIPS_TO_ABBR, normalize_cbg
 
 from .constants import DATA_DIR, TEST_CLUSTER_COLUMNS, TEST_PATTERNS_FILE
 
+PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
+
 
 def read_csv_headers(csv_path):
     with open(csv_path, 'r', encoding='utf-8', newline='') as f:
@@ -62,31 +64,55 @@ def resolve_monthly_patterns_file(cbg_str, month_key):
     if not state_abbr:
         return None
 
-    stem = f'{month_key}-{state_abbr}'
-    state_dir = os.path.join(DATA_DIR, 'patterns', state_abbr)
-    for ext in ('.parquet', '.csv.gz', '.converted.csv', '.csv'):
-        path = os.path.join(state_dir, f'{stem}{ext}')
-        if os.path.exists(path):
-            return path
+    return resolve_monthly_patterns_file_for_state(state_abbr, month_key)
+
+
+def monthly_patterns_dirs_for_state(state_abbr):
+    state = str(state_abbr or '').strip().upper()
+    if not state:
+        return []
+    return [
+        os.path.join(DATA_DIR, 'patterns', state),
+        os.path.join(DATA_DIR, state),
+    ]
+
+
+def resolve_monthly_patterns_file_for_state(state_abbr, month_key):
+    state = str(state_abbr or '').strip().upper()
+    month = str(month_key or '').strip()
+    if not state or not month:
+        return None
+
+    stem = f'{month}-{state}'
+    for state_dir in monthly_patterns_dirs_for_state(state):
+        for ext in PATTERN_EXTS:
+            path = os.path.join(state_dir, f'{stem}{ext}')
+            if os.path.exists(path):
+                return path
 
     return None
 
 
-def list_available_months_for_state(cbg_str):
-    state_fips = str(cbg_str)[:2] if cbg_str else ''
-    state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
-    if not state_abbr:
+def list_available_months_for_state_abbr(state_abbr):
+    state = str(state_abbr or '').strip().upper()
+    if not state:
         return []
-
     pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.(?:parquet|csv(?:\.gz)?|converted\.csv)$', re.IGNORECASE)
     months = set()
-    state_dir = os.path.join(DATA_DIR, 'patterns', state_abbr)
-    if os.path.isdir(state_dir):
+    for state_dir in monthly_patterns_dirs_for_state(state):
+        if not os.path.isdir(state_dir):
+            continue
         for filename in os.listdir(state_dir):
             match = pat.match(filename)
             if match:
                 months.add(match.group(1))
     return sorted(months)
+
+
+def list_available_months_for_state(cbg_str):
+    state_fips = str(cbg_str)[:2] if cbg_str else ''
+    state_abbr = STATE_FIPS_TO_ABBR.get(state_fips)
+    return list_available_months_for_state_abbr(state_abbr)
 
 
 def resolve_patterns_file_for_request(seed_cbg, start_date_raw=None, use_test_data=False):

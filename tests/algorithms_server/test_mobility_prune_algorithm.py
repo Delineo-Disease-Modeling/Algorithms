@@ -39,7 +39,10 @@ def test_mobility_prune_removes_lowest_movement_loss_per_person(monkeypatch):
     graph.add_edge('seed_b', 'low_value_small', weight=5.0)
 
     trace = []
-    clustering = Clustering(DummyConfig(), logging.getLogger('test-mobility-prune'))
+    clustering = Clustering(
+        DummyConfig(),
+        logging.getLogger('test-mobility-prune'),
+    )
     cluster, population, metadata = clustering.mobility_prune(
         graph,
         ['seed_a', 'seed_b'],
@@ -57,6 +60,7 @@ def test_mobility_prune_removes_lowest_movement_loss_per_person(monkeypatch):
     assert metadata['removed_cbg_count'] == 1
     assert metadata['minimum_population_used'] is False
     assert metadata['legacy_min_population'] == 500
+    assert metadata['envelope_max_cbgs'] == 1000
     assert metadata['final_seed_capture_share'] >= 0.97
     assert metadata['stopped_by_seed_capture_floor'] is True
     assert trace[0]['metrics_after']['stage'] == 'bounded_envelope_growth'
@@ -136,3 +140,48 @@ def test_mobility_prune_prunes_remote_component_after_large_envelope(monkeypatch
     assert metadata['initial_cbg_count'] == 5
     assert metadata['initial_population'] == 1001000
     assert metadata['removed_cbg_count'] == 2
+
+
+def test_mobility_prune_reports_unmet_seed_capture_when_seed_exceeds_cbg_cap(
+    monkeypatch,
+):
+    populations = {
+        'seed_a': 100,
+        'seed_b': 100,
+        'seed_c': 100,
+        'external': 100,
+    }
+
+    def fake_population(cbg, _config, _logger):
+        return populations.get(cbg, 0)
+
+    monkeypatch.setattr(
+        'czcode_modules.mobility_prune.cbg_population',
+        fake_population,
+    )
+
+    graph = nx.Graph()
+    for cbg in populations:
+        graph.add_node(cbg, self_weight=0.0)
+
+    graph.add_edge('seed_a', 'seed_b', weight=10.0)
+    graph.add_edge('seed_b', 'seed_c', weight=10.0)
+    graph.add_edge('seed_c', 'external', weight=100.0)
+
+    clustering = Clustering(DummyConfig(), logging.getLogger('test-mobility-prune'))
+    cluster, population, metadata = clustering.mobility_prune(
+        graph,
+        ['seed_a', 'seed_b', 'seed_c'],
+        min_pop=500,
+        min_seed_capture=0.80,
+        envelope_population_floor=0,
+        envelope_max_cbgs=2,
+    )
+
+    assert cluster == ['seed_a', 'seed_b', 'seed_c']
+    assert population == 300
+    assert metadata['final_seed_capture_share'] < 0.80
+    assert metadata['seed_capture_target_met'] is False
+    assert metadata['population_target_met'] is False
+    assert metadata['envelope_limited_by_cbg_cap'] is True
+    assert metadata['seed_region_exceeds_envelope_cap'] is True

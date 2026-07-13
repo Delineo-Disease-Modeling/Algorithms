@@ -469,15 +469,9 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         n_people = len(people)
         pid_str_list: List[str] = [None] * n_people  # str(int(sid))
         home_str_list: List[str] = [None] * n_people  # str(info["home"])
-        demand_pull_eligible_arr = np.ones(n_people, dtype=bool)
         for i, (sid, info) in enumerate(people):
             pid_str_list[i] = str(int(sid))
             home_str_list[i] = str(info.get("home"))
-            if (
-                isinstance(info, dict)
-                and (info.get("is_worker") is True or info.get("is_student") is True)
-            ):
-                demand_pull_eligible_arr[i] = False
         is_home_arr = np.ones(n_people, dtype=bool)
         leave_time_arr = np.full(n_people, -1, dtype=np.int64)
         # Destination as a global place index (-1 = home), so current occupancy
@@ -584,7 +578,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             needed = np.maximum(0, target_int - current_occ)
             total_needed = int(needed.sum())
 
-            home_indices = np.where(is_home_arr & demand_pull_eligible_arr)[0]
+            home_indices = np.where(is_home_arr)[0]
             n_home = int(home_indices.size)
             if total_needed > 0 and n_home > 0:
                 if total_needed > n_home:

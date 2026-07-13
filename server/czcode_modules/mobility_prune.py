@@ -15,7 +15,7 @@ class MobilityPruneMixin:
         trace_collector=None,
         envelope_population_multiplier: float = 2.0,
         envelope_population_floor: int = 100000,
-        envelope_max_cbgs: int = 250,
+        envelope_max_cbgs: int = 1000,
         min_seed_capture: float = 0.80,
         trace_candidate_limit: int = 50,
     ):
@@ -81,9 +81,9 @@ class MobilityPruneMixin:
         try:
             max_envelope_cbgs = int(envelope_max_cbgs)
         except (TypeError, ValueError):
-            max_envelope_cbgs = 250
+            max_envelope_cbgs = 1000
         if max_envelope_cbgs <= 0:
-            max_envelope_cbgs = 250
+            max_envelope_cbgs = 1000
 
         try:
             max_trace_candidates = int(trace_candidate_limit)
@@ -577,6 +577,11 @@ class MobilityPruneMixin:
             if seed_movement_total > 0
             else 1.0
         )
+        seed_capture_target_met = (
+            final_seed_capture_share + 1e-12 >= min_seed_capture_threshold
+        )
+        population_target_met = population >= envelope_population_target
+        seed_region_exceeds_envelope_cap = len(seed_set) >= max_envelope_cbgs
         metadata = {
             'seed_cbgs': list(seed_cluster),
             'missing_seed_cbgs': list(missing_seed_cbgs),
@@ -589,6 +594,10 @@ class MobilityPruneMixin:
             'min_seed_capture': float(min_seed_capture_threshold),
             'envelope_growth_iterations': int(growth_iteration),
             'envelope_limited_by_cbg_cap': bool(envelope_limited_by_cbg_cap),
+            'seed_region_exceeds_envelope_cap': bool(
+                seed_region_exceeds_envelope_cap
+            ),
+            'seed_capture_target_met': bool(seed_capture_target_met),
             'stopped_by_seed_capture_floor': bool(stopped_by_seed_capture),
             'initial_cbg_count': int(initial_envelope_cbg_count),
             'initial_population': int(initial_envelope_population),
@@ -607,10 +616,9 @@ class MobilityPruneMixin:
             'final_czi': float(final_czi),
             'minimum_population_used': False,
             'legacy_min_population': int(legacy_min_population),
-            'population_target_met': True,
+            'population_target_met': bool(population_target_met),
             'population_reduced': int(initial_envelope_population - population),
             'removed_cbg_count': int(initial_envelope_cbg_count - len(cluster_set)),
         }
 
         return cluster, int(population), metadata
-

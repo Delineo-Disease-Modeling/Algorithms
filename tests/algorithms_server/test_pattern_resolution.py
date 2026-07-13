@@ -50,3 +50,26 @@ def test_resolve_patterns_file_for_request_exact_or_raise_then_latest_default(tm
     )
     assert latest_path == str(later)
     assert latest_month == '2021-08'
+
+
+def test_resolve_patterns_file_supports_legacy_state_folder(tmp_path, monkeypatch):
+    data_dir = tmp_path / 'data'
+    ok_dir = data_dir / 'OK'
+    ok_dir.mkdir(parents=True)
+    legacy = ok_dir / '2019-01-OK.csv'
+    legacy.write_text('poi_cbg,visitor_daytime_cbgs\n', encoding='utf-8')
+
+    monkeypatch.setattr(pattern_resolution, 'DATA_DIR', str(data_dir))
+
+    path, source, month = pattern_resolution.resolve_patterns_file_for_request(
+        '401139400081',
+        start_date_raw='2019-01-01',
+        use_test_data=False,
+    )
+
+    assert path == str(legacy)
+    assert source == 'monthly'
+    assert month == '2019-01'
+    assert pattern_resolution.list_available_months_for_state('401139400081') == [
+        '2019-01'
+    ]

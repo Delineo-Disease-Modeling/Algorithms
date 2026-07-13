@@ -13,15 +13,13 @@ from run_report import RunReport
 from schema import gen_cz_schema
 
 from .analysis_helpers import compute_geojson_bounds
-from .constants import (
-    DATA_DIR,
-    TEST_SIM_COLUMNS,
-)
+from .constants import TEST_SIM_COLUMNS
 from .errors import ApiError
 from .jobs import stream_events
 from .logging_utils import log_candidate_pois
 from .pattern_resolution import (
     extract_month_key,
+    list_available_months_for_state_abbr,
     months_in_range,
     validate_csv_columns,
 )
@@ -471,22 +469,14 @@ def register_routes(
 
         required_months = months_in_range(start_month, end_month)
 
-        patterns_dir = f'{DATA_DIR}/patterns/{state_abbr}'
-        available_months = []
-        if re and patterns_dir:
-            import os
-            if os.path.isdir(patterns_dir):
-                pat = re.compile(r'^(\d{4}-\d{2})-[A-Z]{2}\.parquet$', re.IGNORECASE)
-                found = set()
-                for filename in os.listdir(patterns_dir):
-                    match = pat.match(filename)
-                    if match:
-                        found.add(match.group(1))
-                available_months = sorted(found)
+        available_months = list_available_months_for_state_abbr(state_abbr)
+        available_months_set = set(available_months)
 
         has_any_data = len(available_months) > 0
-        has_coverage = has_any_data
-        missing_months = [] if has_coverage else required_months
+        missing_months = [
+            month for month in required_months if month not in available_months_set
+        ]
+        has_coverage = has_any_data and len(missing_months) == 0
 
         return jsonify({
             'data': {

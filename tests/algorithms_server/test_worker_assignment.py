@@ -11,6 +11,7 @@ for _m in ("patterns", "patterns_loader", "worker_assignment", "papdata_convert"
 
 from papdata_convert import convert_data  # noqa: E402
 from worker_assignment import (  # noqa: E402
+    assign_workers,
     compute_home_origin_capture,
     effective_workplace_area_weight,
 )
@@ -117,7 +118,7 @@ def _places_with_school():
     return _StubPatterns(rows)
 
 
-def test_worker_assignment_emits_persistent_poi_or_out_of_zone(monkeypatch):
+def test_worker_assignment_emits_persistent_in_zone_pois(monkeypatch):
     monkeypatch.setenv("DELINEO_WORKER_PROB_18_64", "1")
     monkeypatch.setenv("DELINEO_WORKER_PROB_65_PLUS", "0")
 
@@ -136,14 +137,14 @@ def test_worker_assignment_emits_persistent_poi_or_out_of_zone(monkeypatch):
     assert papdata["people"]["1"]["work_poi"] in papdata["places"]
 
     assert papdata["people"]["2"]["is_worker"] is True
-    assert papdata["people"]["2"]["work_location_type"] == "out_of_zone"
-    assert papdata["people"]["2"]["work_poi"] is None
+    assert papdata["people"]["2"]["work_location_type"] == "poi"
+    assert papdata["people"]["2"]["work_poi"] in papdata["places"]
+    assert papdata["people"]["2"]["work_p_inside"] == 0.0
     external_places = [
         place for place in papdata["places"].values()
         if place.get("external_location_type") == "out_of_zone_work"
     ]
-    assert len(external_places) == 1
-    assert external_places[0]["label"] == "Out of Zone Work"
+    assert len(external_places) == 0
 
     assert papdata["people"]["3"]["is_worker"] is False
     assert papdata["people"]["3"]["work_location_type"] == "none"
@@ -156,8 +157,8 @@ def test_worker_assignment_emits_persistent_poi_or_out_of_zone(monkeypatch):
     assert len(school_external_places) == 1
     assert school_external_places[0]["label"] == "Out of Zone School"
     assert papdata["worker_assignment"]["worker_count"] == 2
-    assert papdata["worker_assignment"]["in_zone_worker_count"] == 1
-    assert papdata["worker_assignment"]["out_of_zone_worker_count"] == 1
+    assert papdata["worker_assignment"]["in_zone_worker_count"] == 2
+    assert papdata["worker_assignment"]["out_of_zone_worker_count"] == 0
     assert papdata["school_assignment"]["student_count"] == 1
     assert papdata["school_assignment"]["out_of_zone_student_count"] == 1
 
@@ -181,6 +182,27 @@ def test_school_assignment_uses_elementary_secondary_school_pois(monkeypatch):
     assert school["label"] == "Local Elementary"
     assert school["naics_code"] == "611110"
     assert papdata["school_assignment"]["in_zone_student_count"] == 1
+
+
+def test_worker_assignment_without_work_pois_does_not_emit_out_of_zone(monkeypatch):
+    monkeypatch.setenv("DELINEO_WORKER_PROB_18_64", "1")
+    papdata = {
+        "people": {
+            "1": {
+                "age": 41,
+                "home_cbg": "400010001001",
+            }
+        },
+        "places": {},
+    }
+
+    summary = assign_workers(papdata)
+
+    assert papdata["people"]["1"]["is_worker"] is False
+    assert papdata["people"]["1"]["work_location_type"] == "none"
+    assert summary["worker_count"] == 0
+    assert summary["out_of_zone_worker_count"] == 0
+    assert "external_workplace_id" not in papdata
 
 
 def test_effective_workplace_area_weight_is_capped():

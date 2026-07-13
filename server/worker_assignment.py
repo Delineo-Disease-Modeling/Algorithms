@@ -307,10 +307,10 @@ def assign_workers(
 ) -> Dict[str, Any]:
     """Annotate papdata people with persistent v1 work assignments.
 
-    Employment is age-probability based. In-zone workers are assigned to exactly
-    one persistent POI, sampled by capped POI area. Out-of-zone workers are
-    annotated here and later routed to the synthetic external-work placeholder
-    by movement generation.
+    Employment is age-probability based. Workers are assigned to exactly one
+    in-zone persistent POI, sampled by capped POI area. ``work_p_inside`` is
+    retained as diagnostic metadata from observed home-origin capture, but it
+    no longer routes workers out of the zone.
     """
     people = papdata.get("people", {})
     places = papdata.get("places", {})
@@ -323,7 +323,7 @@ def assign_workers(
         p_inside_fallback = 1.0 if place_ids else 0.0
 
     summary = {
-        "version": "v1_area_weighted",
+        "version": "v1_area_weighted_in_zone_only",
         "employment_probability_18_64": employment_probability(18),
         "employment_probability_65_plus": employment_probability(65),
         "area_weight_min_m2": MIN_WORKPLACE_AREA_M2,
@@ -351,22 +351,26 @@ def assign_workers(
             summary["non_worker_count"] += 1
             continue
 
+        if not place_ids:
+            if isinstance(person, dict):
+                person["is_worker"] = False
+                person["work_location_type"] = "none"
+                person["work_poi"] = None
+                person["work_p_inside"] = None
+            summary["non_worker_count"] += 1
+            continue
+
         summary["worker_count"] += 1
         home_cbg = person.get("home_cbg") if isinstance(person, dict) else None
         p_inside = _capture_for_cbg(home_origin_capture, home_cbg, p_inside_fallback)
         person["is_worker"] = True
         person["work_p_inside"] = p_inside
 
-        if place_ids and random.random() < p_inside:
-            work_poi = random.choices(place_ids, weights=place_weights, k=1)[0]
-            person["work_location_type"] = "poi"
-            person["work_poi"] = work_poi
-            summary["in_zone_worker_count"] += 1
-            workers_by_poi[work_poi] = workers_by_poi.get(work_poi, 0) + 1
-        else:
-            person["work_location_type"] = "out_of_zone"
-            person["work_poi"] = None
-            summary["out_of_zone_worker_count"] += 1
+        work_poi = random.choices(place_ids, weights=place_weights, k=1)[0]
+        person["work_location_type"] = "poi"
+        person["work_poi"] = work_poi
+        summary["in_zone_worker_count"] += 1
+        workers_by_poi[work_poi] = workers_by_poi.get(work_poi, 0) + 1
 
     summary["workplace_poi_count"] = len(workers_by_poi)
     if workers_by_poi:

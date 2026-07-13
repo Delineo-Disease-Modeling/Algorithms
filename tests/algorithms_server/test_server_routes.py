@@ -35,6 +35,31 @@ def test_seed_region_route_rejects_invalid_zip(client):
     assert response.get_json()['message'] == "Missing or invalid 'zip': expected exactly 5 digits"
 
 
+def test_pattern_availability_reports_legacy_months_and_missing_range(
+    client, monkeypatch
+):
+    monkeypatch.setattr(
+        'server_app.routes.list_available_months_for_state_abbr',
+        lambda state: ['2019-01', '2019-02'] if state == 'OK' else [],
+    )
+
+    covered = client.get(
+        '/pattern-availability?state=OK&start_date=2019-01-01&end_date=2019-02-28'
+    )
+    missing = client.get(
+        '/pattern-availability?state=OK&start_date=2019-01-01&end_date=2019-03-31'
+    )
+
+    assert covered.status_code == 200
+    assert covered.get_json()['data']['available_months'] == ['2019-01', '2019-02']
+    assert covered.get_json()['data']['has_coverage'] is True
+    assert covered.get_json()['data']['missing_months'] == []
+
+    assert missing.status_code == 200
+    assert missing.get_json()['data']['has_coverage'] is False
+    assert missing.get_json()['data']['missing_months'] == ['2019-03']
+
+
 def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monkeypatch):
     monkeypatch.setattr(
         'server_app.request_parsing.resolve_patterns_file_for_request',
