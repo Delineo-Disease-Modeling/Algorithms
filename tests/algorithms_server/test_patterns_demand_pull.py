@@ -173,6 +173,27 @@ def test_catchment_downscales_external_poi(monkeypatch):
     assert peak.get("0", 0) > 5 * peak.get("1", 1)   # local >> external
 
 
+# --- released visitors spend a full snapshot at home -------------------------
+
+def test_expired_generic_visitor_is_not_reselected_in_same_timestep(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    h = [0] * 24
+    h[0] = h[1] = h[2] = h[3] = 100
+    shared = _shared([
+        _poi("shop", h, dwell=1,
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(_papdata(["shop"], n_people=1, n_homes=1),
+                       datetime(2021, 1, 4, 0), 4, shared_data=shared)
+
+    locations = [_location_of(out[str(minute)], "0")
+                 for minute in (60, 120, 180, 240)]
+    assert locations[0] == ("places", "0")
+    first_home = locations.index(("homes", "home-0"))
+    assert locations[first_home + 1] == ("places", "0")
+
+
 # --- workers use their persistent assigned workplace -------------------------
 
 def test_assigned_worker_goes_to_work_poi_on_weekday(monkeypatch):
@@ -207,7 +228,7 @@ def test_assigned_worker_goes_to_work_poi_on_weekday(monkeypatch):
     assert pap["places"]["2"]["external_location_type"] == "out_of_zone_work"
 
 
-def test_assigned_worker_can_be_pulled_to_after_work_random_poi(monkeypatch):
+def test_worker_released_at_17_cannot_be_pulled_until_next_timestep(monkeypatch):
     monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
     work_h = [0] * 24
     other_h = [0] * 24
@@ -228,8 +249,35 @@ def test_assigned_worker_can_be_pulled_to_after_work_random_poi(monkeypatch):
     out = gen_patterns(pap, datetime(2021, 1, 4, 0), 18, shared_data=shared)
 
     assert _location_of(out["960"], "0") == ("places", "0")
-    assert _location_of(out["1020"], "0") == ("places", "1")
+    assert _location_of(out["1020"], "0") == ("homes", "home-0")
     assert _location_of(out["1080"], "0") == ("places", "1")
+
+
+def test_release_cooldown_does_not_backfill_from_other_residents(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    work_h = [0] * 24
+    other_h = [0] * 24
+    other_h[16] = 100
+    pap = _papdata(["work", "other"], n_people=200, n_homes=10)
+    for person_id in range(100):
+        pap["people"][str(person_id)].update({
+            "is_worker": True,
+            "work_location_type": "poi",
+            "work_poi": "0",
+            "work_p_inside": 1.0,
+        })
+    shared = _shared([
+        _poi("work", work_h,
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", other_h,
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, 0), 17, shared_data=shared)
+
+    visitors = out["1020"].get("places", {}).get("1", [])
+    assert 0 < len(visitors) < 100
+    assert all(int(person_id) >= 100 for person_id in visitors)
 
 
 # --- students use their persistent assigned school ---------------------------
@@ -238,8 +286,6 @@ def test_assigned_student_goes_to_school_on_weekday(monkeypatch):
     monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
     school_h = [0] * 24
     other_h = [0] * 24
-    other_h[14] = 100
-    other_h[15] = 100
     pap = _papdata(["school", "other"], n_people=2, n_homes=1)
     pap["people"]["0"].update({
         "is_student": True,
@@ -261,12 +307,77 @@ def test_assigned_student_goes_to_school_on_weekday(monkeypatch):
     assert _location_of(out["420"], "0") == ("homes", "home-0")
     assert _location_of(out["480"], "0") == ("places", "0")
     assert _location_of(out["840"], "0") == ("places", "0")
-    assert _location_of(out["900"], "0") == ("places", "1")
-    assert _location_of(out["960"], "0") == ("places", "1")
+    assert _location_of(out["900"], "0") == ("homes", "home-0")
+    assert _location_of(out["960"], "0") == ("homes", "home-0")
 
     assert _location_of(out["480"], "1") == ("places", "2")
     assert pap["places"]["2"]["label"] == "Out of Zone School"
     assert pap["places"]["2"]["external_location_type"] == "out_of_zone_school"
+
+
+def test_student_dismissed_at_15_cannot_be_pulled_until_next_timestep(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    school_h = [0] * 24
+    other_h = [0] * 24
+    other_h[14] = other_h[15] = 100
+    pap = _papdata(["school", "other"], n_people=1, n_homes=1)
+    pap["people"]["0"].update({
+        "is_student": True,
+        "school_location_type": "poi",
+        "school_poi": "0",
+    })
+    shared = _shared([
+        _poi("school", school_h, naics="611110",
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", other_h,
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, 0), 16, shared_data=shared)
+
+    assert _location_of(out["840"], "0") == ("places", "0")
+    assert _location_of(out["900"], "0") == ("homes", "home-0")
+    assert _location_of(out["960"], "0") == ("places", "1")
+
+
+@pytest.mark.parametrize(
+    ("start_hour", "assignment", "scheduled_place"),
+    [
+        (7, {
+            "is_worker": True,
+            "work_location_type": "poi",
+            "work_poi": "0",
+            "work_p_inside": 1.0,
+        }, "work"),
+        (6, {
+            "is_student": True,
+            "school_location_type": "poi",
+            "school_poi": "0",
+        }, "school"),
+    ],
+    ids=["worker", "student"],
+)
+def test_schedule_overrides_generic_expiry_cooldown(
+        monkeypatch, start_hour, assignment, scheduled_place):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    assigned_h = [0] * 24
+    generic_h = [0] * 24
+    generic_h[start_hour] = 100
+    pap = _papdata([scheduled_place, "other"], n_people=1, n_homes=1)
+    pap["people"]["0"].update(assignment)
+    shared = _shared([
+        _poi(scheduled_place, assigned_h,
+             naics="611110" if scheduled_place == "school" else "445110",
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+        _poi("other", generic_h, dwell=1,
+             open_hours={a: [["0:00", "24:00"]] for a in ABBR}),
+    ])
+
+    out = gen_patterns(pap, datetime(2021, 1, 4, start_hour), 2,
+                       shared_data=shared)
+
+    assert _location_of(out["60"], "0") == ("places", "1")
+    assert _location_of(out["120"], "0") == ("places", "0")
 
 
 # --- determinism + bounded occupancy (no dwell-driven ballooning) -------------

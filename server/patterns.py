@@ -522,6 +522,10 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         # People whose dwell time expires this hour return home.
         with _timed("gen_patterns/leave_time_expiry"):
             expired_mask = (leave_time_arr == hour_idx)
+            # Keep every generic expiry and schedule release at home for this
+            # emitted snapshot. Scheduled work/school may still override this
+            # mask below because demand-pull only considers people still home.
+            returned_home_this_hour = expired_mask.copy()
             if expired_mask.any():
                 is_home_arr[expired_mask] = True
                 leave_time_arr[expired_mask] = -1
@@ -540,6 +544,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     at_work_arr[scheduled_mask] = True
                 else:
                     leaving_work_mask = at_work_arr & worker_mask
+                    returned_home_this_hour |= leaving_work_mask
                     if leaving_work_mask.any():
                         is_home_arr[leaving_work_mask] = True
                         leave_time_arr[leaving_work_mask] = -1
@@ -557,6 +562,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     at_school_arr[scheduled_mask] = True
                 else:
                     leaving_school_mask = at_school_arr & student_mask
+                    returned_home_this_hour |= leaving_school_mask
                     if leaving_school_mask.any():
                         is_home_arr[leaving_school_mask] = True
                         leave_time_arr[leaving_school_mask] = -1
@@ -578,7 +584,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             needed = np.maximum(0, target_int - current_occ)
             total_needed = int(needed.sum())
 
-            home_indices = np.where(is_home_arr)[0]
+            home_indices = np.flatnonzero(is_home_arr)
             n_home = int(home_indices.size)
             if total_needed > 0 and n_home > 0:
                 if total_needed > n_home:
@@ -588,12 +594,21 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 if total_needed > 0:
                     dest_assign = np.repeat(np.arange(n_places_total), needed)
                     movers = rng.choice(home_indices, size=total_needed, replace=False)
-                    med = dwell_arr[dest_assign]
-                    lo = np.maximum(1, med - 1)
-                    dwell_hours_arr = rng.integers(lo, med + 2)
-                    is_home_arr[movers] = False
-                    dest_idx_arr[movers] = dest_assign
-                    leave_time_arr[movers] = np.minimum(duration, hour_idx + dwell_hours_arr)
+                    # Do not backfill demand slots that selected someone who
+                    # just returned home; otherwise their cooldown simply
+                    # transfers the same movement burden to other residents.
+                    eligible_selection = ~returned_home_this_hour[movers]
+                    movers = movers[eligible_selection]
+                    dest_assign = dest_assign[eligible_selection]
+                    if movers.size:
+                        med = dwell_arr[dest_assign]
+                        lo = np.maximum(1, med - 1)
+                        dwell_hours_arr = rng.integers(lo, med + 2)
+                        is_home_arr[movers] = False
+                        dest_idx_arr[movers] = dest_assign
+                        leave_time_arr[movers] = np.minimum(
+                            duration, hour_idx + dwell_hours_arr
+                        )
 
         # Snapshot at the end of this hour
         with _timed("gen_patterns/snapshot_assembly"):
