@@ -12,6 +12,10 @@ import time
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
 
+from dwell import (
+    build_dwell_models,
+    sample_dwell_hours,
+)
 from worker_assignment import ensure_external_locations
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -74,6 +78,8 @@ def _is_default_school_time(snapshot_time: datetime) -> bool:
 def _static_external_stats() -> Dict[str, Any]:
     return {
         "median_dwell_hours": 8,
+        "dwell_probabilities": None,
+        "dwell_tail_geometric_p": 1.0,
         "day_factor": {wd: 1.0 for wd in WEEKDAYS},
         "raw_hour_counts": [0] * 24,
         "open_gate": {wd: [1.0] * 24 for wd in WEEKDAYS},
@@ -315,7 +321,8 @@ def _median_fj_fallback(fj_values) -> float:
 
 def _build_stats_from_df(df: pd.DataFrame,
                          placekey_to_place_id: Dict[str, str],
-                         cluster_cbgs: Optional[set] = None) -> Dict[str, Dict[str, Any]]:
+                         cluster_cbgs: Optional[set] = None,
+                         dwell_reference=None) -> Dict[str, Dict[str, Any]]:
     """
     Build per-place stats from a DataFrame that already has the needed columns
     (placekey, median_dwell, popularity_by_hour, popularity_by_day).
@@ -330,6 +337,7 @@ def _build_stats_from_df(df: pd.DataFrame,
     stats: Dict[str, Dict[str, Any]] = {}
     needed = set(placekey_to_place_id.keys())
 
+    dwell_models = build_dwell_models(df, needed, reference=dwell_reference)
     subset = df[df["placekey"].isin(needed)]
     for _, row in subset.iterrows():
         placekey = row["placekey"]
@@ -340,6 +348,8 @@ def _build_stats_from_df(df: pd.DataFrame,
         median_dwell_minutes = row.get("median_dwell", None)
         if pd.isna(median_dwell_minutes):
             median_dwell_minutes = 60
+        median_dwell_hours = _ceil_hours_from_minutes(median_dwell_minutes)
+        dwell_model = dwell_models.get(str(placekey))
 
         hour_list = _parse_hour_list(row.get("popularity_by_hour", "[]"))
         day_map = _parse_day_map(row.get("popularity_by_day", "{}"))
@@ -354,7 +364,24 @@ def _build_stats_from_df(df: pd.DataFrame,
             day_factor = {k: 1.0 for k in WEEKDAYS}
 
         stats[place_id] = {
-            "median_dwell_hours": _ceil_hours_from_minutes(median_dwell_minutes),
+            # Legacy median remains available for rows without usable bucket
+            # data. Assigned workers/students use schedules instead of this value.
+            "median_dwell_hours": median_dwell_hours,
+            "dwell_probabilities": (
+                dwell_model.probabilities.tolist() if dwell_model else None
+            ),
+            "dwell_tail_geometric_p": (
+                dwell_model.tail_geometric_p if dwell_model else 1.0
+            ),
+            "dwell_category_level": (
+                dwell_model.category_level if dwell_model else None
+            ),
+            "dwell_poi_weight": (
+                dwell_model.poi_weight if dwell_model else None
+            ),
+            "dwell_fallback_reasons": (
+                dwell_model.fallback_reasons if dwell_model else ()
+            ),
             "day_factor": day_factor,
             "raw_hour_counts": hour_list,
             # open-hours gate (hard for real hours, soft NAICS-default otherwise).
@@ -370,6 +397,13 @@ def _build_stats_from_df(df: pd.DataFrame,
     for s in stats.values():
         if s["catchment_fj"] is None:
             s["catchment_fj"] = fallback
+    hard_fallbacks = sum(bool(s["dwell_fallback_reasons"]) for s in stats.values())
+    if hard_fallbacks:
+        _PATTERNS_LOGGER.info(
+            "Replaced unreliable POI dwell distributions with category priors: %d/%d",
+            hard_fallbacks,
+            len(stats),
+        )
     return stats
 
 
@@ -379,7 +413,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
     Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
       - popularity_by_hour (time-of-day)
       - popularity_by_day (day-of-week)
-      - median_dwell (stay length in hours = ceil(median_dwell/60))
+      - bucketed dwell distributions, shrunk toward comparable NAICS peers
     Inputs:
       papdata: dict with keys 'people', 'homes', 'places' (already loaded)
       start_time: simulation start timestamp (datetime)
@@ -431,7 +465,16 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 "refusing to generate a movement-free run.")
         placekey_set = set(placekey_to_place_id.keys())
         stats_df = shared_data.for_patterns_stats(placekey_set)
-        stats = _build_stats_from_df(stats_df, placekey_to_place_id, cluster_cbgs)
+        dwell_reference_getter = getattr(shared_data, "for_dwell_reference", None)
+        dwell_reference = (
+            dwell_reference_getter() if callable(dwell_reference_getter) else None
+        )
+        stats = _build_stats_from_df(
+            stats_df,
+            placekey_to_place_id,
+            cluster_cbgs,
+            dwell_reference=dwell_reference,
+        )
 
         # Demand-pull precompute: a stable global place ordering plus the per-POI
         # inputs to the occupancy target, as numpy matrices so each hour's fill is
@@ -458,6 +501,16 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         gate_mat = np.array([[[stats[p]["open_gate"][wd][h] for h in range(24)] for wd in WEEKDAYS]
                              for p in all_place_ids], dtype=float)                                        # (P,7,24)
         dwell_arr = np.array([stats[p]["median_dwell_hours"] for p in all_place_ids], dtype=np.int64)     # (P,)
+        dwell_modeled_arr = np.array([
+            stats[p].get("dwell_probabilities") is not None for p in all_place_ids
+        ], dtype=bool)
+        dwell_probability_mat = np.array([
+            stats[p].get("dwell_probabilities") or [1.0, 0.0, 0.0, 0.0, 0.0]
+            for p in all_place_ids
+        ], dtype=float)
+        dwell_tail_p_arr = np.array([
+            stats[p].get("dwell_tail_geometric_p", 1.0) for p in all_place_ids
+        ], dtype=float)
 
         # People state held in parallel arrays so the mover-decision hot loop
         # can run as a batched numpy op instead of one rng.random + rng.choice
@@ -601,9 +654,14 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     movers = movers[eligible_selection]
                     dest_assign = dest_assign[eligible_selection]
                     if movers.size:
-                        med = dwell_arr[dest_assign]
-                        lo = np.maximum(1, med - 1)
-                        dwell_hours_arr = rng.integers(lo, med + 2)
+                        dwell_hours_arr = sample_dwell_hours(
+                            rng,
+                            dest_assign,
+                            dwell_probability_mat,
+                            dwell_modeled_arr,
+                            dwell_tail_p_arr,
+                            dwell_arr,
+                        )
                         is_home_arr[movers] = False
                         dest_idx_arr[movers] = dest_assign
                         leave_time_arr[movers] = np.minimum(

@@ -13,24 +13,63 @@ to lowercase so downstream code works unchanged.
 
 import os
 import logging
+import threading
 import pandas as pd
-from typing import Dict, List, Optional, Set
+from typing import Callable, Dict, List, Optional, Set
 from datetime import datetime
+
+from dwell import (
+    DwellReference,
+    build_dwell_reference,
+    merge_dwell_references,
+)
 
 logger = logging.getLogger(__name__)
 
 PATTERNS_BASE_DIR = os.path.join(os.path.dirname(__file__), 'data', 'patterns')
 _PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
+_DWELL_REFERENCE_CACHE_MAX = 4
+_DWELL_REFERENCE_CACHE = {}
+_DWELL_REFERENCE_CACHE_LOCK = threading.Lock()
+
+
+def _cached_dwell_reference(
+    path: str,
+    builder: Callable[[], DwellReference],
+) -> DwellReference:
+    """Single-flight compact-profile cache keyed by source file identity."""
+    try:
+        stat = os.stat(path)
+        key = (os.path.abspath(path), stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        return builder()
+    with _DWELL_REFERENCE_CACHE_LOCK:
+        cached = _DWELL_REFERENCE_CACHE.get(key)
+        if cached is not None:
+            logger.info("Reusing cached dwell category profiles for %s", path)
+            return cached
+
+        # Deliberately build under the lock. Generation jobs run in threads;
+        # allowing identical cold builds to stampede can multiply state-scale
+        # memory use and exhaust the service container.
+        reference = builder()
+        # Discard an older identity for a replaced file at the same path.
+        for old_key in list(_DWELL_REFERENCE_CACHE):
+            if old_key[0] == key[0] and old_key != key:
+                _DWELL_REFERENCE_CACHE.pop(old_key, None)
+        while len(_DWELL_REFERENCE_CACHE) >= _DWELL_REFERENCE_CACHE_MAX:
+            _DWELL_REFERENCE_CACHE.pop(next(iter(_DWELL_REFERENCE_CACHE)))
+        _DWELL_REFERENCE_CACHE[key] = reference
+        return reference
 
 # All columns any algorithm step might need (lowercase canonical names).
 # CZ clustering:  poi_cbg, visitor_daytime_cbgs, postal_code
 # Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, street_address, postal_code, polygon_wkt, wkt_area_sq_meters
 # Patterns gen:   placekey, median_dwell, popularity_by_hour, popularity_by_day
 # Movement redesign (docs/MOVEMENT_MODEL_REDESIGN.md): absolute visit volume,
-#   observed home-CBG catchment, open hours, category. Stage 0 only LOADS these
-#   so they are reachable downstream; gen_patterns does not consume them yet.
+#   observed home-CBG catchment, open hours, category, and robust dwell inputs.
 ALL_NEEDED_COLUMNS = [
-    'poi_cbg', 'visitor_daytime_cbgs', 'postal_code',
+    'poi_cbg', 'visitor_daytime_cbgs', 'postal_code', 'region',
     'placekey', 'location_name', 'top_category', 'latitude', 'longitude',
     'street_address',
     'polygon_wkt', 'wkt_area_sq_meters',
@@ -39,16 +78,21 @@ ALL_NEEDED_COLUMNS = [
     'raw_visit_counts', 'raw_visitor_counts', 'normalized_visits_by_state_scaling',
     'visitor_home_cbgs', 'open_hours', 'naics_code',
     'visits_by_day', 'bucketed_dwell_times',
+    # Dwell-quality corroboration for shared-host and home-like artifacts:
+    'parent_placekey', 'polygon_class', 'enclosed', 'distance_from_home',
+    'closed_on', 'date_range_start',
 ]
 
 # Columns handed to gen_patterns via for_patterns_stats(). The first four are
 # the baseline movement fields. The rest support demand scaling, catchment, and
-# open-hours gating; bucketed dwell is carried for later distribution sampling.
+# open-hours gating plus category-relative dwell modeling.
 PATTERNS_STATS_COLUMNS = [
     'placekey', 'median_dwell', 'popularity_by_hour', 'popularity_by_day',
     'raw_visit_counts', 'raw_visitor_counts', 'normalized_visits_by_state_scaling',
-    'visitor_home_cbgs', 'open_hours', 'naics_code', 'poi_cbg',
+    'visitor_home_cbgs', 'open_hours', 'naics_code', 'poi_cbg', 'region',
     'latitude', 'longitude', 'bucketed_dwell_times', 'visits_by_day',
+    'parent_placekey', 'polygon_class', 'enclosed', 'distance_from_home',
+    'closed_on', 'date_range_start',
 ]
 
 # Fields whose presence the staged redesign depends on. Logged once per load so
@@ -58,6 +102,64 @@ COVERAGE_FIELDS = [
     'raw_visit_counts', 'normalized_visits_by_state_scaling',
     'visitor_home_cbgs', 'open_hours', 'wkt_area_sq_meters', 'naics_code',
 ]
+
+DWELL_REFERENCE_COLUMNS = [
+    'placekey', 'region', 'naics_code', 'median_dwell',
+    'bucketed_dwell_times', 'raw_visitor_counts', 'raw_visit_counts',
+    'popularity_by_hour', 'popularity_by_day', 'distance_from_home',
+    'parent_placekey', 'polygon_class', 'enclosed', 'closed_on',
+    'date_range_start',
+]
+
+
+def _source_column_names(path: str) -> Dict[str, str]:
+    """Map lowercase canonical names to the file's actual parquet casing."""
+    try:
+        import pyarrow.parquet as pq
+        names = pq.ParquetFile(path).schema.names
+    except Exception:
+        return {}
+    return {str(name).lower(): str(name) for name in names}
+
+
+def _read_parquet_columns(path: str, desired: List[str], filters=None) -> pd.DataFrame:
+    source_names = _source_column_names(path)
+    if not source_names:
+        return pd.read_parquet(path)
+    columns = [source_names[name] for name in desired if name in source_names]
+    source_filters = None
+    if filters:
+        source_filters = [
+            (source_names[name], operator, value)
+            for name, operator, value in filters
+            if name in source_names
+        ]
+        source_filters = source_filters or None
+    return pd.read_parquet(path, columns=columns, filters=source_filters)
+
+
+def _read_csv_columns(path: str, desired: List[str]) -> pd.DataFrame:
+    wanted = set(desired)
+    return pd.read_csv(
+        path,
+        usecols=lambda name: str(name).strip().lower() in wanted,
+    )
+
+
+def _normalize_columns_and_region(df: pd.DataFrame, path: str) -> pd.DataFrame:
+    df.columns = df.columns.str.lower()
+    state_hint = os.path.basename(os.path.dirname(path)).upper()
+    if 'region' not in df.columns:
+        df['region'] = state_hint
+    else:
+        df['region'] = df['region'].fillna(state_hint)
+    return df
+
+
+def _normalized_postal_codes(series: pd.Series) -> pd.Series:
+    """Canonical five-digit ZIP strings, including float-like legacy CSV data."""
+    numeric = pd.to_numeric(series, errors='coerce').astype('Int64')
+    return numeric.astype(str).str.zfill(5)
 
 # FIPS code -> state abbreviation (50 states + DC + territories)
 FIPS_TO_STATE = {
@@ -164,12 +266,14 @@ class PatternsData:
     """
     Pre-loaded patterns data shared across algorithm steps.
 
-    Loads the CSV once with only the columns needed, normalizes column names
-    to lowercase, and provides filtered views for each consumer.
+    Loads projected source columns, retains compact state-wide dwell profiles,
+    normalizes names to lowercase, and provides zone-filtered consumer views.
     """
 
-    def __init__(self, df: pd.DataFrame):
+    def __init__(self, df: pd.DataFrame,
+                 dwell_reference: Optional[DwellReference] = None):
         self._df = df
+        self._dwell_reference = dwell_reference or build_dwell_reference(df)
 
     @classmethod
     def load(cls, file_paths: List[str],
@@ -189,33 +293,75 @@ class PatternsData:
             chunksize: Rows per chunk for CSV streaming read
         """
         all_chunks: List[pd.DataFrame] = []
+        dwell_references: List[DwellReference] = []
+        wanted_cbgs = (
+            {str(cbg).strip().zfill(12) for cbg in cbg_set}
+            if cbg_set else set()
+        )
+        wanted_zips = (
+            {str(code).strip().zfill(5) for code in zip_codes}
+            if zip_codes else set()
+        )
 
         for path in file_paths:
             if path.endswith('.parquet'):
                 logger.info(f"Loading parquet patterns from {path}")
-                df = pd.read_parquet(path)
-                df.columns = df.columns.str.lower()
+                def _build_parquet_reference(path=path):
+                    reference_df = _read_parquet_columns(
+                        path, DWELL_REFERENCE_COLUMNS
+                    )
+                    _normalize_columns_and_region(reference_df, path)
+                    return build_dwell_reference(reference_df)
+
+                dwell_references.append(
+                    _cached_dwell_reference(path, _build_parquet_reference)
+                )
+                parquet_filters = None
+                if wanted_cbgs:
+                    parquet_filters = [(
+                        'poi_cbg', 'in',
+                        list(wanted_cbgs),
+                    )]
+                elif wanted_zips:
+                    parquet_filters = [(
+                        'postal_code', 'in',
+                        list(wanted_zips),
+                    )]
+                df = _read_parquet_columns(
+                    path, ALL_NEEDED_COLUMNS, filters=parquet_filters
+                )
+                _normalize_columns_and_region(df, path)
                 if 'poi_cbg' in df.columns:
                     df['poi_cbg'] = df['poi_cbg'].astype(str).str.strip().str.zfill(12)
-                if cbg_set and 'poi_cbg' in df.columns:
-                    df = df[df['poi_cbg'].isin(cbg_set)]
-                elif zip_codes and 'postal_code' in df.columns:
-                    df = df[df['postal_code'].isin(zip_codes)]
+                if wanted_cbgs and 'poi_cbg' in df.columns:
+                    df = df[df['poi_cbg'].isin(wanted_cbgs)]
+                elif wanted_zips and 'postal_code' in df.columns:
+                    df = df[_normalized_postal_codes(df['postal_code']).isin(wanted_zips)]
                 if not df.empty:
                     all_chunks.append(df)
             else:
                 # Legacy CSV fallback
                 logger.info(f"Loading CSV patterns from {path}")
-                df = pd.read_csv(path)
-                df.columns = df.columns.str.lower()
+                def _build_csv_reference(path=path):
+                    reference_df = _read_csv_columns(
+                        path, DWELL_REFERENCE_COLUMNS
+                    )
+                    _normalize_columns_and_region(reference_df, path)
+                    return build_dwell_reference(reference_df)
+
+                dwell_references.append(
+                    _cached_dwell_reference(path, _build_csv_reference)
+                )
+                df = _read_csv_columns(path, ALL_NEEDED_COLUMNS)
+                _normalize_columns_and_region(df, path)
                 if 'poi_cbg' in df.columns:
                     df['poi_cbg'] = pd.to_numeric(df['poi_cbg'], errors='coerce')
                     df.dropna(subset=['poi_cbg'], inplace=True)
                     df['poi_cbg'] = df['poi_cbg'].astype('int64').astype(str).str.zfill(12)
-                if cbg_set and 'poi_cbg' in df.columns:
-                    df = df[df['poi_cbg'].isin(cbg_set)]
-                elif zip_codes and 'postal_code' in df.columns:
-                    df = df[df['postal_code'].isin(zip_codes)]
+                if wanted_cbgs and 'poi_cbg' in df.columns:
+                    df = df[df['poi_cbg'].isin(wanted_cbgs)]
+                elif wanted_zips and 'postal_code' in df.columns:
+                    df = df[_normalized_postal_codes(df['postal_code']).isin(wanted_zips)]
                 if not df.empty:
                     all_chunks.append(df)
 
@@ -225,7 +371,11 @@ class PatternsData:
             df = pd.DataFrame(columns=[c.lower() for c in ALL_NEEDED_COLUMNS])
 
         logger.info(f"Loaded {len(df)} pattern rows total")
-        instance = cls(df)
+        dwell_reference = (
+            merge_dwell_references(dwell_references)
+            if dwell_references else build_dwell_reference(df)
+        )
+        instance = cls(df, dwell_reference=dwell_reference)
         if not instance.is_empty():
             cov = instance.field_coverage()
             logger.info(
@@ -241,6 +391,10 @@ class PatternsData:
 
     def is_empty(self) -> bool:
         return len(self._df) == 0
+
+    def for_dwell_reference(self) -> DwellReference:
+        """Compact state-wide category baselines retained after zone filtering."""
+        return self._dwell_reference
 
     # -- Views for each algorithm step --
 
@@ -297,8 +451,8 @@ class PatternsData:
         """SafeGraph stats for patterns generation.
 
         This projection also carries movement-redesign inputs: absolute visit
-        volume, observed home-CBG catchment, open hours, NAICS, and bucketed
-        dwell for future distribution sampling."""
+        volume, observed home-CBG catchment, open hours, NAICS, and robust dwell
+        distribution inputs."""
         cols = [c for c in PATTERNS_STATS_COLUMNS if c in self._df.columns]
         if 'placekey' not in self._df.columns:
             return pd.DataFrame()

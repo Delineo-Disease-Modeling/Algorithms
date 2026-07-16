@@ -27,6 +27,7 @@ from patterns import (  # noqa: E402
     _catchment_fraction,
     gen_patterns,
 )
+from dwell import build_dwell_reference  # noqa: E402
 
 WEEK = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 ABBR = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
@@ -35,6 +36,7 @@ CBG_IN, CBG_OUT = "400010001001", "999990000001"
 
 def _shared(pois):
     df = pd.DataFrame(pois)
+    dwell_reference = build_dwell_reference(df)
 
     class _Stub:
         def is_empty(self):
@@ -43,12 +45,15 @@ def _shared(pois):
         def for_patterns_stats(self, placekeys):
             return df[df["placekey"].isin(placekeys)]
 
+        def for_dwell_reference(self):
+            return dwell_reference
+
     return _Stub()
 
 
 def _poi(pk, hour_counts, *, dwell=30, open_hours=None, naics="445110",
-         home_cbgs=None, day=10):
-    return {
+         home_cbgs=None, day=10, **extra):
+    row = {
         "placekey": pk, "median_dwell": dwell,
         "popularity_by_hour": hour_counts,
         "popularity_by_day": {d: day for d in WEEK},
@@ -56,6 +61,8 @@ def _poi(pk, hour_counts, *, dwell=30, open_hours=None, naics="445110",
         "naics_code": naics,
         "visitor_home_cbgs": json.dumps(home_cbgs or {CBG_IN: 10}),
     }
+    row.update(extra)
+    return row
 
 
 def _papdata(placekeys, n_people=400, n_homes=20):
@@ -395,6 +402,40 @@ def test_deterministic_and_bounded(monkeypatch):
     b = _peak_occ(gen_patterns(pap, datetime(2021, 1, 4, 0), 24, shared_data=shared))
     assert a == b                                   # deterministic
     assert b.get("0", 0) <= 100                     # bounded near target ~80, not 80*8h
+
+
+def test_generic_arrivals_use_bucket_distribution_instead_of_poi_median(monkeypatch):
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    active_hours = [0] * 24
+    active_hours[0] = active_hours[1] = 40
+    bucketed = json.dumps({
+        "<5": 0, "5-20": 0, "21-60": 0, "61-240": 100, ">240": 0,
+    })
+    common = {
+        "naics": "713940",
+        "open_hours": {a: [["0:00", "24:00"]] for a in ABBR},
+        "bucketed_dwell_times": bucketed,
+        "raw_visitor_counts": 200,
+        "raw_visit_counts": 200,
+        "region": "OK",
+    }
+    peers = [
+        _poi(f"peer-{index}", [0] * 24, dwell=120, **common)
+        for index in range(30)
+    ]
+    # A one-minute median would use a one-hour stay in the legacy path. The
+    # empirical 61-240-minute bucket must keep this cohort through hour two.
+    target = _poi("target", active_hours, dwell=1, **common)
+
+    out = gen_patterns(
+        _papdata(["target"], n_people=40, n_homes=4),
+        datetime(2021, 1, 4, 0),
+        duration=2,
+        shared_data=_shared(peers + [target]),
+    )
+
+    assert len(out["60"]["places"]["0"]) == 40
+    assert len(out["120"]["places"]["0"]) == 40
 
 
 # --- helpers ------------------------------------------------------------------
