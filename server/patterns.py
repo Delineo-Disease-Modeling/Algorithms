@@ -384,8 +384,8 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
       papdata: dict with keys 'people', 'homes', 'places' (already loaded)
       start_time: simulation start timestamp (datetime)
       duration: hours to simulate
-      shared_data: Pre-loaded PatternsData. If None/empty, no place stats are
-          available and movement falls back to home-only.
+      shared_data: Non-empty, pre-loaded PatternsData with usable place stats.
+          Missing or unusable statistics raise ValueError.
     Output format matches the original: a dict keyed by cumulative minutes,
     each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
     """
