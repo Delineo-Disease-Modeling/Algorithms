@@ -16,6 +16,21 @@ import requests
 # the literal out when convenient.
 CENSUS_API_KEY_DEFAULT = "b1cdc56f4855e77fe024c8b2dfa187b7985cbd89"
 
+# The Census API rejects a request whose `get` list has more than 50 variables,
+# and every request also asks for NAME.
+CENSUS_API_MAX_VARIABLES = 50
+
+# Fields computed from requested variables after merging and imputation.
+# B11003 has no single "families with own children under 18" line, so the total
+# is the sum of that line across the three family types.
+DERIVED_SUM_FIELDS = {
+    "with_children_under_18": (
+        "married_with_children",
+        "single_father_with_children",
+        "single_mother_with_children",
+    ),
+}
+
 
 class CensusDataPuller:
     def __init__(self, api_key: Optional[str] = None):
@@ -38,16 +53,22 @@ class CensusDataPuller:
             "avg_family_size": "DP02_0017E"
         }
 
-        # Variables to retrieve from detailed tables
+        # Variables to retrieve from detailed tables. Each code is pinned to its
+        # official ACS 2023 label by tests/algorithms_server/
+        # test_census_household_labels.py; update that test's fixture when
+        # adding a code. Keep this map within CENSUS_API_MAX_VARIABLES - 1.
         self.variables_detailed = {
-            # From B11001
+            # From B11001 (Household Type)
             "total_households": "B11001_001E",
-            # From B11003
+            "family_households": "B11001_002E",
+            # From B11003 (Family Type by Presence and Age of Own Children
+            # Under 18). Its universe is families, so _001E equals B11001_002E.
+            # The three "with own children" lines are summed into
+            # with_children_under_18 (see DERIVED_SUM_FIELDS).
             "total_family_households": "B11003_001E",
-            "with_children_under_18": "B11003_002E",
             "married_with_children": "B11003_003E",
-            "single_mother_with_children": "B11003_004E",
-            "single_father_with_children": "B11003_005E",
+            "single_father_with_children": "B11003_010E",
+            "single_mother_with_children": "B11003_016E",
             # From B11016
             "size_2": "B11016_003E",
             "size_3": "B11016_004E",
@@ -66,7 +87,8 @@ class CensusDataPuller:
             "multigenerational_households": "B11017_002E",
             # From B09019
             "total_population": "B09019_001E",
-            "family_households": "B09019_002E",
+            # B09019_002E is population in households, not a household count.
+            # The DP02 profile already supplies that, so it is not requested.
             "householders": "B09019_003E",
             "male_householders": "B09019_004E",
             "male_hh_living_alone": "B09019_005E",
@@ -193,6 +215,12 @@ class CensusDataPuller:
         # Extract headers from the first list
         counties_list = list(counties_dict.keys())
         headers = data_lists[0]
+        # Variable columns are every header except the name and geography
+        # columns. The header row comes from the state request, which has no
+        # county column, so a fixed range(1, len(headers) - 2) dropped the last
+        # requested variable.
+        value_columns = [i for i, header in enumerate(headers)
+                         if header not in ("NAME", "state", "county")]
 
         # Process each data row (starting from index 1)
         for data_row in data_lists[1:]:
@@ -204,7 +232,7 @@ class CensusDataPuller:
             # Check if this county exists in the counties dictionary
             if county_code in counties_dict:
                 # Process each field in the data row
-                for i in range(1, len(headers) - 2):  # Skip 'NAME' and state/county at the end
+                for i in value_columns:
                     field_name = field_dict.get(headers[i], headers[i])
                     field_value = data_row[i]
 
@@ -220,7 +248,7 @@ class CensusDataPuller:
             # County population as a percent of state population
             ratio = counties_dict[county_code]["pop_in_households"] / counties_dict["000"]["pop_in_households"]
             data_row = data_lists[1]
-            for i in range(1, len(headers) - 2):  # Skip 'NAME' and state/county at the end
+            for i in value_columns:
                 field_name = field_dict.get(headers[i], headers[i])
                 field_value = data_row[i]
 
@@ -231,6 +259,26 @@ class CensusDataPuller:
                 # Add the field to the county dictionary
                 counties_dict[county_code][field_name] = field_value
 
+        return counties_dict
+
+    @staticmethod
+    def add_derived_fields(counties_dict: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Add DERIVED_SUM_FIELDS to every row, including imputed counties.
+
+        Runs after merge_datasets, so an imputed county gets the sum of its
+        imputed parts. Fails loud when a part is missing or not a count: a
+        silent zero would make every generated family childless.
+        """
+        for county_code, row in counties_dict.items():
+            for field, parts in DERIVED_SUM_FIELDS.items():
+                values = [row.get(part) for part in parts]
+                unusable = [part for part, value in zip(parts, values)
+                            if not isinstance(value, int) or value < 0]
+                if unusable:
+                    raise ValueError(
+                        f"Census row {county_code} has no usable count for "
+                        f"{unusable}; cannot derive {field}")
+                row[field] = sum(values)
         return counties_dict
 
     def pull_counties_census_data(self, state_fips: str, county_fips: List[str],
@@ -272,6 +320,7 @@ class CensusDataPuller:
 
             # Merge datasets
             census_data = self.merge_datasets(base_data, census_data, self.field_dict)
+            census_data = self.add_derived_fields(census_data)
 
             # Filter for only the rows with COUNTY FIP in the COUNTY_FIPS list
             relevant_data = {k: v for k, v in census_data.items() if k in county_fips}
