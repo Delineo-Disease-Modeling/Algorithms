@@ -28,6 +28,7 @@ VALID_CLUSTER_ALGORITHMS = {
     'greedy_ratio',
     'greedy_ttwa',
     'mobility_prune',
+    'seed_prune',
 }
 
 DEFAULT_DISTANCE_PENALTY_WEIGHT = 0.02

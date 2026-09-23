@@ -23,6 +23,9 @@ def normalize_cluster_algorithm(algorithm):
         'mobility_pruning': 'mobility_prune',
         'reverse_prune': 'mobility_prune',
         'movement_prune': 'mobility_prune',
+        'seed_prune': 'seed_prune',
+        'seed_neighbor_prune': 'seed_prune',
+        'take_all_prune': 'seed_prune',
     }
     alg = aliases.get(alg, alg)
     return alg if alg in VALID_CLUSTER_ALGORITHMS else None

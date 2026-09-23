@@ -12,9 +12,10 @@ VALID_ALGORITHMS = (
     'greedy_ratio',
     'greedy_ttwa',
     'mobility_prune',
+    'seed_prune',
 )
 
-SEED_REGION_ALGORITHMS = {'mobility_prune'}
+SEED_REGION_ALGORITHMS = {'mobility_prune', 'seed_prune'}
 
 
 TRACE_NOTES = {
@@ -26,9 +27,14 @@ TRACE_NOTES = {
         "Trace steps show bounded mobility-envelope growth followed by reverse "
         "pruning. CBGs are removed by lowest movement loss per resident removed."
     ),
+    'seed_prune': (
+        "Trace starts from every CBG with a direct movement link to the seed and "
+        "shows reverse pruning only. CBGs are removed by lowest seed movement per "
+        "resident while seed capture stays at or above the target."
+    ),
 }
 
-TRACE_METADATA_ALGORITHMS = {'mobility_prune'}
+TRACE_METADATA_ALGORITHMS = {'mobility_prune', 'seed_prune'}
 
 
 @dataclass
@@ -113,6 +119,7 @@ class AlgorithmRunner:
             'greedy_ratio': self._run_greedy_ratio,
             'greedy_ttwa': self._run_greedy_ttwa,
             'mobility_prune': self._run_mobility_prune,
+            'seed_prune': self._run_seed_prune,
         }
 
     def _validate_seed_presence(self, algorithm_key, normalized_seed_cbgs):
@@ -238,6 +245,18 @@ class AlgorithmRunner:
             kwargs['min_seed_capture'] = float(params['mobility_prune_min_seed_capture'])
         self._add_trace_collector(kwargs, trace_steps)
         return self.clustering_algo.mobility_prune(
+            self.graph,
+            normalized_seed_cbgs,
+            self.config.min_cluster_pop,
+            **kwargs
+        )
+
+    def _run_seed_prune(self, normalized_seed_cbgs, trace_steps, params):
+        kwargs = {}
+        if params.get('mobility_prune_min_seed_capture') is not None:
+            kwargs['min_seed_capture'] = float(params['mobility_prune_min_seed_capture'])
+        self._add_trace_collector(kwargs, trace_steps)
+        return self.clustering_algo.seed_prune(
             self.graph,
             normalized_seed_cbgs,
             self.config.min_cluster_pop,
