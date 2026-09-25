@@ -1,6 +1,7 @@
 import threading
 
 from czcode import Helpers, generate_cz
+from czcode_modules.trace_encoding import encode_trace_payload
 from geojsongen import get_cbg_geojson
 
 from .analysis_config import effective_params_for_algorithm
@@ -76,7 +77,8 @@ class PreviewClusteringService:
     def compute_second_order_destinations(self, *args, **kwargs):
         return self.second_order_destinations.compute_second_order_destinations(*args, **kwargs)
 
-    def start_cluster_job(self, cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
+    def start_cluster_job(self, cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
+                          trace_encoding=None):
         cid = self.clustering_store.next_id()
 
         def run():
@@ -132,7 +134,9 @@ class PreviewClusteringService:
                     'use_test_data': pattern_selection.use_test_data,
                 }
                 if include_trace:
-                    response_data['trace'] = trace_payload
+                    # trace_geojson above needs the full per-step lists; only
+                    # the response is compacted.
+                    response_data['trace'] = encode_trace_payload(trace_payload, trace_encoding)
                     response_data['trace_geojson'] = trace_geojson
                     if isinstance(trace_payload, dict) and trace_payload.get('algorithm_metadata'):
                         response_data['algorithm_metadata'] = trace_payload.get('algorithm_metadata')

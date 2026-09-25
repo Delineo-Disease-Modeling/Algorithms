@@ -180,6 +180,7 @@ def register_routes(
                 algorithm_config,
                 include_trace,
                 seed_cbgs=seed_cbgs,
+                trace_encoding=payload.get('trace_encoding'),
             )
             return jsonify({'clustering_id': cid})
         except ApiError as error:

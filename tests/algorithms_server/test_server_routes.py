@@ -68,13 +68,15 @@ def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monk
 
     captured = {}
 
-    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
+    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
+                               trace_encoding=None):
         captured['cbg_str'] = cbg_str
         captured['min_pop'] = min_pop
         captured['pattern_selection'] = pattern_selection
         captured['algorithm_config'] = algorithm_config
         captured['include_trace'] = include_trace
         captured['seed_cbgs'] = seed_cbgs
+        captured['trace_encoding'] = trace_encoding
         return 17
 
     monkeypatch.setattr(app.config['analysis_service'], 'start_cluster_job', fake_start_cluster_job)
@@ -96,6 +98,33 @@ def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monk
     assert captured['algorithm_config']['algorithm'] == 'czi_balanced'
     assert captured['include_trace'] is True
     assert captured['seed_cbgs'] == ['012345678901']
+    assert captured['trace_encoding'] is None
+
+
+def test_cluster_cbgs_route_passes_trace_encoding(client, app, monkeypatch):
+    monkeypatch.setattr(
+        'server_app.request_parsing.resolve_patterns_file_for_request',
+        lambda seed_cbg, start_date_raw=None, use_test_data=False: ('/tmp/patterns.parquet', 'monthly', '2021-01'),
+    )
+    captured = {}
+
+    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
+                               trace_encoding=None):
+        captured['trace_encoding'] = trace_encoding
+        return 18
+
+    monkeypatch.setattr(app.config['analysis_service'], 'start_cluster_job', fake_start_cluster_job)
+
+    response = client.post('/cluster-cbgs', json={
+        'cbg': '12345678901',
+        'algorithm': 'mobility_prune',
+        'start_date': '2021-01-15',
+        'include_trace': True,
+        'trace_encoding': 'delta',
+    })
+
+    assert response.status_code == 200
+    assert captured['trace_encoding'] == 'delta'
 
 
 def test_cluster_cbgs_route_accepts_mobility_prune_alias(client, app, monkeypatch):
@@ -106,7 +135,8 @@ def test_cluster_cbgs_route_accepts_mobility_prune_alias(client, app, monkeypatc
 
     captured = {}
 
-    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
+    def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
+                               trace_encoding=None):
         captured['algorithm_config'] = algorithm_config
         captured['seed_cbgs'] = seed_cbgs
         return 18
