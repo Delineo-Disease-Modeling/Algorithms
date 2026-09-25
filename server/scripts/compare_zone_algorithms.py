@@ -36,7 +36,7 @@ from czcode_modules.config import Config  # noqa: E402
 from czcode_modules.data_loading import DataLoader  # noqa: E402
 from czcode_modules.graph import GraphBuilder  # noqa: E402
 from czcode_modules.metrics import Helpers, cbg_population  # noqa: E402
-from czcode_modules.seed_prune import seed_movement_accounting  # noqa: E402
+from czcode_modules.mobility_prune import seed_movement_accounting  # noqa: E402
 
 LOG = logging.getLogger("compare_zone_algorithms")
 ALBERS = "EPSG:5070"
@@ -170,7 +170,7 @@ def run(zip_code, seeds, algorithm, threshold, start_date, with_trace):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--zip", nargs="+", default=["74002", "74103", "74056", "55901"])
-    parser.add_argument("--algorithms", nargs="+", default=["mobility_prune", "seed_prune"])
+    parser.add_argument("--algorithms", nargs="+", default=["mobility_prune"])
     parser.add_argument("--threshold", type=float, default=0.80)
     parser.add_argument("--start-date", default="2021-04-01")
     parser.add_argument("--trace", action="store_true", help="also measure trace size (runs twice)")

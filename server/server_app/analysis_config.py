@@ -28,7 +28,6 @@ EFFECTIVE_PARAM_KEYS_BY_ALGORITHM = {
     'greedy_weight_seed_guard': 'effective_seed_guard_params',
     'greedy_ttwa': 'effective_ttwa_params',
     'mobility_prune': 'effective_mobility_prune_params',
-    'seed_prune': 'effective_mobility_prune_params',
 }
 
 
