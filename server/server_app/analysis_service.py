@@ -1,6 +1,8 @@
 import threading
+from collections import OrderedDict
 
 from czcode import Helpers, generate_cz
+from czcode_modules.trace_encoding import encode_trace_payload, summarize_trace_payload
 from geojsongen import get_cbg_geojson
 
 from .analysis_config import effective_params_for_algorithm
@@ -12,12 +14,58 @@ from .pattern_resolution import resolve_localized_patterns_extract
 from .second_order_destinations import SecondOrderDestinationAnalyzer
 
 
+# Deferred traces kept for /clustering-trace; the oldest is dropped past this.
+MAX_DEFERRED_TRACES = 20
+
+
 class PreviewClusteringService:
     def __init__(self, clustering_store, resources=None):
         self.clustering_store = clustering_store
         self.resources = resources or AnalysisResourceCache()
         self.frontier_candidates = FrontierCandidateAnalyzer(self.resources)
         self.second_order_destinations = SecondOrderDestinationAnalyzer(self.resources)
+        self._deferred_traces = OrderedDict()
+        self._deferred_traces_lock = threading.Lock()
+
+    @staticmethod
+    def _build_trace_geojson(cluster, trace_payload):
+        if not trace_payload or not trace_payload.get('steps'):
+            return None
+        trace_cbgs_set = set(cluster)
+        for step in trace_payload.get('steps', []):
+            trace_cbgs_set.update(step.get('cluster_before', []))
+            trace_cbgs_set.update(step.get('cluster_after', []))
+            for candidate in step.get('candidates', []):
+                candidate_cbg = candidate.get('cbg')
+                if candidate_cbg:
+                    trace_cbgs_set.add(candidate_cbg)
+        if not trace_cbgs_set:
+            return None
+        return get_cbg_geojson(list(trace_cbgs_set), include_neighbors=False)
+
+    def _store_deferred_trace(self, cid, cluster, trace_payload):
+        with self._deferred_traces_lock:
+            self._deferred_traces[cid] = {
+                'cluster': list(cluster),
+                'trace': trace_payload,
+                'trace_geojson': None,
+            }
+            while len(self._deferred_traces) > MAX_DEFERRED_TRACES:
+                self._deferred_traces.popitem(last=False)
+
+    def get_deferred_trace(self, cid, trace_encoding=None):
+        """Return {'trace', 'trace_geojson'} for a deferred preview, or None
+        when the id is unknown or its trace has been evicted."""
+        with self._deferred_traces_lock:
+            entry = self._deferred_traces.get(cid)
+        if entry is None:
+            return None
+        if entry['trace_geojson'] is None:
+            entry['trace_geojson'] = self._build_trace_geojson(entry['cluster'], entry['trace'])
+        return {
+            'trace': encode_trace_payload(entry['trace'], trace_encoding),
+            'trace_geojson': entry['trace_geojson'],
+        }
 
     @staticmethod
     def graph_key(cbg):
@@ -76,7 +124,8 @@ class PreviewClusteringService:
     def compute_second_order_destinations(self, *args, **kwargs):
         return self.second_order_destinations.compute_second_order_destinations(*args, **kwargs)
 
-    def start_cluster_job(self, cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None):
+    def start_cluster_job(self, cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
+                          trace_encoding=None, defer_trace=False):
         cid = self.clustering_store.next_id()
 
         def run():
@@ -104,19 +153,12 @@ class PreviewClusteringService:
 
                 self.clustering_store.update(cid, 'Generating GeoJSON...', 95)
                 geojson = get_cbg_geojson(cluster, include_neighbors=True)
+                # A deferred trace leaves its steps and GeoJSON out of the
+                # response; the client fetches both from /clustering-trace/<cid>.
+                deferred = bool(include_trace and defer_trace and isinstance(trace_payload, dict))
                 trace_geojson = None
-
-                if include_trace and trace_payload and trace_payload.get('steps'):
-                    trace_cbgs_set = set(cluster)
-                    for step in trace_payload.get('steps', []):
-                        trace_cbgs_set.update(step.get('cluster_before', []))
-                        trace_cbgs_set.update(step.get('cluster_after', []))
-                        for candidate in step.get('candidates', []):
-                            candidate_cbg = candidate.get('cbg')
-                            if candidate_cbg:
-                                trace_cbgs_set.add(candidate_cbg)
-                    if trace_cbgs_set:
-                        trace_geojson = get_cbg_geojson(list(trace_cbgs_set), include_neighbors=False)
+                if include_trace and not deferred:
+                    trace_geojson = self._build_trace_geojson(cluster, trace_payload)
 
                 response_data = {
                     'cluster': cluster,
@@ -131,9 +173,15 @@ class PreviewClusteringService:
                     'patterns_month': pattern_selection.month,
                     'use_test_data': pattern_selection.use_test_data,
                 }
-                if include_trace:
-                    response_data['trace'] = trace_payload
+                if deferred:
+                    self._store_deferred_trace(cid, cluster, trace_payload)
+                    response_data['trace'] = summarize_trace_payload(trace_payload, cid)
+                elif include_trace:
+                    # trace_geojson above needs the full per-step lists; only
+                    # the response is compacted.
+                    response_data['trace'] = encode_trace_payload(trace_payload, trace_encoding)
                     response_data['trace_geojson'] = trace_geojson
+                if include_trace:
                     if isinstance(trace_payload, dict) and trace_payload.get('algorithm_metadata'):
                         response_data['algorithm_metadata'] = trace_payload.get('algorithm_metadata')
 
