@@ -173,6 +173,28 @@ class SyntheticPopulationGenerator:
             return 'M' if random.random() < 0.5 else 'F'
         return 'M' if random.random() < (male_householders / householders) else 'F'
 
+    @classmethod
+    def _partner_probability(cls, county_data: Dict[str, Any]) -> float:
+        """P(a family household has a spouse present).
+
+        Spouses of the householder (B09019) over family households (B11001).
+        Each married-couple household has exactly one such spouse, so this is
+        the married-couple share of family households.
+        """
+        spouses = (cls._positive_count(county_data, "opposite-sex spouse")
+                   + cls._positive_count(county_data, "same-sex spouse"))
+        return spouses / max(1, cls._positive_count(county_data, "family_households"))
+
+    @classmethod
+    def _children_probability(cls, county_data: Dict[str, Any]) -> float:
+        """P(a family household has own children under 18), from B11003.
+
+        ``with_children_under_18`` is the sum of the "with own children" lines
+        across all three family types, derived by CensusDataPuller.
+        """
+        return (cls._positive_count(county_data, "with_children_under_18")
+                / max(1, cls._positive_count(county_data, "total_family_households")))
+
     def determine_household_composition(self, county_code: str) -> Dict[str, int]:
         """Determine the composition of a household based on census data."""
         county_data = self.census_data[county_code]
@@ -198,20 +220,12 @@ class SyntheticPopulationGenerator:
 
         if is_family:
             # Family households
-            percent_married = (
-                (self._positive_count(county_data, "opposite-sex spouse")
-                 + self._positive_count(county_data, "same-sex spouse"))
-                / max(1, self._positive_count(county_data, "family_households"))
-            )
-            if random.random() < percent_married:  # Most family households have a partner
+            if random.random() < self._partner_probability(county_data):  # Most family households have a partner
                 has_partner = True
                 household_size -= 1  # Account for partner
 
             # Determine if has children and how many
-            if random.random() < (
-                self._positive_count(county_data, "with_children_under_18")
-                / max(1, self._positive_count(county_data, "total_family_households"))
-            ):
+            if random.random() < self._children_probability(county_data):
                 child_count = min(household_size - 1, np.random.geometric(p=0.5))
                 has_children = child_count
                 household_size -= child_count
