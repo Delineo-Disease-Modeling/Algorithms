@@ -101,7 +101,7 @@ def test_trace_payload_carries_notes_and_metadata():
     assert payload['supports_stepwise'] is True
     assert payload['steps'] == [{'iteration': 0}]
     assert payload['algorithm_metadata'] == {'bounded_envelope': True}
-    assert 'bounded mobility-envelope growth' in payload['note']
+    assert 'direct movement link to the seed' in payload['note']
 
 
 def test_normalize_seed_cbgs_deduplicates_preserving_order():

@@ -23,8 +23,9 @@ TRACE_NOTES = {
         "single greedy add-one expansion sequence."
     ),
     'mobility_prune': (
-        "Trace steps show bounded mobility-envelope growth followed by reverse "
-        "pruning. CBGs are removed by lowest movement loss per resident removed."
+        "Trace starts from every CBG with a direct movement link to the seed and "
+        "shows reverse pruning only. CBGs are removed by lowest seed movement per "
+        "resident while seed capture stays at or above the target."
     ),
 }
 

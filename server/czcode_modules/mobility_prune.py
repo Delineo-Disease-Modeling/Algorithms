@@ -1,8 +1,73 @@
-import math
+"""Mobility prune: take every seed-linked CBG, then trim it.
+
+The convenience-zone rule described in the walkthrough deck ("Take every CBG
+linked to the seed, then trim it"). It replaced an earlier version that grew a
+population-bounded envelope greedily by seed movement and then pruned it; that
+prune could only remove the CBGs added after the capture target was reached,
+so the result was effectively greedy by raw seed movement.
+
+Universe
+    The seed CBGs present in the graph, plus every CBG with a direct edge to a
+    seed and population > 0. This set holds all of the seed's movement except
+    edges to zero-population CBGs, which could never hold simulated residents.
+    Every non-seed member touches a seed, so the retained zone stays attached to
+    the seed region whatever is removed; no connectivity check is needed.
+
+Prune
+    Repeatedly remove the non-seed CBG with the lowest seed movement per
+    resident whose removal keeps seed capture at or above ``min_seed_capture``.
+    A candidate whose removal would cross the floor is skipped, and the prune
+    stops when no candidate can be removed. Seed CBGs are never removed.
+
+Why one pass is enough
+    A candidate's seed movement depends only on its own edges to the seeds, so
+    its score never changes as other CBGs leave. Seed capture only falls as CBGs
+    are removed, so a candidate that is blocked once stays blocked. The
+    iterative rule is therefore identical to one ascending pass over a static
+    ordering, which is O(n log n) instead of O(n^2).
+
+Seed capture: captured = seed self weight + seed-to-seed edges + seed edges to
+non-seed members; total = seed self weight + every edge touching a seed.
+"""
 
 import networkx as nx
 
 from .metrics import Helpers, cbg_population
+
+
+CAPTURE_TOLERANCE = 1e-12
+
+
+def _edge_weight(G, a, b):
+    return float(G.adj[a][b].get('weight', 0) or 0)
+
+
+def seed_movement_accounting(G: nx.Graph, seed_set):
+    """Return (total, always_captured, seed_movement_by_non_seed_cbg).
+
+    Each undirected edge touching a seed is counted once, including seed-seed
+    edges, which are always captured because seeds are never removed.
+    """
+    total = 0.0
+    always_captured = 0.0
+    by_cbg = {}
+    counted_edges = set()
+    for seed in seed_set:
+        self_weight = float(G.nodes[seed].get('self_weight', 0) or 0)
+        total += self_weight
+        always_captured += self_weight
+        for neighbor in G.adj[seed]:
+            edge_key = frozenset((seed, neighbor))
+            if edge_key in counted_edges:
+                continue
+            counted_edges.add(edge_key)
+            weight = _edge_weight(G, seed, neighbor)
+            total += weight
+            if neighbor in seed_set:
+                always_captured += weight
+            else:
+                by_cbg[neighbor] = by_cbg.get(neighbor, 0.0) + weight
+    return total, always_captured, by_cbg
 
 
 class MobilityPruneMixin:
@@ -11,11 +76,7 @@ class MobilityPruneMixin:
         G: nx.Graph,
         seed_cbgs,
         min_pop: int,
-        max_iter: int = 1000,
         trace_collector=None,
-        envelope_population_multiplier: float = 2.0,
-        envelope_population_floor: int = 100000,
-        envelope_max_cbgs: int = 1000,
         min_seed_capture: float = 0.80,
         trace_candidate_limit: int = 50,
     ):
@@ -34,14 +95,25 @@ class MobilityPruneMixin:
         if not seed_cluster:
             raise ValueError("None of the seed region CBGs are present in the mobility graph")
 
-        self.logger.info(
-            "Starting mobility_prune with %d seed CBGs",
-            len(seed_cluster),
-        )
+        try:
+            legacy_min_population = max(0, int(min_pop))
+        except (TypeError, ValueError):
+            legacy_min_population = 0
+
+        try:
+            threshold = float(min_seed_capture)
+        except (TypeError, ValueError):
+            threshold = 0.80
+        threshold = min(1.0, max(0.0, threshold))
+
+        try:
+            max_trace_candidates = int(trace_candidate_limit)
+        except (TypeError, ValueError):
+            max_trace_candidates = 50
+        if max_trace_candidates <= 0:
+            max_trace_candidates = 50
 
         seed_set = set(seed_cluster)
-        cluster = list(seed_cluster)
-        cluster_set = set(cluster)
         population_by_cbg = {}
 
         def get_population(cbg):
@@ -52,562 +124,213 @@ class MobilityPruneMixin:
                 )
             return population_by_cbg[cbg]
 
-        population = sum(get_population(cbg) for cbg in cluster)
-        seed_population = int(population)
-
-        try:
-            legacy_min_population = max(0, int(min_pop))
-        except (TypeError, ValueError):
-            legacy_min_population = 0
-
-        try:
-            multiplier = float(envelope_population_multiplier)
-        except (TypeError, ValueError):
-            multiplier = 2.0
-        if multiplier < 1.0:
-            multiplier = 1.0
-
-        try:
-            population_floor = max(0, int(envelope_population_floor))
-        except (TypeError, ValueError):
-            population_floor = 100000
-
-        envelope_population_target = max(
-            int(population),
-            int(math.ceil(population * multiplier)),
-            int(population_floor),
+        seed_movement_total, seed_movement_always_captured, seed_movement_by_cbg = (
+            seed_movement_accounting(G, seed_set)
         )
 
-        try:
-            max_envelope_cbgs = int(envelope_max_cbgs)
-        except (TypeError, ValueError):
-            max_envelope_cbgs = 1000
-        if max_envelope_cbgs <= 0:
-            max_envelope_cbgs = 1000
-
-        try:
-            max_trace_candidates = int(trace_candidate_limit)
-        except (TypeError, ValueError):
-            max_trace_candidates = 50
-        if max_trace_candidates <= 0:
-            max_trace_candidates = 50
-
-        try:
-            min_seed_capture_threshold = float(min_seed_capture)
-        except (TypeError, ValueError):
-            min_seed_capture_threshold = 0.80
-        min_seed_capture_threshold = min(1.0, max(0.0, min_seed_capture_threshold))
-
-        seed_movement_total = 0.0
-        seed_movement_always_captured = 0.0
-        seed_movement_by_cbg = {}
-        counted_seed_edges = set()
-        for seed in seed_set:
-            self_weight = float(G.nodes[seed].get('self_weight', 0) or 0)
-            seed_movement_total += self_weight
-            seed_movement_always_captured += self_weight
-            for neighbor in G.adj[seed]:
-                edge_key = frozenset((seed, neighbor))
-                if edge_key in counted_seed_edges:
-                    continue
-                counted_seed_edges.add(edge_key)
-                weight = float(G.adj[seed][neighbor].get('weight', 0) or 0)
-                seed_movement_total += weight
-                if neighbor in seed_set:
-                    seed_movement_always_captured += weight
-                else:
-                    seed_movement_by_cbg[neighbor] = (
-                        seed_movement_by_cbg.get(neighbor, 0.0) + weight
-                    )
-
-        seed_movement_captured = seed_movement_always_captured
-
-        def seed_capture_share(captured):
+        def capture_share(captured):
             return captured / seed_movement_total if seed_movement_total > 0 else 1.0
 
-        def movement_to_cluster(candidate):
-            total = 0.0
-            for neighbor in G.adj[candidate]:
-                if neighbor in cluster_set:
-                    total += float(G.adj[candidate][neighbor].get('weight', 0) or 0)
-            return total
+        # Universe: seeds + every direct seed neighbour with residents.
+        excluded_zero_population = []
+        members = []
+        for cbg in sorted(seed_movement_by_cbg):
+            if get_population(cbg) > 0:
+                members.append(cbg)
+            else:
+                excluded_zero_population.append(cbg)
+        excluded_seed_movement = sum(
+            seed_movement_by_cbg[cbg] for cbg in excluded_zero_population
+        )
 
-        def cap_trace_candidates(candidates, selected_cbg, higher_score_better=True):
-            if trace_collector is None or len(candidates) <= max_trace_candidates:
-                return candidates
+        cluster_set = set(seed_cluster) | set(members)
+        seed_population = int(sum(get_population(cbg) for cbg in seed_cluster))
+        population = int(seed_population + sum(population_by_cbg[cbg] for cbg in members))
+        seed_movement_captured = seed_movement_always_captured + sum(
+            seed_movement_by_cbg[cbg] for cbg in members
+        )
 
-            sorted_candidates = sorted(
-                candidates,
-                key=lambda item: (float(item.get('score', 0.0)), item.get('cbg', '')),
-                reverse=bool(higher_score_better),
-            )
-            capped = sorted_candidates[:max_trace_candidates]
-            if selected_cbg and not any(item.get('cbg') == selected_cbg for item in capped):
-                selected = next(
-                    (item for item in sorted_candidates if item.get('cbg') == selected_cbg),
-                    None,
-                )
-                if selected is not None:
-                    capped.append(selected)
-            return capped
+        stats = Helpers.calculate_movement_stats(G, cluster_set)
+        movement_inside = float(stats.get('in', 0.0))
+        movement_outside = float(stats.get('out', 0.0))
 
-        frontier = set()
-        for seed in seed_cluster:
-            frontier.update(neighbor for neighbor in G.adj[seed] if neighbor not in cluster_set)
-
-        growth_iteration = 0
-        envelope_limited_by_cbg_cap = False
-        while (
-            (
-                population < envelope_population_target
-                or seed_capture_share(seed_movement_captured) < min_seed_capture_threshold
-            )
-            and frontier
-            and growth_iteration < max_iter
-        ):
-            if len(cluster_set) >= max_envelope_cbgs:
-                envelope_limited_by_cbg_cap = True
-                break
-
-            best = None
-            candidate_details = []
-            stale_candidates = []
-            needs_seed_capture = (
-                seed_capture_share(seed_movement_captured) < min_seed_capture_threshold
-            )
-            for candidate in sorted(frontier):
-                if candidate in cluster_set or candidate not in G:
-                    stale_candidates.append(candidate)
-                    continue
-
-                candidate_pop = get_population(candidate)
-                if candidate_pop <= 0:
-                    continue
-
-                candidate_movement = movement_to_cluster(candidate)
-                if candidate_movement <= 0:
-                    continue
-
-                movement_outside = self._movement_outside_cluster(G, candidate, cluster_set)
-                population_after = int(population + candidate_pop)
-                envelope_overshoot = max(0, population_after - envelope_population_target)
-                movement_per_person = candidate_movement / candidate_pop
-                seed_movement_gain = float(seed_movement_by_cbg.get(candidate, 0.0))
-                seed_capture_after = seed_movement_captured + seed_movement_gain
-                seed_capture_share_after = seed_capture_share(seed_capture_after)
-                seed_movement_gain_per_person = seed_movement_gain / candidate_pop
-                candidate_details.append({
-                    'cbg': candidate,
-                    'population': int(candidate_pop),
-                    'score': (
-                        float(seed_capture_share_after)
-                        if needs_seed_capture
-                        else float(candidate_movement)
-                    ),
-                    'movement_to_cluster': float(candidate_movement),
-                    'movement_to_outside': float(movement_outside),
-                    'movement_to_cluster_per_person': float(movement_per_person),
-                    'seed_movement_gain': float(seed_movement_gain),
-                    'seed_movement_gain_per_person': float(seed_movement_gain_per_person),
-                    'seed_capture_after': float(seed_capture_share_after),
-                    'population_after': int(population_after),
-                    'envelope_overshoot': int(envelope_overshoot),
-                })
-
-                if needs_seed_capture:
-                    candidate_key = (
-                        seed_movement_gain,
-                        seed_movement_gain_per_person,
-                        candidate_movement,
-                        movement_per_person,
-                        -envelope_overshoot,
-                        -movement_outside,
-                        -candidate_pop,
-                    )
-                else:
-                    candidate_key = (
-                        candidate_movement,
-                        movement_per_person,
-                        -envelope_overshoot,
-                        -movement_outside,
-                        -candidate_pop,
-                    )
-                if best is None or candidate_key > best[0]:
-                    best = (
-                        candidate_key,
-                        candidate,
-                        candidate_pop,
-                        candidate_movement,
-                        movement_outside,
-                        movement_per_person,
-                        population_after,
-                        envelope_overshoot,
-                        seed_capture_after,
-                        seed_capture_share_after,
-                        seed_movement_gain,
-                    )
-
-            for candidate in stale_candidates:
-                frontier.discard(candidate)
-
-            if best is None:
-                self.logger.info(
-                    "No positive-population mobility frontier remains for bounded prune envelope."
-                )
-                break
-
-            (
-                _,
-                selected_cbg,
-                selected_pop,
-                selected_movement,
-                selected_movement_outside,
-                selected_movement_per_person,
-                population_after,
-                selected_overshoot,
-                selected_seed_capture_after,
-                selected_seed_capture_share_after,
-                selected_seed_movement_gain,
-            ) = best
-            prev_cluster = list(cluster)
-            prev_population = int(population)
-
-            frontier.discard(selected_cbg)
-            cluster.append(selected_cbg)
-            cluster_set.add(selected_cbg)
-            population = int(population_after)
-            seed_movement_captured = selected_seed_capture_after
-            for neighbor in G.adj[selected_cbg]:
-                if neighbor not in cluster_set:
-                    frontier.add(neighbor)
-
-            self._record_trace_step(
-                trace_collector,
-                iteration=growth_iteration,
-                cluster_before=prev_cluster,
-                population_before=prev_population,
-                candidates=cap_trace_candidates(candidate_details, selected_cbg),
-                selected_cbg=selected_cbg,
-                selected_population=selected_pop,
-                cluster_after=cluster,
-                population_after=population,
-                metrics_after={
-                    'stage': 'bounded_envelope_growth',
-                    'movement_to_cluster': float(selected_movement),
-                    'movement_to_outside': float(selected_movement_outside),
-                    'movement_to_cluster_per_person': float(selected_movement_per_person),
-                    'envelope_population_target': int(envelope_population_target),
-                    'envelope_overshoot': int(selected_overshoot),
-                    'seed_movement_gain': float(selected_seed_movement_gain),
-                    'seed_capture': float(selected_seed_capture_share_after),
-                },
-            )
-
-            self.logger.info(
-                "Envelope growth iteration %d: added %s pop=%d population=%d seed_capture=%.4f movement_to_cluster=%.2f",
-                growth_iteration,
-                selected_cbg,
-                int(selected_pop),
-                int(population),
-                float(selected_seed_capture_share_after),
-                float(selected_movement),
-            )
-            growth_iteration += 1
-
-        if growth_iteration >= max_iter and population < envelope_population_target:
-            self.logger.warning(
-                "Bounded mobility-prune envelope hit max iterations before target: pop=%d target=%d",
-                int(population),
-                int(envelope_population_target),
-            )
-
-        cluster = sorted(cluster_set)
-        initial_envelope_cbg_count = len(cluster_set)
-        initial_envelope_population = int(population)
-
-        try:
-            full_stats = Helpers.calculate_movement_stats(G, cluster)
-            movement_inside = float(full_stats.get('in', 0.0))
-            movement_outside = float(full_stats.get('out', 0.0))
-        except ValueError:
-            movement_inside = 0.0
-            movement_outside = 0.0
-
+        initial_cbg_count = len(cluster_set)
+        initial_population = int(population)
+        initial_movement_inside = movement_inside
+        initial_movement_outside = movement_outside
         initial_czi = (
             movement_inside / (movement_inside + movement_outside)
             if movement_inside + movement_outside > 0
             else 0.0
         )
-        initial_movement_inside = float(movement_inside)
-        initial_movement_outside = float(movement_outside)
-
-        initial_seed_capture_share = seed_capture_share(seed_movement_captured)
+        initial_seed_movement_captured = float(seed_movement_captured)
+        initial_seed_capture_share = capture_share(seed_movement_captured)
 
         self.logger.info(
-            "Initial bounded mobility-prune envelope: CBGs=%d population=%d target=%d seed_capture=%.4f CZI=%.4f movement_inside=%.2f movement_boundary=%.2f",
-            len(cluster),
-            int(population),
-            int(envelope_population_target),
+            "Starting mobility_prune: seeds=%d universe=%d CBGs population=%d "
+            "seed_capture=%.4f (excluded %d zero-population neighbours) target=%.4f",
+            len(seed_cluster),
+            initial_cbg_count,
+            initial_population,
             float(initial_seed_capture_share),
-            float(initial_czi),
-            float(movement_inside),
-            float(movement_outside),
+            len(excluded_zero_population),
+            float(threshold),
         )
 
-        def movement_effect_if_removed(candidate):
+        def score_key(cbg):
+            loss = seed_movement_by_cbg[cbg]
+            pop = population_by_cbg[cbg]
+            return (loss / pop, loss, -pop, cbg)
+
+        ordered = sorted(members, key=score_key)
+
+        def removal_effect(candidate):
             self_weight = float(G.nodes[candidate].get('self_weight', 0) or 0)
-            movement_to_remaining = 0.0
-            movement_to_current_outside = 0.0
+            to_remaining = 0.0
+            to_outside = 0.0
             for neighbor in G.adj[candidate]:
-                weight = float(G.adj[candidate][neighbor].get('weight', 0) or 0)
+                weight = _edge_weight(G, candidate, neighbor)
                 if neighbor in cluster_set:
-                    movement_to_remaining += weight
+                    to_remaining += weight
                 else:
-                    movement_to_current_outside += weight
+                    to_outside += weight
+            loss = self_weight + to_remaining
+            inside_after = max(0.0, movement_inside - loss)
+            outside_after = max(0.0, movement_outside - to_outside + to_remaining)
+            total_after = inside_after + outside_after
+            czi_after = inside_after / total_after if total_after > 0 else 0.0
+            return loss, to_outside, inside_after, outside_after, czi_after
 
-            movement_loss = self_weight + movement_to_remaining
-            movement_inside_after = max(0.0, movement_inside - movement_loss)
-            movement_outside_after = max(
-                0.0,
-                movement_outside - movement_to_current_outside + movement_to_remaining,
-            )
-            total_after = movement_inside_after + movement_outside_after
-            czi_after = movement_inside_after / total_after if total_after > 0 else 0.0
-            return (
-                movement_loss,
-                movement_to_current_outside,
-                movement_inside_after,
-                movement_outside_after,
-                czi_after,
-            )
+        def blocked_by_floor(seed_loss, captured):
+            share_after = capture_share(max(0.0, captured - seed_loss))
+            return share_after < threshold and seed_loss > CAPTURE_TOLERANCE
 
-        def remains_seed_connected(candidate):
-            next_set = cluster_set - {candidate}
-            if not next_set:
-                return False
-            remaining_seeds = seed_set & next_set
-            if not remaining_seeds:
-                return False
-
-            seen_nodes = set()
-            stack = list(remaining_seeds)
-            while stack:
-                node = stack.pop()
-                if node in seen_nodes:
-                    continue
-                seen_nodes.add(node)
-                for neighbor in G.adj[node]:
-                    if neighbor in next_set and neighbor not in seen_nodes:
-                        stack.append(neighbor)
-            return len(seen_nodes) == len(next_set)
-
-        iteration = 0
-        stopped_by_seed_capture = False
-        while iteration < max_iter:
-            best = None
-            candidate_details = []
-            current_seed_capture_share = (
-                seed_movement_captured / seed_movement_total
-                if seed_movement_total > 0
-                else 1.0
-            )
-
-            for candidate in sorted(cluster_set):
-                if candidate in seed_set:
-                    continue
-
-                candidate_pop = population_by_cbg.get(candidate, 0)
-                if candidate_pop <= 0:
-                    continue
-
-                population_after = int(population - candidate_pop)
-
-                if not remains_seed_connected(candidate):
-                    continue
-
-                (
-                    movement_loss,
-                    movement_to_current_outside,
-                    movement_inside_after,
-                    movement_outside_after,
-                    czi_after,
-                ) = movement_effect_if_removed(candidate)
-                movement_loss_per_person = movement_loss / candidate_pop
-                seed_movement_loss = float(seed_movement_by_cbg.get(candidate, 0.0))
-                seed_capture_after = max(0.0, seed_movement_captured - seed_movement_loss)
-                seed_capture_share_after = (
-                    seed_capture_after / seed_movement_total
-                    if seed_movement_total > 0
-                    else 1.0
-                )
-                seed_movement_loss_per_person = seed_movement_loss / candidate_pop
-                would_violate_seed_capture = (
-                    seed_capture_share_after < min_seed_capture_threshold
-                    and seed_movement_loss > 1e-12
-                )
-
-                candidate_details.append({
-                    'cbg': candidate,
-                    'population': int(candidate_pop),
-                    'score': float(seed_capture_share_after),
-                    'movement_loss': float(movement_loss),
-                    'movement_loss_per_person': float(movement_loss_per_person),
-                    'movement_to_current_outside': float(movement_to_current_outside),
-                    'movement_inside_after': float(movement_inside_after),
-                    'movement_boundary_after': float(movement_outside_after),
-                    'seed_movement_loss': float(seed_movement_loss),
-                    'seed_movement_loss_per_person': float(seed_movement_loss_per_person),
-                    'seed_movement_captured_after': float(seed_capture_after),
-                    'seed_capture_after': float(seed_capture_share_after),
-                    'current_seed_capture': float(current_seed_capture_share),
-                    'czi_after': float(czi_after),
-                    'would_violate_min_seed_capture': bool(would_violate_seed_capture),
-                    'population_after': int(population_after),
+        def trace_candidates(position, captured, current_share):
+            details = []
+            for cbg in ordered[position:position + max_trace_candidates]:
+                pop = population_by_cbg[cbg]
+                seed_loss = float(seed_movement_by_cbg[cbg])
+                captured_after = max(0.0, captured - seed_loss)
+                share_after = capture_share(captured_after)
+                details.append({
+                    'cbg': cbg,
+                    'population': int(pop),
+                    'score': float(share_after),
+                    'seed_movement_loss': seed_loss,
+                    'seed_movement_loss_per_person': seed_loss / pop,
+                    'seed_movement_captured_after': float(captured_after),
+                    'seed_capture_after': float(share_after),
+                    'current_seed_capture': float(current_share),
+                    'would_violate_min_seed_capture': bool(
+                        blocked_by_floor(seed_loss, captured)
+                    ),
+                    'population_after': int(population - pop),
                 })
+            return details
 
-                if would_violate_seed_capture:
-                    continue
+        cluster = sorted(cluster_set)
+        blocked = []
+        iteration = 0
+        for position, candidate in enumerate(ordered):
+            seed_loss = float(seed_movement_by_cbg[candidate])
+            if blocked_by_floor(seed_loss, seed_movement_captured):
+                blocked.append(candidate)
+                continue
 
-                candidate_key = (
-                    seed_movement_loss_per_person,
-                    seed_movement_loss,
-                    movement_loss_per_person,
-                    movement_loss,
-                    -candidate_pop,
-                    candidate,
-                )
-                if best is None or candidate_key < best[0]:
-                    best = (
-                        candidate_key,
-                        candidate,
-                        candidate_pop,
-                        movement_loss,
-                        movement_inside_after,
-                        movement_outside_after,
-                        czi_after,
-                        seed_movement_loss,
-                        seed_capture_after,
-                        seed_capture_share_after,
-                    )
+            removed_pop = population_by_cbg[candidate]
+            movement_loss, _to_outside, inside_after, outside_after, czi_after = (
+                removal_effect(candidate)
+            )
+            captured_after = max(0.0, seed_movement_captured - seed_loss)
+            share_after = capture_share(captured_after)
 
-            if best is None:
-                if candidate_details and all(
-                    bool(candidate.get('would_violate_min_seed_capture'))
-                    for candidate in candidate_details
-                ):
-                    stopped_by_seed_capture = True
-                    self.logger.info(
-                        "Stopping mobility_prune before crossing minimum seed capture %.4f",
-                        float(min_seed_capture_threshold),
-                    )
-                    break
-                self.logger.info(
-                    "No removable non-seed CBG remains without disconnecting the retained zone."
-                )
-                break
-
-            (
-                _,
-                selected_cbg,
-                removed_pop,
-                movement_loss,
-                movement_inside_after,
-                movement_outside_after,
-                czi_after,
-                seed_movement_loss,
-                seed_capture_after,
-                seed_capture_share_after,
-            ) = best
-            prev_cluster = list(cluster)
+            candidates = None
+            prev_cluster = None
             prev_population = int(population)
+            if trace_collector is not None:
+                candidates = trace_candidates(
+                    position,
+                    seed_movement_captured,
+                    capture_share(seed_movement_captured),
+                )
+                candidates[0]['movement_loss'] = float(movement_loss)
+                candidates[0]['czi_after'] = float(czi_after)
+                prev_cluster = list(cluster)
 
-            cluster_set.remove(selected_cbg)
-            cluster = [cbg for cbg in cluster if cbg != selected_cbg]
+            cluster_set.discard(candidate)
+            cluster.remove(candidate)
             population -= int(removed_pop)
-            movement_inside = movement_inside_after
-            movement_outside = movement_outside_after
-            seed_movement_captured = seed_capture_after
+            movement_inside = inside_after
+            movement_outside = outside_after
+            seed_movement_captured = captured_after
 
-            self._record_trace_step(
-                trace_collector,
-                iteration=iteration,
-                cluster_before=prev_cluster,
-                population_before=prev_population,
-                candidates=cap_trace_candidates(
-                    candidate_details,
-                    selected_cbg,
+            if trace_collector is not None:
+                self._record_trace_step(
+                    trace_collector,
+                    iteration=iteration,
+                    cluster_before=prev_cluster,
+                    population_before=prev_population,
+                    candidates=candidates,
+                    selected_cbg=candidate,
+                    selected_population=removed_pop,
+                    cluster_after=cluster,
+                    population_after=population,
+                    metrics_after={
+                        'stage': 'reverse_prune',
+                        'removed_population': int(removed_pop),
+                        'movement_loss': float(movement_loss),
+                        'movement_inside': float(movement_inside),
+                        'movement_boundary': float(movement_outside),
+                        'seed_movement_loss': float(seed_loss),
+                        'seed_movement_captured': float(seed_movement_captured),
+                        'seed_capture': float(share_after),
+                        'czi': float(czi_after),
+                    },
                     higher_score_better=True,
-                ),
-                selected_cbg=selected_cbg,
-                selected_population=removed_pop,
-                cluster_after=cluster,
-                population_after=population,
-                metrics_after={
-                    'stage': 'reverse_prune',
-                    'removed_population': int(removed_pop),
-                    'movement_loss': float(movement_loss),
-                    'movement_inside': float(movement_inside),
-                    'movement_boundary': float(movement_outside),
-                    'seed_movement_loss': float(seed_movement_loss),
-                    'seed_movement_captured': float(seed_movement_captured),
-                    'seed_capture': float(seed_capture_share_after),
-                    'czi': float(czi_after),
-                },
-                higher_score_better=True,
-            )
-
-            self.logger.info(
-                "Prune iteration %d: removed %s pop=%d population=%d seed_capture=%.4f CZI=%.4f",
-                iteration,
-                selected_cbg,
-                int(removed_pop),
-                int(population),
-                float(seed_capture_share_after),
-                float(czi_after),
-            )
+                )
             iteration += 1
 
+        final_seed_capture_share = capture_share(seed_movement_captured)
         final_czi = (
             movement_inside / (movement_inside + movement_outside)
             if movement_inside + movement_outside > 0
             else 0.0
         )
-        final_seed_capture_share = (
-            seed_movement_captured / seed_movement_total
-            if seed_movement_total > 0
-            else 1.0
+
+        self.logger.info(
+            "mobility_prune finished: removed=%d blocked=%d CBGs=%d population=%d "
+            "seed_capture=%.4f CZI=%.4f",
+            iteration,
+            len(blocked),
+            len(cluster),
+            int(population),
+            float(final_seed_capture_share),
+            float(final_czi),
         )
-        seed_capture_target_met = (
-            final_seed_capture_share + 1e-12 >= min_seed_capture_threshold
-        )
-        population_target_met = population >= envelope_population_target
-        seed_region_exceeds_envelope_cap = len(seed_set) >= max_envelope_cbgs
+
         metadata = {
             'seed_cbgs': list(seed_cluster),
             'missing_seed_cbgs': list(missing_seed_cbgs),
             'seed_population': int(seed_population),
+            # The seed-linked universe is the envelope. Clients key the prune
+            # summary off this flag, so it stays True.
             'bounded_envelope': True,
-            'envelope_population_target': int(envelope_population_target),
-            'envelope_population_multiplier': float(multiplier),
-            'envelope_population_floor': int(population_floor),
-            'envelope_max_cbgs': int(max_envelope_cbgs),
-            'min_seed_capture': float(min_seed_capture_threshold),
-            'envelope_growth_iterations': int(growth_iteration),
-            'envelope_limited_by_cbg_cap': bool(envelope_limited_by_cbg_cap),
-            'seed_region_exceeds_envelope_cap': bool(
-                seed_region_exceeds_envelope_cap
+            'universe_rule': 'seed_neighbors',
+            'min_seed_capture': float(threshold),
+            'seed_capture_target_met': bool(
+                final_seed_capture_share + CAPTURE_TOLERANCE >= threshold
             ),
-            'seed_capture_target_met': bool(seed_capture_target_met),
-            'stopped_by_seed_capture_floor': bool(stopped_by_seed_capture),
-            'initial_cbg_count': int(initial_envelope_cbg_count),
-            'initial_population': int(initial_envelope_population),
+            'stopped_by_seed_capture_floor': bool(blocked),
+            'blocked_cbg_count': int(len(blocked)),
+            'excluded_zero_population_cbg_count': int(len(excluded_zero_population)),
+            'excluded_zero_population_seed_movement': float(excluded_seed_movement),
+            'initial_cbg_count': int(initial_cbg_count),
+            'initial_population': int(initial_population),
             'initial_movement_inside': float(initial_movement_inside),
             'initial_movement_boundary': float(initial_movement_outside),
             'initial_czi': float(initial_czi),
             'seed_movement_total': float(seed_movement_total),
-            'initial_seed_movement_captured': float(
-                initial_seed_capture_share * seed_movement_total
-            ),
+            'initial_seed_movement_captured': float(initial_seed_movement_captured),
             'initial_seed_capture_share': float(initial_seed_capture_share),
             'final_seed_movement_captured': float(seed_movement_captured),
             'final_seed_capture_share': float(final_seed_capture_share),
@@ -616,9 +339,8 @@ class MobilityPruneMixin:
             'final_czi': float(final_czi),
             'minimum_population_used': False,
             'legacy_min_population': int(legacy_min_population),
-            'population_target_met': bool(population_target_met),
-            'population_reduced': int(initial_envelope_population - population),
-            'removed_cbg_count': int(initial_envelope_cbg_count - len(cluster_set)),
+            'population_reduced': int(initial_population - population),
+            'removed_cbg_count': int(initial_cbg_count - len(cluster_set)),
         }
 
         return cluster, int(population), metadata
