@@ -181,6 +181,7 @@ def register_routes(
                 include_trace,
                 seed_cbgs=seed_cbgs,
                 trace_encoding=payload.get('trace_encoding'),
+                defer_trace=bool(payload.get('defer_trace', False)),
             )
             return jsonify({'clustering_id': cid})
         except ApiError as error:
@@ -246,6 +247,16 @@ def register_routes(
                 'X-Accel-Buffering': 'no',
             }
         )
+
+    @app.route('/clustering-trace/<int:cid>', methods=['GET'])
+    @cross_origin()
+    def route_clustering_trace(cid):
+        result = analysis_service.get_deferred_trace(cid, request.args.get('trace_encoding'))
+        if result is None:
+            return make_response(jsonify({
+                'message': 'This trace is no longer available. Preview the zone again to reload it.',
+            }), 404)
+        return jsonify(result)
 
     @app.route('/cz-metrics', methods=['POST'])
     @cross_origin()

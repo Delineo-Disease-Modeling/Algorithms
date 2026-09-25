@@ -1,4 +1,4 @@
-"""Compact encoding of clustering trace steps for the /cluster-cbgs response.
+"""Compact encoding and deferred delivery of clustering trace steps.
 
 Every trace step records the zone before and after one addition or removal,
 so sending both lists in full makes the payload grow with steps x zone size
@@ -79,3 +79,14 @@ def encode_trace_payload(trace_payload, trace_encoding):
     encoded['steps'] = encode_trace_steps(trace_payload.get('steps') or [])
     encoded['step_encoding'] = TRACE_ENCODING_DELTA
     return encoded
+
+
+def summarize_trace_payload(trace_payload, clustering_id):
+    """Everything in the trace except its steps, for a preview whose steps are
+    fetched later from /clustering-trace/<clustering_id>."""
+    steps = trace_payload.get('steps') or []
+    summary = {key: value for key, value in trace_payload.items() if key != 'steps'}
+    summary['step_count'] = len(steps)
+    summary['deferred'] = True
+    summary['clustering_id'] = clustering_id
+    return summary

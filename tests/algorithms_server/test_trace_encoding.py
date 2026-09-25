@@ -9,6 +9,7 @@ from czcode_modules.trace_encoding import (
     encode_trace_payload,
     encode_trace_steps,
 )
+from server_app import analysis_service as analysis_service_module
 from server_app.analysis_service import PreviewClusteringService
 from server_app.jobs import ProgressStore
 from server_app.request_parsing import parse_cluster_algorithm_config
@@ -159,7 +160,7 @@ def test_delta_encoding_shrinks_a_long_prune_trace():
     assert compact < full / 10
 
 
-def _run_cluster_job(monkeypatch, trace_payload, trace_encoding):
+def _run_cluster_job(monkeypatch, trace_payload, trace_encoding, defer_trace=False, service=None):
     geojson_requests = []
     monkeypatch.setattr(
         'server_app.analysis_service.get_cbg_geojson',
@@ -175,8 +176,9 @@ def _run_cluster_job(monkeypatch, trace_payload, trace_encoding):
 
     monkeypatch.setattr('server_app.analysis_service.threading.Thread', _SyncThread)
 
-    store = ProgressStore(with_results=True, with_counter=True)
-    service = PreviewClusteringService(store, resources=object())
+    if service is None:
+        service = PreviewClusteringService(ProgressStore(with_results=True, with_counter=True), resources=object())
+    store = service.clustering_store
     service.cluster_cbgs = lambda *args, **kwargs: ({'a': 10, 'c': 10}, [36.5, -96.1], trace_payload)
     pattern_selection = SimpleNamespace(
         file_path='/tmp/patterns.parquet', month='2021-04', source='monthly', use_test_data=False,
@@ -190,8 +192,12 @@ def _run_cluster_job(monkeypatch, trace_payload, trace_encoding):
         True,
         seed_cbgs=['a'],
         trace_encoding=trace_encoding,
+        defer_trace=defer_trace,
     )
-    return store.get_result(cid), geojson_requests
+    result = store.get_result(cid)
+    if defer_trace:
+        return result, geojson_requests, service, cid
+    return result, geojson_requests
 
 
 def test_cluster_job_compacts_trace_after_building_trace_geojson(monkeypatch):
@@ -217,3 +223,58 @@ def test_cluster_job_keeps_full_trace_without_encoding(monkeypatch):
 
     assert 'step_encoding' not in result['trace']
     assert result['trace']['steps'] == steps
+
+
+def test_deferred_trace_is_summarized_and_fetched_later(monkeypatch):
+    steps = [
+        _step(0, ['a', 'b', 'c', 'far'], ['a', 'c', 'far'], 'b'),
+        _step(1, ['a', 'c', 'far'], ['a', 'c'], 'far'),
+    ]
+    trace_payload = {
+        'algorithm': 'mobility_prune',
+        'supports_stepwise': True,
+        'note': 'n',
+        'steps': steps,
+        'algorithm_metadata': {'x': 1},
+    }
+
+    result, geojson_requests, service, cid = _run_cluster_job(
+        monkeypatch, trace_payload, 'delta', defer_trace=True,
+    )
+
+    assert result['trace'] == {
+        'algorithm': 'mobility_prune',
+        'supports_stepwise': True,
+        'note': 'n',
+        'algorithm_metadata': {'x': 1},
+        'step_count': 2,
+        'deferred': True,
+        'clustering_id': cid,
+    }
+    assert 'trace_geojson' not in result
+    assert result['algorithm_metadata'] == {'x': 1}
+    assert geojson_requests == [['a', 'c']]  # zone only; trace GeoJSON waits
+
+    fetched = service.get_deferred_trace(cid, 'delta')
+    assert fetched['trace']['step_encoding'] == 'delta'
+    assert decode_trace_steps(fetched['trace']['steps']) == steps
+    assert geojson_requests[-1] == ['a', 'b', 'c', 'far']
+    assert service.get_deferred_trace(cid)['trace']['steps'] == steps
+    assert len(geojson_requests) == 2  # trace GeoJSON built once, then reused
+
+
+def test_deferred_traces_are_bounded(monkeypatch):
+    monkeypatch.setattr(analysis_service_module, 'MAX_DEFERRED_TRACES', 2)
+    service = PreviewClusteringService(ProgressStore(with_results=True, with_counter=True), resources=object())
+    trace_payload = {'algorithm': 'mobility_prune', 'steps': [_step(0, ['a', 'b'], ['a'], 'b')]}
+
+    cids = [
+        _run_cluster_job(monkeypatch, trace_payload, None, defer_trace=True, service=service)[3]
+        for _ in range(3)
+    ]
+
+    assert service.get_deferred_trace(cids[0]) is None
+    assert service.get_deferred_trace(cids[1]) is not None
+    assert service.get_deferred_trace(cids[2]) is not None
+    assert service.get_deferred_trace(999) is None
+

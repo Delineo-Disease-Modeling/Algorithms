@@ -69,7 +69,7 @@ def test_cluster_cbgs_route_normalizes_seed_and_returns_job_id(client, app, monk
     captured = {}
 
     def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
-                               trace_encoding=None):
+                               trace_encoding=None, defer_trace=False):
         captured['cbg_str'] = cbg_str
         captured['min_pop'] = min_pop
         captured['pattern_selection'] = pattern_selection
@@ -109,8 +109,9 @@ def test_cluster_cbgs_route_passes_trace_encoding(client, app, monkeypatch):
     captured = {}
 
     def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
-                               trace_encoding=None):
+                               trace_encoding=None, defer_trace=False):
         captured['trace_encoding'] = trace_encoding
+        captured['defer_trace'] = defer_trace
         return 18
 
     monkeypatch.setattr(app.config['analysis_service'], 'start_cluster_job', fake_start_cluster_job)
@@ -121,10 +122,33 @@ def test_cluster_cbgs_route_passes_trace_encoding(client, app, monkeypatch):
         'start_date': '2021-01-15',
         'include_trace': True,
         'trace_encoding': 'delta',
+        'defer_trace': True,
     })
 
     assert response.status_code == 200
     assert captured['trace_encoding'] == 'delta'
+    assert captured['defer_trace'] is True
+
+
+def test_clustering_trace_route_returns_deferred_trace_or_404(client, app, monkeypatch):
+    requests = []
+
+    def fake_get_deferred_trace(cid, trace_encoding=None):
+        requests.append((cid, trace_encoding))
+        if cid != 5:
+            return None
+        return {'trace': {'steps': [], 'step_encoding': 'delta'}, 'trace_geojson': None}
+
+    monkeypatch.setattr(app.config['analysis_service'], 'get_deferred_trace', fake_get_deferred_trace)
+
+    found = client.get('/clustering-trace/5?trace_encoding=delta')
+    missing = client.get('/clustering-trace/6')
+
+    assert found.status_code == 200
+    assert found.get_json() == {'trace': {'steps': [], 'step_encoding': 'delta'}, 'trace_geojson': None}
+    assert missing.status_code == 404
+    assert 'Preview the zone again' in missing.get_json()['message']
+    assert requests == [(5, 'delta'), (6, None)]
 
 
 def test_cluster_cbgs_route_accepts_mobility_prune_alias(client, app, monkeypatch):
@@ -136,7 +160,7 @@ def test_cluster_cbgs_route_accepts_mobility_prune_alias(client, app, monkeypatc
     captured = {}
 
     def fake_start_cluster_job(cbg_str, min_pop, pattern_selection, algorithm_config, include_trace, seed_cbgs=None,
-                               trace_encoding=None):
+                               trace_encoding=None, defer_trace=False):
         captured['algorithm_config'] = algorithm_config
         captured['seed_cbgs'] = seed_cbgs
         return 18
