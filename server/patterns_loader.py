@@ -27,8 +27,8 @@ _PATTERN_EXTS = ('.parquet', '.csv.gz', '.converted.csv', '.csv')
 # Popgen:         poi_cbg, placekey, location_name, top_category, latitude, longitude, street_address, postal_code, polygon_wkt, wkt_area_sq_meters
 # Patterns gen:   placekey, median_dwell, popularity_by_hour, popularity_by_day
 # Movement redesign (docs/MOVEMENT_MODEL_REDESIGN.md): absolute visit volume,
-#   observed home-CBG catchment, open hours, category. Stage 0 only LOADS these
-#   so they are reachable downstream; gen_patterns does not consume them yet.
+#   observed home-CBG catchment, open hours, category. These fields feed the
+#   current demand-pull movement generator through for_patterns_stats().
 ALL_NEEDED_COLUMNS = [
     'poi_cbg', 'visitor_daytime_cbgs', 'postal_code',
     'placekey', 'location_name', 'top_category', 'latitude', 'longitude',
