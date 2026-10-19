@@ -29,9 +29,10 @@ def _perf_timings_enabled() -> bool:
 
 
 def _fractional_dwell_enabled() -> bool:
-    """Minute-level visits (DELINEO_FRACTIONAL_DWELL). Default off: visits keep
-    the whole-hour median +/- 1 rule and the output carries no minutes."""
-    return os.getenv("DELINEO_FRACTIONAL_DWELL", "0").strip().lower() in {
+    """Minute-level visits (DELINEO_FRACTIONAL_DWELL). Default on;
+    DELINEO_FRACTIONAL_DWELL=0 restores the whole-hour median +/- 1 rule with
+    no minutes in the output."""
+    return os.getenv("DELINEO_FRACTIONAL_DWELL", "1").strip().lower() in {
         "1", "true", "yes", "on"}
 
 

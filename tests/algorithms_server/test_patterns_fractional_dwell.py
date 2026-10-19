@@ -1,10 +1,11 @@
 """Fractional dwell in movement generation (DELINEO_FRACTIONAL_DWELL).
 
-Off (default): generic visits keep the whole-hour median +/- 1 rule and the
-output carries no minutes. On: each visit's length is drawn in minutes from the
+On (default): each visit's length is drawn in minutes from the
 POI's bucketed dwell distribution and starts at a random minute of its first
 hour; the person is listed at the POI for every hour the visit overlaps, and
-hours the visit only partly fills carry the minutes spent there.
+hours the visit only partly fills carry the minutes spent there. Off
+(DELINEO_FRACTIONAL_DWELL=0): generic visits keep the whole-hour median +/- 1
+rule and the output carries no minutes.
 """
 import json
 import sys
@@ -102,23 +103,26 @@ def _visits(out, place_id="0"):
     return [r for r in runs if r[0] + len(r[1]) - 1 < last]
 
 
-def test_off_by_default_emits_no_minutes(monkeypatch):
+def test_on_by_default(monkeypatch):
     monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
     monkeypatch.delenv("DELINEO_FRACTIONAL_DWELL", raising=False)
     pap, shared = _world([0, 100, 0, 0, 0])
     default = gen_patterns(pap, datetime(2021, 1, 4, 0), 12, shared_data=shared)
-    explicit_off = gen_patterns(pap, datetime(2021, 1, 4, 0), 12, shared_data=shared,
-                                fractional_dwell=False)
-    assert default == explicit_off
-    assert all("minutes" not in snap for snap in default.values())
+    explicit_on = gen_patterns(pap, datetime(2021, 1, 4, 0), 12, shared_data=shared,
+                               fractional_dwell=True)
+    assert default == explicit_on
+    assert any(snap.get("minutes") for snap in default.values())
 
 
-def test_env_switch_turns_it_on(monkeypatch):
+def test_env_switch_turns_it_off(monkeypatch):
     monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
-    monkeypatch.setenv("DELINEO_FRACTIONAL_DWELL", "1")
+    monkeypatch.setenv("DELINEO_FRACTIONAL_DWELL", "0")
     pap, shared = _world([0, 100, 0, 0, 0])
     out = gen_patterns(pap, datetime(2021, 1, 4, 0), 12, shared_data=shared)
-    assert any(snap.get("minutes") for snap in out.values())
+    explicit_off = gen_patterns(pap, datetime(2021, 1, 4, 0), 12, shared_data=shared,
+                                fractional_dwell=False)
+    assert out == explicit_off
+    assert all("minutes" not in snap for snap in out.values())
 
 
 @pytest.mark.parametrize("bucket,lo,hi", [(1, 5, 20), (2, 21, 60), (3, 61, 240)])
