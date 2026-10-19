@@ -312,8 +312,9 @@ def test_generic_arrivals_use_bucket_distribution_instead_of_poi_median(monkeypa
         _poi(f"peer-{index}", [0] * 24, dwell=120, **common)
         for index in range(30)
     ]
-    # A one-minute median would use a one-hour stay in the legacy path. The
-    # empirical 61-240-minute bucket must keep this cohort through hour two.
+    # A one-minute median would use a one-hour stay in the legacy path. With
+    # fractional dwell, the empirical 61-240-minute bucket must keep this
+    # cohort through hour two.
     target = _poi("target", active_hours, dwell=1, **common)
 
     out = gen_patterns(
@@ -321,6 +322,7 @@ def test_generic_arrivals_use_bucket_distribution_instead_of_poi_median(monkeypa
         datetime(2021, 1, 4, 0),
         duration=2,
         shared_data=_shared(peers + [target]),
+        fractional_dwell=True,
     )
 
     assert len(out["60"]["places"]["0"]) == 40

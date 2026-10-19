@@ -754,15 +754,27 @@ def build_dwell_models(
     return models
 
 
-def sample_dwell_hours(
+# Minute range of each finite SafeGraph dwell bucket; the open ">240" bucket
+# continues past DWELL_TAIL_START_MINUTES with a decreasing geometric tail.
+DWELL_BUCKET_MINUTES: Tuple[Tuple[int, int], ...] = ((1, 4), (5, 20), (21, 60), (61, 240))
+DWELL_TAIL_START_MINUTES = 240
+
+
+def sample_dwell_minutes(
     rng: np.random.Generator,
     destination_indices: np.ndarray,
     probability_matrix: np.ndarray,
     modeled_places: np.ndarray,
     tail_geometric_p: np.ndarray,
-    legacy_median_hours: np.ndarray,
+    fallback_median_minutes: np.ndarray,
 ) -> np.ndarray:
-    """Vectorized sampling for a batch of generic POI arrivals."""
+    """Vectorized visit lengths in minutes for a batch of generic POI arrivals.
+
+    A modeled POI draws a bucket from its (shrunk) bucket distribution, then a
+    minute uniformly inside it. The open >240-minute bucket adds whole hours
+    with a decreasing geometric tail and a uniform minute inside the last one.
+    A POI without a bucket model draws uniformly within +/-50% of its median.
+    """
     destinations = np.asarray(destination_indices, dtype=np.int64)
     result = np.ones(destinations.size, dtype=np.int64)
     if destinations.size == 0:
@@ -780,14 +792,12 @@ def sample_dwell_hours(
         finite_mask = buckets < 4
         if finite_mask.any():
             finite_buckets = buckets[finite_mask]
-            lows = np.choose(finite_buckets, [1, 5, 21, 61]).astype(np.int64)
-            highs = np.choose(finite_buckets, [4, 20, 60, 240]).astype(np.int64)
-            spans = np.maximum(1, highs - lows + 1)
-            minute_draws = lows + np.floor(
+            lows = np.choose(finite_buckets, [lo for lo, _ in DWELL_BUCKET_MINUTES])
+            highs = np.choose(finite_buckets, [hi for _, hi in DWELL_BUCKET_MINUTES])
+            spans = highs - lows + 1
+            result[modeled_positions[finite_mask]] = lows + np.floor(
                 rng.random(finite_buckets.size) * spans
             ).astype(np.int64)
-            sampled_hours = (minute_draws + 59) // 60
-            result[modeled_positions[finite_mask]] = sampled_hours
 
         tail_mask = buckets == 4
         if tail_mask.any():
@@ -804,18 +814,60 @@ def sample_dwell_hours(
                     ).astype(np.int64)
                     + 1
                 )
-            sampled_hours = 4 + increments
-            result[modeled_positions[tail_mask]] = sampled_hours
+            last_hour_minute = 1 + np.floor(
+                rng.random(tail_destinations.size) * 60
+            ).astype(np.int64)
+            result[modeled_positions[tail_mask]] = (
+                DWELL_TAIL_START_MINUTES + 60 * (increments - 1) + last_hour_minute
+            )
 
-    legacy_positions = np.flatnonzero(~has_model)
-    if legacy_positions.size:
-        legacy_destinations = destinations[legacy_positions]
-        medians = legacy_median_hours[legacy_destinations]
-        lows = np.maximum(1, medians - 1)
-        highs = medians + 1
-        spans = np.maximum(1, highs - lows + 1)
-        result[legacy_positions] = lows + np.floor(
-            rng.random(legacy_positions.size) * spans
+    fallback_positions = np.flatnonzero(~has_model)
+    if fallback_positions.size:
+        medians = np.maximum(
+            1.0, np.asarray(fallback_median_minutes, dtype=float)[destinations[fallback_positions]]
+        )
+        lows = np.maximum(1, np.ceil(medians * 0.5)).astype(np.int64)
+        highs = np.maximum(lows, np.floor(medians * 1.5).astype(np.int64))
+        result[fallback_positions] = lows + np.floor(
+            rng.random(fallback_positions.size) * (highs - lows + 1)
         ).astype(np.int64)
 
     return np.maximum(1, result)
+
+
+def expected_bucket_minutes(tail_geometric_p: np.ndarray) -> np.ndarray:
+    """Mean visit length (minutes) of each bucket as sample_dwell_minutes draws
+    it: finite buckets are uniform; the tail mean follows each POI's geometric
+    p. Returns shape (P, 5)."""
+    p = np.clip(np.asarray(tail_geometric_p, dtype=float), 1e-9, 1.0)
+    finite = np.array([(lo + hi) / 2.0 for lo, hi in DWELL_BUCKET_MINUTES])
+    tail = DWELL_TAIL_START_MINUTES + 60.0 * (1.0 - p) / p + 30.5
+    return np.column_stack([np.broadcast_to(finite, (p.size, 4)), tail])
+
+
+def drop_pass_by_bucket(
+    probability_matrix: np.ndarray, tail_geometric_p: np.ndarray
+) -> Tuple[np.ndarray, np.ndarray]:
+    """Remove the <5-minute bucket (mostly pass-by pings) from each POI's
+    distribution.
+
+    Returns the renormalized probabilities and, per POI, the share of its
+    hourly visitor counts that the remaining visits account for. SafeGraph's
+    visits-by-hour counts a visit in every hour it overlaps; with a uniform
+    arrival minute a D-minute visit overlaps 1 + (D - 1)/60 hours on average, so
+    that share is sum_b p_b (1 + (E[D_b] - 1)/60) over the kept buckets divided
+    by the same sum over all buckets. Multiply the hourly target by it. A POI
+    whose whole distribution is <5 minutes is left unchanged (share 1).
+    """
+    probs = np.asarray(probability_matrix, dtype=float)
+    touches = 1.0 + (expected_bucket_minutes(tail_geometric_p) - 1.0) / 60.0
+    weighted = probs * touches
+    total = weighted.sum(axis=1)
+    kept = weighted[:, 1:].sum(axis=1)
+    droppable = (probs[:, 1:].sum(axis=1) > 0.0) & (total > 0.0)
+    keep_share = np.ones(probs.shape[0])
+    keep_share[droppable] = kept[droppable] / total[droppable]
+    out = probs.copy()
+    out[droppable, 0] = 0.0
+    out[droppable] /= out[droppable].sum(axis=1, keepdims=True)
+    return out, keep_share

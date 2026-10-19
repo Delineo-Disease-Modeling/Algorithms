@@ -42,10 +42,17 @@ class FullstackClient:
         are only advisory."""
         if _binary_patterns_enabled():
             # Lazy import so the JSON path needs neither numpy nor zstandard.
-            from patterns_codec import build_arrays_from_legacy, encode_patterns_binary
+            from patterns_codec import (
+                build_arrays_from_legacy,
+                build_minutes_from_legacy,
+                encode_patterns_binary,
+            )
 
             arrays = build_arrays_from_legacy(patterns, papdata)
-            blob = encode_patterns_binary(*arrays)
+            _, ts_minutes, pids, _, _ = arrays
+            # None (no partial-hour visits) leaves the MINS section out.
+            minutes = build_minutes_from_legacy(patterns, ts_minutes, pids)
+            blob = encode_patterns_binary(*arrays, minutes=minutes)
             return ('patterns.bin', BytesIO(blob), 'application/octet-stream')
         return ('patterns.json', BytesIO(json.dumps(patterns).encode()), 'text/plain')
 

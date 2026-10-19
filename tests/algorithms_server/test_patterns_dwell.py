@@ -17,7 +17,7 @@ from dwell import (  # noqa: E402
     build_dwell_reference,
     build_dwell_models,
     parse_dwell_bucket_counts,
-    sample_dwell_hours,
+    sample_dwell_minutes,
 )
 
 
@@ -318,32 +318,47 @@ def test_category_extreme_night_and_weekend_activity_forces_fallback():
     assert model.fallback_reasons == ("temporal_mismatch",)
 
 
-def test_sampler_draws_from_finite_buckets_and_decreasing_tail():
+def test_sampler_draws_minutes_from_finite_buckets_and_decreasing_tail():
     probability_matrix = np.eye(5)
     modeled = np.ones(5, dtype=bool)
     tail_p = np.ones(5)
-    legacy = np.ones(5, dtype=np.int64)
-    destinations = np.repeat(np.arange(5), 200)
+    fallback = np.full(5, 30.0)
+    destinations = np.repeat(np.arange(5), 400)
 
-    samples = sample_dwell_hours(
+    samples = sample_dwell_minutes(
         np.random.default_rng(42), destinations, probability_matrix,
-        modeled, tail_p, legacy,
-    ).reshape(5, 200)
+        modeled, tail_p, fallback,
+    ).reshape(5, 400)
 
-    assert np.all(samples[0] == 1)
-    assert np.all(samples[1] == 1)
-    assert np.all(samples[2] == 1)
-    assert samples[3].min() >= 2 and samples[3].max() <= 4
-    assert np.all(samples[4] == 5)
+    for row, (lo, hi) in enumerate([(1, 4), (5, 20), (21, 60), (61, 240)]):
+        assert samples[row].min() >= lo and samples[row].max() <= hi
+        # Uniform inside the bucket: both ends of the range get drawn.
+        assert samples[row].min() <= lo + (hi - lo) // 4
+        assert samples[row].max() >= hi - (hi - lo) // 4
+    # p = 1 tail: exactly one extra hour past 240, minute uniform inside it.
+    assert samples[4].min() >= 241 and samples[4].max() <= 300
 
-    tail_samples = sample_dwell_hours(
+    tail_samples = sample_dwell_minutes(
         np.random.default_rng(7),
         np.zeros(10_000, dtype=np.int64),
         np.array([[0.0, 0.0, 0.0, 0.0, 1.0]]),
         np.array([True]),
         np.array([0.5]),
-        np.array([1], dtype=np.int64),
+        np.array([30.0]),
     )
-    counts = np.bincount(tail_samples)
-    assert counts[5] > counts[6] > counts[7]
-    assert tail_samples.max() > 5
+    assert tail_samples.min() >= 241
+    extra_hours = np.bincount((tail_samples - 241) // 60)
+    assert extra_hours[0] > extra_hours[1] > extra_hours[2]
+
+
+def test_sampler_fallback_stays_within_half_of_the_median():
+    samples = sample_dwell_minutes(
+        np.random.default_rng(3),
+        np.zeros(2000, dtype=np.int64),
+        np.array([[1.0, 0.0, 0.0, 0.0, 0.0]]),
+        np.array([False]),
+        np.array([1.0]),
+        np.array([40.0]),
+    )
+    assert samples.min() >= 20 and samples.max() <= 60
+    assert abs(samples.mean() - 40.0) < 1.5

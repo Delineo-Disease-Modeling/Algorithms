@@ -14,7 +14,8 @@ from typing import Dict, Any, List, Optional
 
 from dwell import (
     build_dwell_models,
-    sample_dwell_hours,
+    drop_pass_by_bucket,
+    sample_dwell_minutes,
 )
 from worker_assignment import ensure_external_locations
 
@@ -25,6 +26,20 @@ _PATTERNS_LOGGER = logging.getLogger(__name__)
 
 def _perf_timings_enabled() -> bool:
     return os.getenv("DELINEO_PERF_TIMINGS", "").lower() in {"1", "true", "yes", "on"}
+
+
+def _fractional_dwell_enabled() -> bool:
+    """Minute-level visits (DELINEO_FRACTIONAL_DWELL). Default off: visits keep
+    the whole-hour median +/- 1 rule and the output carries no minutes."""
+    return os.getenv("DELINEO_FRACTIONAL_DWELL", "0").strip().lower() in {
+        "1", "true", "yes", "on"}
+
+
+def _drop_pass_by_enabled() -> bool:
+    """With fractional dwell on, drop the <5-minute bucket and shrink each hourly
+    target by its share (DELINEO_DWELL_DROP_PASS_BY, default on)."""
+    return os.getenv("DELINEO_DWELL_DROP_PASS_BY", "1").strip().lower() in {
+        "1", "true", "yes", "on"}
 
 
 _PANEL_DEFAULT = 19.7   # SafeGraph panel->population factor (OK ~19.7); overridden from data
@@ -78,6 +93,7 @@ def _is_default_school_time(snapshot_time: datetime) -> bool:
 def _static_external_stats() -> Dict[str, Any]:
     return {
         "median_dwell_hours": 8,
+        "median_dwell_minutes": 480.0,
         "dwell_probabilities": None,
         "dwell_tail_geometric_p": 1.0,
         "day_factor": {wd: 1.0 for wd in WEEKDAYS},
@@ -367,6 +383,7 @@ def _build_stats_from_df(df: pd.DataFrame,
             # Legacy median remains available for rows without usable bucket
             # data. Assigned workers/students use schedules instead of this value.
             "median_dwell_hours": median_dwell_hours,
+            "median_dwell_minutes": float(median_dwell_minutes),
             "dwell_probabilities": (
                 dwell_model.probabilities.tolist() if dwell_model else None
             ),
@@ -407,8 +424,24 @@ def _build_stats_from_df(df: pd.DataFrame,
     return stats
 
 
+def _partial_hour_minutes(hour_idx: int, is_home_arr: np.ndarray,
+                          visit_start_arr: np.ndarray, visit_end_arr: np.ndarray,
+                          pid_str_list: List[str]) -> Dict[str, int]:
+    """{person_id: minutes} for generic visits that fill only part of this hour."""
+    out_idx = np.flatnonzero(~is_home_arr & (visit_start_arr >= 0))
+    if out_idx.size == 0:
+        return {}
+    hour_start = hour_idx * 60
+    overlap = (np.minimum(visit_end_arr[out_idx], hour_start + 60)
+               - np.maximum(visit_start_arr[out_idx], hour_start))
+    if overlap.size and int(overlap.min()) < 1:
+        raise AssertionError("a listed visit has no minutes in its hour")
+    partial = overlap < 60
+    return {pid_str_list[i]: int(m) for i, m in zip(out_idx[partial], overlap[partial])}
+
+
 def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 168,
-                 shared_data=None) -> Dict[str, Any]:
+                 shared_data=None, fractional_dwell: Optional[bool] = None) -> Dict[str, Any]:
     """
     Simulate, hour-by-hour, moving people from homes to places using SafeGraph-like stats:
       - popularity_by_hour (time-of-day)
@@ -420,9 +453,19 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
       duration: hours to simulate
       shared_data: Pre-loaded PatternsData. If None/empty, no place stats are
           available and movement falls back to home-only.
+      fractional_dwell: minute-level visits (None -> DELINEO_FRACTIONAL_DWELL).
+          Off: each generic visit lasts the POI's median in whole hours +/- 1.
+          On: each visit's length is drawn in minutes from the POI's bucketed
+          dwell distribution, starting at a random minute of its first hour; the
+          person is listed at the POI for every hour the visit overlaps.
     Output format matches the original: a dict keyed by cumulative minutes,
     each mapping to {"homes": {home_id: [person_ids]}, "places": {place_id: [person_ids]}}.
+    With fractional dwell on, a timestep with partial-hour visits also carries
+    "minutes": {person_id: minutes at the POI during that hour (1..59)}; the
+    rest of that hour is spent at home.
     """
+    if fractional_dwell is None:
+        fractional_dwell = _fractional_dwell_enabled()
     perf_accum: Dict[str, float] = {}
     perf_on = _perf_timings_enabled()
 
@@ -511,6 +554,17 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
         dwell_tail_p_arr = np.array([
             stats[p].get("dwell_tail_geometric_p", 1.0) for p in all_place_ids
         ], dtype=float)
+        dwell_median_minutes_arr = np.array([
+            stats[p].get("median_dwell_minutes", 60.0) for p in all_place_ids
+        ], dtype=float)
+        # Share of each POI's hourly visitor count that generated visits stand
+        # for (1 unless pass-by visits are dropped, see drop_pass_by_bucket).
+        target_keep_arr = np.ones(n_places_total)
+        if fractional_dwell and _drop_pass_by_enabled():
+            dropped, keep = drop_pass_by_bucket(dwell_probability_mat, dwell_tail_p_arr)
+            dwell_probability_mat = np.where(dwell_modeled_arr[:, None], dropped,
+                                             dwell_probability_mat)
+            target_keep_arr = np.where(dwell_modeled_arr, keep, 1.0)
 
         # People state held in parallel arrays so the mover-decision hot loop
         # can run as a batched numpy op instead of one rng.random + rng.choice
@@ -559,6 +613,11 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 student_dest_idx_arr[i] = school_idx
         at_work_arr = np.zeros(n_people, dtype=bool)
         at_school_arr = np.zeros(n_people, dtype=bool)
+        # Fractional dwell: each generic visit's span in minutes from start_time,
+        # [visit_start, visit_end). -1 = a scheduled work/school stay, which
+        # fills every hour it is listed.
+        visit_start_arr = np.full(n_people, -1, dtype=np.int64)
+        visit_end_arr = np.full(n_people, -1, dtype=np.int64)
 
     output: Dict[str, Any] = {}
 
@@ -590,6 +649,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     is_home_arr[scheduled_mask] = False
                     dest_idx_arr[scheduled_mask] = worker_dest_idx_arr[scheduled_mask]
                     leave_time_arr[scheduled_mask] = -1
+                    visit_start_arr[scheduled_mask] = -1
                     at_work_arr[scheduled_mask] = True
                 else:
                     leaving_work_mask = at_work_arr & worker_mask
@@ -607,6 +667,7 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                     is_home_arr[scheduled_mask] = False
                     dest_idx_arr[scheduled_mask] = student_dest_idx_arr[scheduled_mask]
                     leave_time_arr[scheduled_mask] = -1
+                    visit_start_arr[scheduled_mask] = -1
                     at_school_arr[scheduled_mask] = True
                 else:
                     leaving_school_mask = at_school_arr & student_mask
@@ -623,6 +684,8 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             wd_idx = WEEKDAYS.index(weekday)
             targets = (pop_hour_mat[:, hour_of_day] * day_factor_mat[:, wd_idx]
                        * gate_mat[:, wd_idx, hour_of_day] * fj_arr * movement_scale)
+            if fractional_dwell:
+                targets = targets * target_keep_arr
             target_int = np.floor(targets + 0.5).astype(np.int64)
 
             out_mask = ~is_home_arr
@@ -641,14 +704,24 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
                 if total_needed > 0:
                     dest_assign = np.repeat(np.arange(n_places_total), needed)
                     movers = rng.choice(home_indices, size=total_needed, replace=False)
-                    dwell_hours_arr = sample_dwell_hours(
-                        rng,
-                        dest_assign,
-                        dwell_probability_mat,
-                        dwell_modeled_arr,
-                        dwell_tail_p_arr,
-                        dwell_arr,
-                    )
+                    if fractional_dwell:
+                        dwell_minutes_arr = sample_dwell_minutes(
+                            rng,
+                            dest_assign,
+                            dwell_probability_mat,
+                            dwell_modeled_arr,
+                            dwell_tail_p_arr,
+                            dwell_median_minutes_arr,
+                        )
+                        arrival_minute_arr = rng.integers(0, 60, size=total_needed)
+                        # Hours the visit overlaps, counting its first one.
+                        dwell_hours_arr = (arrival_minute_arr + dwell_minutes_arr + 59) // 60
+                        visit_start_arr[movers] = hour_idx * 60 + arrival_minute_arr
+                        visit_end_arr[movers] = visit_start_arr[movers] + dwell_minutes_arr
+                    else:
+                        med = dwell_arr[dest_assign]
+                        lo = np.maximum(1, med - 1)
+                        dwell_hours_arr = rng.integers(lo, med + 2)
                     is_home_arr[movers] = False
                     dest_idx_arr[movers] = dest_assign
                     leave_time_arr[movers] = np.minimum(duration, hour_idx + dwell_hours_arr)
@@ -683,6 +756,11 @@ def gen_patterns(papdata: Dict[str, Any], start_time: datetime, duration: int = 
             # Frontend interprets key "60" as "1 hour from start" which is correct.
             current_minutes = (hour_idx + 1) * 60
             output[str(current_minutes)] = {"homes": homes_map, "places": places_map}
+            if fractional_dwell:
+                minutes_map = _partial_hour_minutes(
+                    hour_idx, is_home_arr, visit_start_arr, visit_end_arr, pid_str_list)
+                if minutes_map:
+                    output[str(current_minutes)]["minutes"] = minutes_map
 
     if perf_on:
         # Emit via print so the line is visible even when the algorithms logger
