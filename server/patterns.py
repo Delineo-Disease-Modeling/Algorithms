@@ -288,6 +288,15 @@ def _ceil_hours_from_minutes(m: Optional[float]) -> int:
     return max(1, int(math.ceil(m / 60.0)))
 
 
+def _minutes_or_default(m, default: float = 60.0) -> float:
+    """Median dwell in minutes; blank, unparseable or non-positive -> default."""
+    try:
+        m = float(m)
+    except (TypeError, ValueError):
+        return default
+    return m if math.isfinite(m) and m > 0 else default
+
+
 def _parse_cbg_counts(val) -> Dict[str, float]:
     """Parse a SafeGraph {cbg: visitor_count} field (visitor_home_cbgs) into a
     dict keyed by zero-padded 12-digit CBG. Empty dict if missing/unparseable."""
@@ -383,7 +392,7 @@ def _build_stats_from_df(df: pd.DataFrame,
             # Legacy median remains available for rows without usable bucket
             # data. Assigned workers/students use schedules instead of this value.
             "median_dwell_hours": median_dwell_hours,
-            "median_dwell_minutes": float(median_dwell_minutes),
+            "median_dwell_minutes": _minutes_or_default(median_dwell_minutes),
             "dwell_probabilities": (
                 dwell_model.probabilities.tolist() if dwell_model else None
             ),

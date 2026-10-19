@@ -22,7 +22,7 @@ for _m in ("patterns", "patterns_loader", "dwell", "patterns_codec"):
     sys.modules.pop(_m, None)
 
 from dwell import build_dwell_reference, drop_pass_by_bucket, expected_bucket_minutes  # noqa: E402
-from patterns import _partial_hour_minutes, gen_patterns  # noqa: E402
+from patterns import _minutes_or_default, _partial_hour_minutes, gen_patterns  # noqa: E402
 from patterns_codec import decode_patterns_binary  # noqa: E402
 from server_app.fullstack_client import FullstackClient  # noqa: E402
 
@@ -223,3 +223,32 @@ def test_binary_upload_carries_the_minutes(monkeypatch):
     assert bp.minutes is not None
     assert {k: v.get("minutes") for k, v in bp.items()} == \
         {k: v.get("minutes") for k, v in out.items()}
+
+
+def test_blank_median_dwell_falls_back_to_an_hour(monkeypatch):
+    # Real SafeGraph rows can carry a blank median_dwell; both modes must cope.
+    assert _minutes_or_default("") == 60.0
+    assert _minutes_or_default(None) == 60.0
+    assert _minutes_or_default("nan") == 60.0
+    assert _minutes_or_default("0") == 60.0
+    assert _minutes_or_default("12.5") == 12.5
+    monkeypatch.setenv("DELINEO_MOVEMENT_SCALE", "1")
+    pap, shared = _world([0, 100, 0, 0, 0])
+    shared.for_patterns_stats({"target"})  # stub sanity
+    df = shared.for_patterns_stats({"target"}).copy()
+    df["median_dwell"] = ""
+
+    class _Blank:
+        def is_empty(self):
+            return False
+
+        def for_patterns_stats(self, placekeys):
+            return df
+
+        def for_dwell_reference(self):
+            return shared.for_dwell_reference()
+
+    for on in (False, True):
+        out = gen_patterns(pap, datetime(2021, 1, 4, 0), 3, shared_data=_Blank(),
+                           fractional_dwell=on)
+        assert len(out) == 3
