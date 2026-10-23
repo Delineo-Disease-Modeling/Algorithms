@@ -6,9 +6,9 @@ It groups census block groups into a **convenience zone**, generates a
 patterns** for every person in it. It's a Flask server on port **1880**.
 
 > **New to Delineo?** Read
-> [Start Here](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/START_HERE.md)
+> [Start Here](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/START_HERE.md)
 > first, and keep the
-> [Glossary](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/GLOSSARY.md)
+> [Glossary](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/GLOSSARY.md)
 > handy.
 
 ## What it does
@@ -33,7 +33,7 @@ Fullstack, which stores them. Algorithms keeps no database of its own.
 ## Running it
 
 Do the full setup in
-[Setup](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/SETUP.md)
+[Setup](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/SETUP.md)
 first. In particular, you need Python 3.13, a `.venv` in this folder, and the
 **`server/data/` folder, which is not in git.** Then:
 
@@ -147,7 +147,7 @@ archive/                         # code from earlier semesters; not used by the 
   they don't match.
 - **Changing the papdata or patterns format.** Simulation and Fullstack read
   these too. Update the readers first, then the writer. See
-  [How We Work](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/HOW_WE_WORK.md#changes-that-touch-more-than-one-repo).
+  [How We Work](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/HOW_WE_WORK.md#changes-that-touch-more-than-one-repo).
 
 ## Further reading
 
@@ -156,7 +156,7 @@ archive/                         # code from earlier semesters; not used by the 
 - [`docs/POPULATION_AND_MOVEMENT.md`](docs/POPULATION_AND_MOVEMENT.md): how the
   synthetic population and hour-by-hour movement are generated, and the
   assumptions behind them
-- [Data formats](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/DATA_FORMATS.md):
+- [Data formats](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/DATA_FORMATS.md):
   the exact shape of papdata and movement patterns
 - [`docs/MOVEMENT_MODEL_REDESIGN.md`](docs/MOVEMENT_MODEL_REDESIGN.md): why POIs
   were overfilling, and how movement demand is now scaled

@@ -10,7 +10,7 @@ needs:
 
 Read the [README](../README.md) and [Clustering](CLUSTERING.md) first. The
 output formats are in
-[Data formats](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/DATA_FORMATS.md).
+[Data formats](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/DATA_FORMATS.md).
 [`MOVEMENT_MODEL_REDESIGN.md`](MOVEMENT_MODEL_REDESIGN.md) explains *why* the
 movement model works the way it does. This page explains *what* it does now.
 

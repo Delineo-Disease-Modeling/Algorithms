@@ -4,7 +4,7 @@ This page explains how Algorithms turns a seed location into a **convenience
 zone**: the mobility graph it builds, the clustering algorithms, how they
 differ, and which one to use. Read the [README](../README.md) first. For the
 terms, see the
-[Glossary](https://github.com/Delineo-Disease-Modeling/Deploy/blob/main/docs/GLOSSARY.md).
+[Glossary](https://github.com/Delineo-Disease-Modeling/.github/blob/main/docs/GLOSSARY.md).
 
 Everything here describes the code as of October 2026. If you change the
 behavior, update this page in the same PR.
