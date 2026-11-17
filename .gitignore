@@ -164,3 +164,5 @@ SP24/refactored/output/*.json
 SP24/census/*
 SP24/refactored/data_download/*.json
 SP24/config.json
+# Generated v2 geography, Census responses and LODES downloads
+/server/data/v2/

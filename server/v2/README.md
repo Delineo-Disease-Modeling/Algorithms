@@ -1,0 +1,20 @@
+- Setup → set `CENSUS_API_KEY`; start Algorithms and Fullstack.
+- UI → `POST /v2/region` (ZIP code + commuting coverage percentage).
+- `routes.py` → `service.py` (start preview job; return job ID).
+- `service.py` → `geography.py` (ZIP → core CBGs + neighboring states).
+- `prepare_lodes.py` → LODES cache (download state files; aggregate home/work CBG pairs).
+- `lodes.py` → selected CBG list (core + commuting partners within coverage target).
+- `service.py` → `population.py` (selected CBG list → Census population totals).
+- `service.py` → `geography.py` (selected CBG list → map GeoJSON).
+- Preview job → UI (CBG list, population, map, commuting coverage).
+- UI confirmation → `POST /v2/population` (preview ID + seed).
+- `service.py` → saved preview (retrieve confirmed CBG list + population totals).
+- `service.py` → `census.py` (confirmed CBG list + population totals).
+- `census.py` → Census API/cache (age/sex, households, employment, enrollment, commuting).
+- Census county batches → selected CBG records (exclude unselected CBGs from region totals).
+- County age/sex distributions → later employment/enrollment assignment guidance.
+- Missing demographic values → `null` + `missing_fields`; population and age/sex remain required.
+- Census job → UI (population summary; complete, partial, or unavailable counts).
+- Job progress → `/clustering-progress/<id>` (existing progress stream).
+- Source files → `server/data/v2/` cache (override with `DELINEO_V2_CACHE_DIR`; reuse across requests).
+- Preview and prepared results → in-memory `ProgressStore` (cleared on server restart).

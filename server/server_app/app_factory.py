@@ -43,4 +43,11 @@ def create_app():
         generation_store=generation_store,
         clustering_store=clustering_store,
     )
+    # Separate v2 preview path; legacy services and routes retain their behavior.
+    from v2.population import PopulationTotalsClient
+    from v2.routes import create_blueprint
+    from v2.service import V2RegionService
+
+    v2_service = V2RegionService(clustering_store, PopulationTotalsClient())
+    app.register_blueprint(create_blueprint(v2_service))
     return app
