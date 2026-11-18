@@ -48,6 +48,6 @@ def create_app():
     from v2.routes import create_blueprint
     from v2.service import V2RegionService
 
-    v2_service = V2RegionService(clustering_store, PopulationTotalsClient(), fullstack_client)
+    v2_service = V2RegionService(clustering_store, PopulationTotalsClient())
     app.register_blueprint(create_blueprint(v2_service))
     return app
