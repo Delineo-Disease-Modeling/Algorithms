@@ -58,6 +58,29 @@ def calculate_core_connections(core_cbgs, manifest, progress_callback=None, *, a
     return inbound, outbound
 
 
+def load_commute_flows(cluster, manifest, progress_callback=None):
+    """Primary-job flows for residents of the region: home_cbg -> {work_cbg: jobs}.
+
+    Workplaces may be inside or outside the region; the caller decides which
+    destinations are off-map. Every prepared workplace state is read because the
+    prepared files are keyed by workplace state.
+    """
+    homes = set(cluster)
+    flows = {}
+    for index, state in enumerate(manifest['states']):
+        if progress_callback:
+            progress_callback(f'Reading commuting flows ({state.upper()})...', index / len(manifest['states']))
+        for frame in pd.read_csv(LODES_DIR / f'{state}.csv.gz',
+                                 usecols=['home_cbg', 'work_cbg', 'jobs'],
+                                 dtype={'home_cbg': str, 'work_cbg': str, 'jobs': 'int64'},
+                                 chunksize=250_000):
+            frame = frame.loc[frame.home_cbg.isin(homes)]
+            for (home, work), jobs in frame.groupby(['home_cbg', 'work_cbg']).jobs.sum().items():
+                destinations = flows.setdefault(home, {})
+                destinations[work] = destinations.get(work, 0) + int(jobs)
+    return flows
+
+
 def select_connected_cbgs(counts_by_cbg, coverage_target=COMMUTING_COVERAGE_TARGET):
     total = sum(counts_by_cbg.values())
     selected, cumulative = [], 0

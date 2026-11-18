@@ -18,3 +18,9 @@
 - Job progress → `/clustering-progress/<id>` (existing progress stream).
 - Source files → `server/data/v2/` cache (override with `DELINEO_V2_CACHE_DIR`; reuse across requests).
 - Preview and prepared results → in-memory `ProgressStore` (cleared on server restart).
+- UI/census confirmation -> `POST /v2/places` (census job ID) -> `osm.py`/`places.py` (tiled, cached Overpass: places + residential buildings, assigned to selected CBGs).
+- `POST /v2/town` (places job ID, optional seed) -> `agents.py` (households, people, employment/enrollment calibrated to ACS; LODES work assignment; nearest school/grocery/health care).
+- `POST /v2/patterns` (town job ID, `start_date`, `length` hours, optional `publish`) -> `papdata.py` -> `mesa_model.py` (hourly Mesa run -> minute-keyed patterns).
+- `publish` -> existing `FullstackClient` (create zone, upload papdata + patterns) -> Simulation reads them unchanged.
+- `GET /v2/papdata/<id>` and `GET /v2/patterns/<id>` -> download a patterns job's output (in memory only).
+- OSM tiles -> `server/data/v2/osm/` cache (0.1 degree grid, shared across regions).
