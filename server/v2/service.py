@@ -8,7 +8,7 @@ from .geography import (
     neighboring_workplace_states, resolve_core_cbgs, state_fips_for_states,
 )
 from .lodes import (
-    COMMUTING_COVERAGE_TARGET, STATE_ABBRS, expand_cbgs, load_manifest,
+    COMMUTING_COVERAGE_TARGET, STATE_ABBRS, expand_cbgs, load_commute_flows, load_manifest,
 )
 from .prepare_lodes import prepare
 from .census import CensusInputsClient, complete_sum
@@ -109,6 +109,34 @@ class V2RegionService:
             self.clustering_store.update(cid, 'Places ready', 100, done=True, result=result)
 
         return self._start_job('places', work)
+
+    def start_town_job(self, places_id, seed=None, hours=48):
+        """People, households, workplaces and a Mesa movement run for a places job's region."""
+        places_result = self._require(places_id, 'places')
+        census_result = self._require(places_result['census_id'], 'census_inputs')
+        places = (self.artifacts.get(places_id) or {}).get('places')
+        if places is None:
+            raise ValueError(f'Places for job {places_id} are unavailable (server restarted?). Run /v2/places again.')
+        seed = census_result['seed'] if seed is None else seed
+
+        def work(cid, progress):
+            from .town import generate_town, run_movement, sample_trace
+            cluster = census_result['cluster']
+            progress('Loading region boundaries...', 2)
+            geometries = load_selected_cbgs(cluster)
+            home_points = load_home_points(geometries, lambda m, f: progress(m, 3 + int(10 * f)))
+            flows = load_commute_flows(cluster, load_manifest(), lambda m, f: progress(m, 13 + int(10 * f)))
+            people, homes, summary = generate_town(
+                census_result['census'], geometries, places, home_points, flows, seed,
+                lambda m, f: progress(m, 25 + int(40 * f)))
+            progress(f'Running Mesa movement for {hours} hours...', 70)
+            patterns = run_movement(people, hours, seed=seed)
+            self.artifacts[cid] = {'people': people, 'homes': homes, 'patterns': patterns}
+            result = {'stage': 'town', 'places_id': places_id, 'seed': seed, 'hours': hours,
+                      'summary': summary, 'sample_trace': sample_trace(people, patterns)}
+            self.clustering_store.update(cid, 'Town ready', 100, done=True, result=result)
+
+        return self._start_job('town', work)
 
     def start_population_job(self, preview_id, seed):
         preview = self.clustering_store.get_result(preview_id)

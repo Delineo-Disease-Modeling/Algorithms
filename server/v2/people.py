@@ -99,11 +99,105 @@ def _weighted_size(households, fields, rng, default):
     return rng.choices([s for s, _ in sizes], weights=[c for _, c in sizes], k=1)[0]
 
 
-def draft_households(block, rng):
+def _fit_sizes(counts, target, default, rng):
+    """Exactly ``target`` household sizes, drawn from the census size counts.
+
+    Uses the table's own multiset of sizes. If the table has more households
+    than ``target`` a random few are dropped; if fewer, extra sizes are drawn
+    in proportion to the counts (``default`` when the table is empty).
+    """
+    sizes = [size for size, n in sorted(counts.items()) for _ in range(n)]
+    rng.shuffle(sizes)
+    sizes = sizes[:target]
+    positive = [(size, n) for size, n in counts.items() if n > 0]
+    while len(sizes) < target:
+        sizes.append(rng.choices([s for s, _ in positive], weights=[n for _, n in positive], k=1)[0]
+                     if positive else default)
+    return sizes
+
+
+def _draft_constrained(block, rng, notes):
+    """Households that match the census counts, or None when the tables can't support it.
+
+    Fixed by the census: the number of family and nonfamily households (B11001),
+    their size distributions (B11016), how many families have own children under
+    18 (B11003), and the household population (B25008). The member total is made
+    to equal the household population exactly by moving a few households up or
+    down one size at a time, since ACS tables are separate estimates and rarely
+    add up perfectly.
+    """
+    households = block['households']
+    family, nonfamily = households.get('family_households'), households.get('nonfamily_households')
+    population = block['population']
+    household_population = block['residence'].get('household_population')
+    household_population = population if household_population is None else min(household_population, population)
+    if family is None or nonfamily is None or family + nonfamily == 0:
+        return None
+    if household_population < 2 * family + nonfamily:     # not enough people for the minimum sizes
+        return None
+
+    homes = [['family', size] for size in _fit_sizes(
+        {size: households.get(field) or 0 for size, field in FAMILY_SIZE_FIELDS.items()}, family, 2, rng)]
+    homes += [['nonfamily', size] for size in _fit_sizes(
+        {size: households.get(field) or 0 for size, field in NONFAMILY_SIZE_FIELDS.items()}, nonfamily, 1, rng)]
+
+    # Reconcile sizes with the household population, one person at a time.
+    # Households of size 7 may really be "7 or more", so they grow first.
+    gap = household_population - sum(size for _, size in homes)
+    notes['size_adjustment_people'] = notes.get('size_adjustment_people', 0) + abs(gap)
+    while gap > 0:
+        open_ended = [h for h in homes if h[1] >= 7]
+        rng.choice(open_ended or homes)[1] += 1
+        gap -= 1
+    while gap < 0:
+        rng.choice([h for h in homes if h[1] > (2 if h[0] == 'family' else 1)])[1] -= 1
+        gap += 1
+    rng.shuffle(homes)
+
+    # Exactly this many families have own children under 18 (fallback: a share).
+    family_ids = [i for i, (kind, _) in enumerate(homes) if kind == 'family']
+    with_children_count = households.get('families_with_own_children_under_18')
+    if with_children_count is None:
+        with_children = {i for i in family_ids if rng.random() < 0.4}   # DECISION: fallback share
+    else:
+        with_children = set(rng.sample(family_ids, min(with_children_count, len(family_ids))))
+
+    buckets = block['sex_age']
+    drafts = []
+    for index, (kind, size) in enumerate(homes):
+        children = rng.randint(1, size - 1) if index in with_children and size > 1 else 0
+        members = [_sample_person(buckets, 18, 95, rng) for _ in range(size - children)]
+        members += [_sample_person(buckets, 0, 17, rng) for _ in range(children)]
+        drafts.append({'type': kind, 'members': members})
+    for _ in range(population - household_population):
+        drafts.append({'type': 'group_quarters', 'members': [_sample_person(buckets, 18, 95, rng)]})
+    return drafts
+
+
+def draft_households(block, rng, notes=None):
+    """[{type, members:[(sex, age)]}] for one block group, matching its census counts.
+
+    Uses the census household counts when the block group's tables allow it
+    (``_draft_constrained``) and otherwise falls back to sampling households until
+    the population is used up (``_draft_unconstrained``). ``notes`` (a dict) collects
+    how often each path ran.
+    """
+    notes = {} if notes is None else notes
+    drafts = _draft_constrained(block, rng, notes)
+    if drafts is None:
+        notes['unconstrained_block_groups'] = notes.get('unconstrained_block_groups', 0) + 1
+        return _draft_unconstrained(block, rng)
+    notes['constrained_block_groups'] = notes.get('constrained_block_groups', 0) + 1
+    return drafts
+
+
+def _draft_unconstrained(block, rng):
     """[{type, members:[(sex, age)]}] filling the block group's exact ACS population.
 
-    Household members fill ``household_population``; group-quarters residents
-    (population minus household population) become one-person homes.
+    Fallback used when household counts are missing. The number of households
+    emerges from random sampling. Household members fill ``household_population``;
+    group-quarters residents (population minus household population) become
+    one-person homes.
     """
     households = block['households']
     population = block['population']
@@ -163,6 +257,7 @@ def build_population(census, geometries, home_points=None, seed=42, progress_cal
         return rate_cache[county]
 
     people, homes = [], []
+    notes = {}
     summary = {'seed': seed, 'homes_from_osm': 0, 'homes_sampled': 0, 'workers': 0, 'students': 0}
     for index, cbg in enumerate(sorted(blocks)):
         if progress_callback:
@@ -170,7 +265,7 @@ def build_population(census, geometries, home_points=None, seed=42, progress_cal
                               index / len(blocks))
         block = blocks[cbg]
         employment_table, enrollment_table = county_rates(block['county_geoid'])
-        drafts = draft_households(block, rng)
+        drafts = draft_households(block, rng, notes)
 
         # Exact ACS totals for employed and enrolled, picked by county age/sex rates.
         flat = [(sex, age) for draft in drafts for sex, age in draft['members']]
@@ -218,6 +313,11 @@ def build_population(census, geometries, home_points=None, seed=42, progress_cal
                     household_type=draft['type'], school_level=level))
     summary['people'], summary['homes'] = len(people), len(homes)
     summary['census_population'] = sum(b['population'] for b in blocks.values())
+    census_households = [b['households'].get('total_households') for b in blocks.values()]
+    summary['census_households'] = None if None in census_households else sum(census_households)
+    summary['generated_households'] = sum(h.household_type != 'group_quarters' for h in homes)
+    summary.update({'constrained_block_groups': 0, 'unconstrained_block_groups': 0,
+                    'size_adjustment_people': 0, **notes})
     return people, homes, summary
 
 

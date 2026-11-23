@@ -54,4 +54,22 @@ def create_blueprint(service):
         except ValueError as exc:
             return jsonify(message=str(exc)), 409
 
+    @blueprint.post('/town')
+    def town():
+        payload = request.get_json(silent=True)
+        if (not isinstance(payload, dict) or 'places_id' not in payload
+                or set(payload) - {'places_id', 'seed', 'hours'}):
+            return jsonify(message='Provide places_id and optional seed and hours.'), 400
+        places_id, seed, hours = payload['places_id'], payload.get('seed'), payload.get('hours', 48)
+        if type(places_id) is not int or places_id <= 0:
+            return jsonify(message='places_id must be a positive integer.'), 400
+        if seed is not None and (type(seed) is not int or not 0 <= seed <= 4294967295):
+            return jsonify(message='seed must be an integer from 0 to 4294967295.'), 400
+        if type(hours) is not int or not 1 <= hours <= 24 * 14:
+            return jsonify(message='hours must be a whole number from 1 to 336.'), 400
+        try:
+            return jsonify(clustering_id=service.start_town_job(places_id, seed, hours))
+        except ValueError as exc:
+            return jsonify(message=str(exc)), 409
+
     return blueprint

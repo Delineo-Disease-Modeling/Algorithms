@@ -21,3 +21,5 @@
 - UI/census confirmation -> `POST /v2/places` (census job ID) -> `osm.py`/`places.py` (tiled, cached Overpass: places + residential buildings, assigned to selected CBGs).
 - `lodes.load_commute_flows` -> home CBG -> work CBG job counts for the selected CBGs (input for later work assignment; not yet called by a route).
 - OSM tiles -> `server/data/v2/osm/` cache (0.1 degree grid, shared across regions).
+- Quick run without the UI: `cd server; python -m v2.run_trace --zip 21550` (needs CENSUS_API_KEY) -> region, census, OSM, LODES flows, people + workplaces (`people.py`, `commute.py`), Mesa movement (`mesa_model.py`), printed trace + JSON in `server/data/v2/runs/`.
+- Same chain over HTTP: `POST /v2/region` -> `/v2/population` -> `/v2/places` -> `POST /v2/town` ({places_id, hours?, seed?}); each returns a `clustering_id` streamed at `/clustering-progress/<id>`.
