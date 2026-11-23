@@ -6,12 +6,6 @@ Upstream:  census.py output (per-CBG sex/age, household tables, employment,
 Downstream: commute.py gives the employed people workplaces; the Mesa model reads
            the resulting Person/Home records (schema.py).
 
-Why this is separate from popgen.py: the legacy generator samples from county-level
-household data and scales to the zone by population share, so a block group's people
-only approximate its ACS population, and it uses unseeded global RNG. Here every
-block group is filled to its exact ACS population, household shapes come from that
-block group's own tables, and employed/enrolled totals match the ACS counts. Same
-seed and inputs always give the same people.
 """
 import random
 from dataclasses import replace
